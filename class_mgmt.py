@@ -12,7 +12,7 @@ def render() -> None:
     st.header("반 관리")
 
     if st.session_state.pop("class_save_msg", None):
-        st.success(st.session_state.pop("class_save_detail", "반이 추가되었습니다."))
+        st.success(st.session_state.pop("class_save_detail", "저장되었습니다."))
 
     classes = db.list_classes()
     st.subheader("반 목록")
@@ -56,33 +56,78 @@ def render() -> None:
             )
             st.rerun()
 
-    st.divider()
-    st.subheader("반 삭제")
     if classes.empty:
         return
+
+    st.divider()
+    st.subheader("반 수정 / 삭제")
 
     options = {
         f"{row['반이름']} ({row['담당쌤']})": str(row["반ID"])
         for _, row in classes.iterrows()
     }
-    chosen_label = st.selectbox("삭제할 반", list(options.keys()), key="del_class_sel")
+    chosen_label = st.selectbox("대상 반", list(options.keys()), key="class_action_sel")
     class_id = options[chosen_label]
-    students_in_class = db.list_students(class_id, active_only=False)
-    student_count = len(students_in_class)
+    class_info = db.get_class(class_id)
+    if not class_info:
+        st.error("반 정보를 불러오지 못했습니다.")
+        return
 
-    if student_count > 0:
-        st.warning(
-            f"이 반에 소속된 학생이 {student_count}명 있습니다. "
-            "삭제하면 학생·출결·기록 데이터도 함께 삭제됩니다."
-        )
-        confirmed = confirm_action(
-            f"학생 {student_count}명 포함, 반 삭제를 확인합니다.",
-            key="del_class_confirm",
-        )
-    else:
-        confirmed = confirm_action("이 반을 삭제합니다.", key="del_class_confirm")
+    current_name = str(class_info.get("반이름", ""))
+    current_teacher = str(class_info.get("담당쌤", ""))
 
-    if st.button("반 삭제", type="primary", disabled=not confirmed, key="del_class_btn"):
-        db.delete_class(class_id, cascade_students=True)
-        st.success("반이 삭제되었습니다.")
-        st.rerun()
+    tab_edit, tab_del = st.tabs(["정보 수정", "삭제"])
+
+    with tab_edit:
+        form_nonce = st.session_state.get("class_edit_nonce", 0)
+        with st.form(f"edit_class_form_{form_nonce}"):
+            edit_name = st.text_input("반이름 *", value=current_name)
+            edit_teacher = st.text_input("담당쌤 *", value=current_teacher)
+            edit_submitted = st.form_submit_button("수정 저장", type="primary")
+
+        if edit_submitted:
+            if not edit_name.strip() or not edit_teacher.strip():
+                st.error("반이름과 담당쌤을 모두 입력해 주세요.")
+            else:
+                ok = db.update_class(
+                    class_id,
+                    {
+                        "반이름": edit_name.strip(),
+                        "담당쌤": edit_teacher.strip(),
+                    },
+                )
+                if ok:
+                    st.session_state["class_save_msg"] = True
+                    st.session_state["class_save_detail"] = (
+                        f"반 '{edit_name.strip()}' 정보가 수정되었습니다."
+                    )
+                    st.session_state["class_edit_nonce"] = form_nonce + 1
+                    st.rerun()
+                else:
+                    st.error("수정에 실패했습니다. 반을 찾을 수 없습니다.")
+
+    with tab_del:
+        students_in_class = db.list_students(class_id, active_only=False)
+        student_count = len(students_in_class)
+
+        if student_count > 0:
+            st.warning(
+                f"이 반에 소속된 학생이 {student_count}명 있습니다. "
+                "삭제하면 학생·출결·기록 데이터도 함께 삭제됩니다."
+            )
+            confirmed = confirm_action(
+                f"학생 {student_count}명 포함, 반 삭제를 확인합니다.",
+                key="del_class_confirm",
+            )
+        else:
+            confirmed = confirm_action("이 반을 삭제합니다.", key="del_class_confirm")
+
+        if st.button(
+            "반 삭제", type="primary", disabled=not confirmed, key="del_class_btn"
+        ):
+            db.delete_class(class_id, cascade_students=True)
+            st.session_state["class_save_msg"] = True
+            st.session_state["class_save_detail"] = (
+                f"반 '{current_name}'이(가) 삭제되었습니다."
+            )
+            st.rerun()

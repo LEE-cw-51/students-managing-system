@@ -309,6 +309,23 @@ def add_class(name: str, teacher: str) -> str:
     return class_id
 
 
+def get_class(class_id: str) -> dict[str, Any] | None:
+    classes = load_sheet("Classes")
+    match = classes[classes["반ID"].astype(str) == str(class_id)]
+    if match.empty:
+        return None
+    return match.iloc[0].to_dict()
+
+
+def update_class(class_id: str, updates: dict[str, Any]) -> bool:
+    """Update class fields. Allowed: 반이름, 담당쌤."""
+    allowed = {"반이름", "담당쌤"}
+    cleaned = {k: v for k, v in updates.items() if k in allowed}
+    if not cleaned:
+        return False
+    return update_cells_by_id("Classes", "반ID", class_id, cleaned)
+
+
 def delete_class(class_id: str, cascade_students: bool = False) -> None:
     students = load_sheet("Students")
     class_students = students[students["반ID"] == class_id]
