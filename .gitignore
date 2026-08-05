@@ -1,0 +1,23 @@
+# Secrets & local env (never commit real credentials)
+.streamlit/secrets.toml
+.env
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Streamlit / local
+.cache/
+*.log
