@@ -18,7 +18,16 @@ SCOPES = [
 
 SHEET_HEADERS: dict[str, list[str]] = {
     "Classes": ["반ID", "반이름", "담당쌤", "생성일"],
-    "Students": ["학생ID", "반ID", "학생이름", "연락처", "등록일", "상태"],
+    "Students": [
+        "학생ID",
+        "반ID",
+        "학생이름",
+        "학년",
+        "전화번호",
+        "부모님연락처",
+        "등록일",
+        "상태",
+    ],
     "Records": [
         "기록ID",
         "학생ID",
@@ -35,6 +44,29 @@ SHEET_HEADERS: dict[str, list[str]] = {
     ],
     "Attendance": ["출결ID", "학생ID", "반ID", "날짜", "출결상태", "비고"],
 }
+
+# Legacy column aliases → current Students headers
+_STUDENT_COLUMN_ALIASES: dict[str, str] = {
+    "연락처": "전화번호",
+}
+
+GRADE_OPTIONS = [
+    "초1",
+    "초2",
+    "초3",
+    "초4",
+    "초5",
+    "초6",
+    "중1",
+    "중2",
+    "중3",
+    "고1",
+    "고2",
+    "고3",
+    "기타",
+]
+
+STATUS_OPTIONS = ["재원", "퇴원"]
 
 
 def _today_str() -> str:
@@ -62,23 +94,76 @@ def get_spreadsheet() -> gspread.Spreadsheet:
     return client.open_by_key(sheet_id)
 
 
+def _rewrite_sheet_with_headers(
+    ws: gspread.Worksheet,
+    new_headers: list[str],
+    alias_map: dict[str, str] | None = None,
+) -> None:
+    """Rewrite a worksheet to match new_headers, preserving row data via column names."""
+    values = ws.get_all_values()
+    alias_map = alias_map or {}
+    if not values:
+        ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        return
+
+    old_headers = values[0]
+    if old_headers == new_headers:
+        return
+
+    # Only header, empty cells → just set headers
+    if len(values) == 1 and all(not c.strip() for c in old_headers):
+        ws.clear()
+        ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        return
+
+    # Map each old column to a canonical name
+    col_index: dict[str, int] = {}
+    for idx, name in enumerate(old_headers):
+        canonical = alias_map.get(name, name)
+        if canonical and canonical not in col_index:
+            col_index[canonical] = idx
+
+    new_rows: list[list[str]] = [new_headers]
+    for row in values[1:]:
+        if not any(str(c).strip() for c in row):
+            continue
+        new_row = []
+        for col in new_headers:
+            idx = col_index.get(col)
+            if idx is None or idx >= len(row):
+                new_row.append("")
+            else:
+                new_row.append(row[idx])
+        new_rows.append(new_row)
+
+    ws.clear()
+    ws.update(new_rows, range_name="A1", value_input_option="USER_ENTERED")
+
+
 def ensure_sheets() -> None:
-    """Create missing worksheets and ensure header rows exist."""
+    """Create missing worksheets and ensure header rows exist (migrates Students schema)."""
     ss = get_spreadsheet()
     existing = {ws.title for ws in ss.worksheets()}
     for name, headers in SHEET_HEADERS.items():
         if name not in existing:
             ws = ss.add_worksheet(title=name, rows=1000, cols=len(headers))
             ws.append_row(headers, value_input_option="USER_ENTERED")
-        else:
-            ws = ss.worksheet(name)
-            values = ws.get_all_values()
-            if not values:
-                ws.append_row(headers, value_input_option="USER_ENTERED")
-            elif values[0] != headers:
-                # Keep existing data; only write headers if sheet is empty of data rows
-                if len(values) == 1 and all(not c.strip() for c in values[0]):
-                    ws.update([headers], range_name="A1", value_input_option="USER_ENTERED")
+            continue
+
+        ws = ss.worksheet(name)
+        values = ws.get_all_values()
+        if not values:
+            ws.append_row(headers, value_input_option="USER_ENTERED")
+            continue
+
+        if values[0] == headers:
+            continue
+
+        if name == "Students":
+            _rewrite_sheet_with_headers(ws, headers, _STUDENT_COLUMN_ALIASES)
+            clear_data_cache()
+        elif len(values) == 1 and all(not c.strip() for c in values[0]):
+            ws.update([headers], range_name="A1", value_input_option="USER_ENTERED")
 
 
 def get_worksheet(name: str) -> gspread.Worksheet:
@@ -95,11 +180,20 @@ def load_sheet(name: str) -> pd.DataFrame:
     if not records:
         return pd.DataFrame(columns=headers)
     df = pd.DataFrame(records)
+
+    # Soft-migrate legacy Students columns in-memory if sheet rewrite hasn't run yet
+    if name == "Students":
+        for old, new in _STUDENT_COLUMN_ALIASES.items():
+            if old in df.columns and new not in df.columns:
+                df[new] = df[old]
+            elif old in df.columns and new in df.columns:
+                empty_new = df[new].astype(str).str.strip().isin(["", "nan", "None"])
+                df.loc[empty_new, new] = df.loc[empty_new, old]
+
     for col in headers:
         if col not in df.columns:
             df[col] = ""
     return df[headers].copy()
-
 
 def clear_data_cache() -> None:
     load_sheet.clear()
@@ -236,13 +330,54 @@ def list_students(class_id: str | None = None, active_only: bool = True) -> pd.D
     return df.reset_index(drop=True)
 
 
-def add_student(class_id: str, name: str, contact: str = "") -> str:
+def add_student(
+    class_id: str,
+    name: str,
+    grade: str = "",
+    phone: str = "",
+    parent_phone: str = "",
+    status: str = "재원",
+) -> str:
     student_id = generate_id("STU")
     append_row(
         "Students",
-        [student_id, class_id, name.strip(), contact.strip(), _today_str(), "재원"],
+        [
+            student_id,
+            class_id,
+            name.strip(),
+            grade.strip(),
+            phone.strip(),
+            parent_phone.strip(),
+            _today_str(),
+            status.strip() or "재원",
+        ],
     )
     return student_id
+
+
+def update_student(student_id: str, updates: dict[str, Any]) -> bool:
+    """Update student profile fields. Allowed keys match Students columns (except 학생ID)."""
+    allowed = {
+        "반ID",
+        "학생이름",
+        "학년",
+        "전화번호",
+        "부모님연락처",
+        "등록일",
+        "상태",
+    }
+    cleaned = {k: v for k, v in updates.items() if k in allowed}
+    if not cleaned:
+        return False
+    return update_cells_by_id("Students", "학생ID", student_id, cleaned)
+
+
+def get_student(student_id: str) -> dict[str, Any] | None:
+    students = load_sheet("Students")
+    match = students[students["학생ID"].astype(str) == str(student_id)]
+    if match.empty:
+        return None
+    return match.iloc[0].to_dict()
 
 
 def delete_student(student_id: str, cascade: bool = True) -> None:
@@ -253,8 +388,7 @@ def delete_student(student_id: str, cascade: bool = True) -> None:
 
 
 def move_student(student_id: str, new_class_id: str) -> bool:
-    return update_cells_by_id("Students", "학생ID", student_id, {"반ID": new_class_id})
-
+    return update_student(student_id, {"반ID": new_class_id})
 
 def add_record(
     student_id: str,
