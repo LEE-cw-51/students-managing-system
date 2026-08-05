@@ -39,7 +39,6 @@ SHEET_HEADERS: dict[str, list[str]] = {
         "학습진도",
         "과제안내",
         "과제이행률",
-        "수업집중도",
         "특이사항",
     ],
     "Attendance": ["출결ID", "학생ID", "반ID", "날짜", "출결상태", "비고"],
@@ -49,6 +48,9 @@ SHEET_HEADERS: dict[str, list[str]] = {
 _STUDENT_COLUMN_ALIASES: dict[str, str] = {
     "연락처": "전화번호",
 }
+
+# Sheets that should be rewritten when headers drift (drop/rename columns)
+_MIGRATE_SHEETS: set[str] = {"Students", "Records"}
 
 GRADE_OPTIONS = [
     "초1",
@@ -141,7 +143,7 @@ def _rewrite_sheet_with_headers(
 
 
 def ensure_sheets() -> None:
-    """Create missing worksheets and ensure header rows exist (migrates Students schema)."""
+    """Create missing worksheets and ensure header rows exist (migrates schema)."""
     ss = get_spreadsheet()
     existing = {ws.title for ws in ss.worksheets()}
     for name, headers in SHEET_HEADERS.items():
@@ -159,8 +161,9 @@ def ensure_sheets() -> None:
         if values[0] == headers:
             continue
 
-        if name == "Students":
-            _rewrite_sheet_with_headers(ws, headers, _STUDENT_COLUMN_ALIASES)
+        if name in _MIGRATE_SHEETS:
+            aliases = _STUDENT_COLUMN_ALIASES if name == "Students" else None
+            _rewrite_sheet_with_headers(ws, headers, aliases)
             clear_data_cache()
         elif len(values) == 1 and all(not c.strip() for c in values[0]):
             ws.update([headers], range_name="A1", value_input_option="USER_ENTERED")
@@ -407,6 +410,53 @@ def delete_student(student_id: str, cascade: bool = True) -> None:
 def move_student(student_id: str, new_class_id: str) -> bool:
     return update_student(student_id, {"반ID": new_class_id})
 
+
+def _score_ratios_for_student(
+    student_id: str,
+    *,
+    exclude_record_ids: set[str] | None = None,
+) -> list[float]:
+    records = load_sheet("Records")
+    student_records = records[records["학생ID"].astype(str) == str(student_id)]
+    exclude_record_ids = exclude_record_ids or set()
+    ratios: list[float] = []
+    for _, r in student_records.iterrows():
+        if str(r.get("기록ID", "")) in exclude_record_ids:
+            continue
+        ratio = parse_score_ratio(r["테스트결과"], r["만점"])
+        if ratio is not None:
+            ratios.append(ratio)
+    return ratios
+
+
+def _rolling_average(ratios: list[float], current_ratio: float) -> float:
+    recent = (ratios + [current_ratio])[-10:]
+    return round(sum(recent) / len(recent), 1) if recent else current_ratio
+
+
+def find_records_for_date(student_id: str, record_date: str) -> pd.DataFrame:
+    records = get_student_records(student_id)
+    if records.empty:
+        return records
+    return records[records["날짜"].astype(str) == str(record_date)].reset_index(drop=True)
+
+
+def records_exist_for_class_date(class_id: str, record_date: str) -> list[str]:
+    """Return student IDs in the class that already have a record on record_date."""
+    students = list_students(class_id, active_only=True)
+    if students.empty:
+        return []
+    records = load_sheet("Records")
+    if records.empty:
+        return []
+    sid_set = set(students["학생ID"].astype(str))
+    matched = records[
+        (records["학생ID"].astype(str).isin(sid_set))
+        & (records["날짜"].astype(str) == str(record_date))
+    ]
+    return matched["학생ID"].astype(str).tolist()
+
+
 def add_record(
     student_id: str,
     record_date: str,
@@ -416,29 +466,27 @@ def add_record(
     progress: str,
     homework: str,
     homework_rate: str,
-    focus: str,
     notes: str = "",
+    *,
+    overwrite: bool = False,
 ) -> tuple[str, float]:
-    """Append a record and return (record_id, rolling average of recent scores)."""
-    records = load_sheet("Records")
-    student_records = records[records["학생ID"] == student_id].copy()
-    # Compute average of this + recent previous scores (비율 %)
-    ratios: list[float] = []
-    for _, r in student_records.iterrows():
-        try:
-            s = float(r["테스트결과"])
-            m = float(r["만점"])
-            if m > 0:
-                ratios.append(s / m * 100)
-        except (TypeError, ValueError):
-            continue
+    """Append a record (optionally overwriting same student+date). Returns (record_id, avg)."""
+    existing = find_records_for_date(student_id, record_date)
+    if not existing.empty and not overwrite:
+        raise ValueError("EXISTING")
+    exclude_ids: set[str] = set()
+    if not existing.empty and overwrite:
+        exclude_ids = set(existing["기록ID"].astype(str))
+        delete_rows_by_ids("Records", "기록ID", list(exclude_ids))
+
     try:
-        current_ratio = float(score) / float(max_score) * 100 if float(max_score) > 0 else 0.0
+        current_ratio = (
+            float(score) / float(max_score) * 100 if float(max_score) > 0 else 0.0
+        )
     except (TypeError, ValueError):
         current_ratio = 0.0
-    ratios.append(current_ratio)
-    recent = ratios[-10:]
-    avg = round(sum(recent) / len(recent), 1) if recent else current_ratio
+    ratios = _score_ratios_for_student(student_id, exclude_record_ids=exclude_ids)
+    avg = _rolling_average(ratios, current_ratio)
 
     record_id = generate_id("REC")
     append_row(
@@ -454,11 +502,84 @@ def add_record(
             progress,
             homework,
             homework_rate,
-            focus,
             notes,
         ],
     )
     return record_id, avg
+
+
+def update_record(record_id: str, updates: dict[str, Any]) -> bool:
+    """Update an existing record. Recalculates 평균 if score fields change."""
+    records = load_sheet("Records")
+    match = records[records["기록ID"].astype(str) == str(record_id)]
+    if match.empty:
+        return False
+    row = match.iloc[0]
+    student_id = str(row["학생ID"])
+
+    allowed = {
+        "날짜",
+        "테스트결과",
+        "만점",
+        "난이도",
+        "학습진도",
+        "과제안내",
+        "과제이행률",
+        "특이사항",
+    }
+    cleaned = {k: v for k, v in updates.items() if k in allowed}
+    if not cleaned:
+        return False
+
+    score = cleaned.get("테스트결과", row["테스트결과"])
+    max_score = cleaned.get("만점", row["만점"])
+    try:
+        current_ratio = (
+            float(score) / float(max_score) * 100 if float(max_score) > 0 else 0.0
+        )
+    except (TypeError, ValueError):
+        current_ratio = 0.0
+    ratios = _score_ratios_for_student(
+        student_id, exclude_record_ids={str(record_id)}
+    )
+    cleaned["평균"] = _rolling_average(ratios, current_ratio)
+    return update_cells_by_id("Records", "기록ID", record_id, cleaned)
+
+
+def delete_record(record_id: str) -> int:
+    return delete_rows_by_ids("Records", "기록ID", [record_id])
+
+
+def save_records_batch(
+    record_date: str,
+    common: dict[str, str],
+    entries: list[dict[str, Any]],
+    *,
+    overwrite: bool = False,
+) -> int:
+    """
+    Save multiple student records sharing common lesson fields.
+    entries: [{학생ID, 테스트결과, 만점, 특이사항?, 난이도?, 학습진도?, 과제안내?, 과제이행률?}, ...]
+    Per-entry optional fields override common.
+    """
+    saved = 0
+    for e in entries:
+        sid = str(e["학생ID"])
+        notes = str(e.get("특이사항", common.get("특이사항", "")) or "")
+        add_record(
+            student_id=sid,
+            record_date=record_date,
+            score=e["테스트결과"],
+            max_score=e["만점"],
+            difficulty=str(e.get("난이도") or common["난이도"]),
+            progress=str(e.get("학습진도") if e.get("학습진도") is not None else common["학습진도"]),
+            homework=str(e.get("과제안내") if e.get("과제안내") is not None else common["과제안내"]),
+            homework_rate=str(e.get("과제이행률") or common["과제이행률"]),
+            notes=notes,
+            overwrite=overwrite,
+        )
+        saved += 1
+    return saved
 
 
 def get_student_records(student_id: str) -> pd.DataFrame:

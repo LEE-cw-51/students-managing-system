@@ -52,34 +52,17 @@ def render() -> None:
         hw = rec["과제이행률"].astype(str).map(_normalize_grade)
         hw_counts = hw.value_counts().reset_index()
         hw_counts.columns = ["등급", "건수"]
-        focus = rec["수업집중도"].astype(str).map(_normalize_grade)
-        focus_counts = focus.value_counts().reset_index()
-        focus_counts.columns = ["등급", "건수"]
 
-        left, right = st.columns(2)
-        with left:
-            if not hw_counts.empty:
-                fig_hw = px.pie(
-                    hw_counts,
-                    names="등급",
-                    values="건수",
-                    title="과제이행률 등급 분포",
-                )
-                st.plotly_chart(fig_hw, use_container_width=True)
-            else:
-                st.info("과제이행률 데이터 없음")
-        with right:
-            if not focus_counts.empty:
-                fig_focus = px.bar(
-                    focus_counts,
-                    x="등급",
-                    y="건수",
-                    title="수업집중도 분포",
-                    text="건수",
-                )
-                st.plotly_chart(fig_focus, use_container_width=True)
-            else:
-                st.info("수업집중도 데이터 없음")
+        if not hw_counts.empty:
+            fig_hw = px.pie(
+                hw_counts,
+                names="등급",
+                values="건수",
+                title="과제이행률 등급 분포",
+            )
+            st.plotly_chart(fig_hw, use_container_width=True)
+        else:
+            st.info("과제이행률 데이터 없음")
 
         # Per-student latest average
         st.markdown("##### 학생별 최근 평균")
@@ -97,7 +80,7 @@ def render() -> None:
                     "최근날짜": latest["날짜"],
                     "최근평균": latest["평균"],
                     "과제이행률": latest["과제이행률"],
-                    "수업집중도": latest["수업집중도"],
+                    "난이도": latest["난이도"],
                 }
             )
         if latest_rows:
