@@ -53,6 +53,14 @@ def main() -> None:
     try:
         MENU[page]()
     except Exception as exc:  # noqa: BLE001 — surface sheet/auth errors to user
+        msg = str(exc)
+        if "429" in msg or "Quota exceeded" in msg:
+            st.warning(
+                "Google Sheets API 요청 한도를 잠시 초과했습니다. "
+                "약 1분 정도 기다린 뒤 새로고침해 주세요."
+            )
+            st.caption(msg)
+            return
         st.error("작업을 처리하는 중 오류가 발생했습니다.")
         st.exception(exc)
         st.info(

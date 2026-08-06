@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import time
 import uuid
-from datetime import date, datetime
-from typing import Any
+from datetime import date
+from typing import Any, Callable, TypeVar
 
 import gspread
 import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from gspread.exceptions import APIError
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -70,6 +72,8 @@ GRADE_OPTIONS = [
 
 STATUS_OPTIONS = ["재원", "퇴원"]
 
+T = TypeVar("T")
+
 
 def _today_str() -> str:
     return date.today().isoformat()
@@ -77,6 +81,25 @@ def _today_str() -> str:
 
 def generate_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+def _with_sheets_retry(fn: Callable[[], T], *, retries: int = 4) -> T:
+    """Retry on Sheets API 429 quota errors with exponential backoff."""
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return fn()
+        except APIError as exc:
+            last_exc = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            # gspread sometimes puts status on exc.args
+            msg = str(exc)
+            is_429 = status == 429 or "429" in msg or "Quota exceeded" in msg
+            if not is_429 or attempt >= retries - 1:
+                raise
+            time.sleep(min(2 ** attempt + 1, 20))
+    assert last_exc is not None
+    raise last_exc
 
 
 @st.cache_resource(show_spinner="Google Sheets 연결 중...")
@@ -90,10 +113,12 @@ def get_client() -> gspread.Client:
     return gspread.authorize(credentials)
 
 
+@st.cache_resource(show_spinner=False)
 def get_spreadsheet() -> gspread.Spreadsheet:
+    """Cache the spreadsheet handle — open_by_key is an API read every call."""
     client = get_client()
     sheet_id = st.secrets["SHEET_ID"]
-    return client.open_by_key(sheet_id)
+    return _with_sheets_retry(lambda: client.open_by_key(sheet_id))
 
 
 def _rewrite_sheet_with_headers(
@@ -102,10 +127,12 @@ def _rewrite_sheet_with_headers(
     alias_map: dict[str, str] | None = None,
 ) -> None:
     """Rewrite a worksheet to match new_headers, preserving row data via column names."""
-    values = ws.get_all_values()
+    values = _with_sheets_retry(ws.get_all_values)
     alias_map = alias_map or {}
     if not values:
-        ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        _with_sheets_retry(
+            lambda: ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        )
         return
 
     old_headers = values[0]
@@ -114,8 +141,10 @@ def _rewrite_sheet_with_headers(
 
     # Only header, empty cells → just set headers
     if len(values) == 1 and all(not c.strip() for c in old_headers):
-        ws.clear()
-        ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        _with_sheets_retry(ws.clear)
+        _with_sheets_retry(
+            lambda: ws.append_row(new_headers, value_input_option="USER_ENTERED")
+        )
         return
 
     # Map each old column to a canonical name
@@ -138,24 +167,41 @@ def _rewrite_sheet_with_headers(
                 new_row.append(row[idx])
         new_rows.append(new_row)
 
-    ws.clear()
-    ws.update(new_rows, range_name="A1", value_input_option="USER_ENTERED")
+    _with_sheets_retry(ws.clear)
+    _with_sheets_retry(
+        lambda: ws.update(new_rows, range_name="A1", value_input_option="USER_ENTERED")
+    )
 
 
 def ensure_sheets() -> None:
-    """Create missing worksheets and ensure header rows exist (migrates schema)."""
+    """Create missing worksheets and ensure header rows exist (migrates schema).
+
+    Expensive — only call via ensure_sheets_once().
+    """
     ss = get_spreadsheet()
-    existing = {ws.title for ws in ss.worksheets()}
+    existing = {ws.title for ws in _with_sheets_retry(ss.worksheets)}
     for name, headers in SHEET_HEADERS.items():
         if name not in existing:
-            ws = ss.add_worksheet(title=name, rows=1000, cols=len(headers))
-            ws.append_row(headers, value_input_option="USER_ENTERED")
+            ws = _with_sheets_retry(
+                lambda n=name, h=headers: ss.add_worksheet(
+                    title=n, rows=1000, cols=len(h)
+                )
+            )
+            _with_sheets_retry(
+                lambda w=ws, h=headers: w.append_row(
+                    h, value_input_option="USER_ENTERED"
+                )
+            )
             continue
 
-        ws = ss.worksheet(name)
-        values = ws.get_all_values()
+        ws = _with_sheets_retry(lambda n=name: ss.worksheet(n))
+        values = _with_sheets_retry(ws.get_all_values)
         if not values:
-            ws.append_row(headers, value_input_option="USER_ENTERED")
+            _with_sheets_retry(
+                lambda w=ws, h=headers: w.append_row(
+                    h, value_input_option="USER_ENTERED"
+                )
+            )
             continue
 
         if values[0] == headers:
@@ -166,19 +212,34 @@ def ensure_sheets() -> None:
             _rewrite_sheet_with_headers(ws, headers, aliases)
             clear_data_cache()
         elif len(values) == 1 and all(not c.strip() for c in values[0]):
-            ws.update([headers], range_name="A1", value_input_option="USER_ENTERED")
+            _with_sheets_retry(
+                lambda w=ws, h=headers: w.update(
+                    [h], range_name="A1", value_input_option="USER_ENTERED"
+                )
+            )
+
+
+def ensure_sheets_once() -> None:
+    """Run schema ensure at most once per browser session."""
+    if st.session_state.get("_sheets_schema_ready"):
+        return
+    ensure_sheets()
+    st.session_state["_sheets_schema_ready"] = True
 
 
 def get_worksheet(name: str) -> gspread.Worksheet:
-    ensure_sheets()
-    return get_spreadsheet().worksheet(name)
+    ensure_sheets_once()
+    ss = get_spreadsheet()
+    return _with_sheets_retry(lambda: ss.worksheet(name))
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=180, show_spinner=False)
 def load_sheet(name: str) -> pd.DataFrame:
-    """Load a worksheet into a DataFrame. Cached briefly to reduce API calls."""
-    ws = get_worksheet(name)
-    records = ws.get_all_records()
+    """Load a worksheet into a DataFrame. Cached to stay under Sheets API quotas."""
+    ensure_sheets_once()
+    ss = get_spreadsheet()
+    ws = _with_sheets_retry(lambda: ss.worksheet(name))
+    records = _with_sheets_retry(ws.get_all_records)
     headers = SHEET_HEADERS[name]
     if not records:
         return pd.DataFrame(columns=headers)
@@ -198,13 +259,14 @@ def load_sheet(name: str) -> pd.DataFrame:
             df[col] = ""
     return df[headers].copy()
 
+
 def clear_data_cache() -> None:
     load_sheet.clear()
 
 
 def append_row(sheet_name: str, row: list[Any]) -> None:
     ws = get_worksheet(sheet_name)
-    ws.append_row(row, value_input_option="USER_ENTERED")
+    _with_sheets_retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"))
     clear_data_cache()
 
 
@@ -655,7 +717,9 @@ def get_attendance(
 
 
 def attendance_exists(class_id: str, attendance_date: str) -> bool:
-    return bool(find_row_indices("Attendance", {"반ID": class_id, "날짜": attendance_date}))
+    # Prefer cached sheet load to avoid extra live API reads
+    df = get_attendance(class_id=class_id, attendance_date=attendance_date)
+    return not df.empty
 
 
 def parse_score_ratio(score_val: Any, max_val: Any) -> float | None:
