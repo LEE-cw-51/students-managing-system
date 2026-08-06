@@ -1,8 +1,9 @@
-"""일일 기록 입력 화면 — 공통 일괄 입력 + 개별 수정."""
+"""일일 기록 입력 화면 — 공통 내용 / 학생별 점수 / 개별 수정."""
 
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import streamlit as st
 
@@ -12,16 +13,29 @@ from ui_helpers import confirm_action, select_class, select_student
 
 DIFFICULTY_OPTIONS = ["상", "중", "하"]
 HOMEWORK_RATE_OPTIONS = ["A(100~90%)", "B(89~70%)", "C(70%미만)"]
+COMMON_STATE_KEY = "rec_common_lesson"
 
 
 def _preview_cols() -> list[str]:
     return ["날짜", "테스트", "평균", "난이도", "과제이행률", "학습진도"]
 
 
+def _get_common() -> dict[str, Any] | None:
+    return st.session_state.get(COMMON_STATE_KEY)
+
+
+def _set_common(data: dict[str, Any]) -> None:
+    st.session_state[COMMON_STATE_KEY] = data
+
+
+def _clear_common() -> None:
+    st.session_state.pop(COMMON_STATE_KEY, None)
+
+
 def render() -> None:
     st.header("일일 기록 입력")
     st.caption(
-        "시험 점수는 학생별로, 학습진도·과제 등은 반 공통으로 한 번에 입력할 수 있습니다."
+        "① 공통 내용(진도·과제 등)을 먼저 입력한 뒤, ② 학생별 시험 점수를 저장하세요."
     )
 
     if st.session_state.pop("rec_save_msg", None):
@@ -36,18 +50,142 @@ def render() -> None:
         st.info("이 반에 재원 학생이 없습니다.")
         return
 
-    tab_batch, tab_edit = st.tabs(["일괄 입력", "개별 수정"])
+    record_date = st.date_input("수업 날짜", value=date.today(), key="rec_lesson_date")
+    date_str = record_date.isoformat()
 
-    with tab_batch:
-        _render_batch(class_id, students)
+    common = _get_common()
+    if common and common.get("날짜") == date_str and common.get("반ID") == class_id:
+        st.info(
+            f"적용된 공통 내용 · {date_str} · 난이도 {common['난이도']} · "
+            f"과제이행률 {common['과제이행률']} · 만점 {common['만점']}"
+        )
+    elif common:
+        st.warning("반 또는 날짜가 바뀌었습니다. 「공통 내용」탭에서 다시 적용해 주세요.")
+
+    tab_common, tab_scores, tab_edit = st.tabs(
+        ["① 공통 내용", "② 학생별 점수", "개별 수정"]
+    )
+
+    with tab_common:
+        _render_common_tab(class_id, date_str)
+
+    with tab_scores:
+        _render_scores_tab(class_id, students, date_str)
 
     with tab_edit:
         _render_individual(class_id)
 
 
-def _render_batch(class_id: str, students) -> None:
-    record_date = st.date_input("날짜", value=date.today(), key="rec_batch_date")
-    date_str = record_date.isoformat()
+def _render_common_tab(class_id: str, date_str: str) -> None:
+    st.subheader("공통 수업 내용")
+    st.caption(
+        "오늘 반 전체에 공통으로 들어갈 내용입니다. "
+        "적용 후 「학생별 점수」탭에서 시험 점수만 입력해 일괄 저장합니다."
+    )
+
+    prev = _get_common() or {}
+    same_context = prev.get("반ID") == class_id and prev.get("날짜") == date_str
+
+    def _idx(options: list[str], value: str, default: int = 0) -> int:
+        return options.index(value) if value in options else default
+
+    with st.form("common_lesson_form"):
+        difficulty = st.selectbox(
+            "난이도",
+            DIFFICULTY_OPTIONS,
+            index=_idx(
+                DIFFICULTY_OPTIONS,
+                str(prev.get("난이도", "중")) if same_context else "중",
+                1,
+            ),
+        )
+        progress = st.text_input(
+            "학습진도",
+            value=str(prev.get("학습진도", "")) if same_context else "",
+            placeholder="예: 이차방정식 활용",
+        )
+        homework = st.text_area(
+            "과제안내",
+            value=str(prev.get("과제안내", "")) if same_context else "",
+            height=120,
+            placeholder="예: 문제집 20~25쪽",
+        )
+        homework_rate = st.selectbox(
+            "과제이행률 (공통)",
+            HOMEWORK_RATE_OPTIONS,
+            index=_idx(
+                HOMEWORK_RATE_OPTIONS,
+                str(prev.get("과제이행률", HOMEWORK_RATE_OPTIONS[0]))
+                if same_context
+                else HOMEWORK_RATE_OPTIONS[0],
+            ),
+        )
+        common_notes = st.text_input(
+            "공통 특이사항 (선택)",
+            value=str(prev.get("특이사항", "")) if same_context else "",
+            placeholder="모든 학생에 동일 적용. 학생별로 다르면 점수 탭에서 개별 입력",
+        )
+        default_max = st.number_input(
+            "공통 만점",
+            min_value=1,
+            step=1,
+            value=int(prev.get("만점", 10)) if same_context else 10,
+        )
+        applied = st.form_submit_button("공통 내용 적용", type="primary")
+
+    if applied:
+        if not progress.strip() and not homework.strip():
+            st.warning("학습진도 또는 과제안내 중 하나 이상 입력하는 것을 권장합니다.")
+        _set_common(
+            {
+                "반ID": class_id,
+                "날짜": date_str,
+                "난이도": difficulty,
+                "학습진도": progress.strip(),
+                "과제안내": homework.strip(),
+                "과제이행률": homework_rate,
+                "특이사항": common_notes.strip(),
+                "만점": int(default_max),
+            }
+        )
+        st.session_state["rec_save_msg"] = True
+        st.session_state["rec_save_detail"] = (
+            "공통 내용이 적용되었습니다. 「학생별 점수」탭으로 이동해 점수를 입력하세요."
+        )
+        st.rerun()
+
+    if same_context and prev:
+        st.divider()
+        st.markdown("#### 현재 적용된 공통 내용")
+        st.write(
+            {
+                "날짜": prev.get("날짜"),
+                "난이도": prev.get("난이도"),
+                "학습진도": prev.get("학습진도") or "(없음)",
+                "과제안내": prev.get("과제안내") or "(없음)",
+                "과제이행률": prev.get("과제이행률"),
+                "공통 특이사항": prev.get("특이사항") or "(없음)",
+                "공통 만점": prev.get("만점"),
+            }
+        )
+        if st.button("공통 내용 초기화", key="clear_common_lesson"):
+            _clear_common()
+            st.rerun()
+
+
+def _render_scores_tab(class_id: str, students, date_str: str) -> None:
+    st.subheader("학생별 테스트 점수")
+    common = _get_common()
+    if (
+        not common
+        or common.get("반ID") != class_id
+        or common.get("날짜") != date_str
+    ):
+        st.warning(
+            "먼저 「① 공통 내용」탭에서 오늘 수업 공통 내용을 입력하고 "
+            "**공통 내용 적용**을 눌러 주세요."
+        )
+        return
 
     existing_ids = db.records_exist_for_class_date(class_id, date_str)
     if existing_ids:
@@ -58,29 +196,44 @@ def _render_batch(class_id: str, students) -> None:
             "저장 시 해당 학생 기록은 덮어씁니다."
         )
 
-    st.subheader("공통 내용")
-    form_nonce = st.session_state.get("rec_batch_nonce", 0)
-    with st.form(f"batch_record_form_{form_nonce}"):
-        difficulty = st.selectbox("난이도", DIFFICULTY_OPTIONS, index=1)
-        progress = st.text_input("학습진도")
-        homework = st.text_area("과제안내", height=100)
-        homework_rate = st.selectbox("과제이행률", HOMEWORK_RATE_OPTIONS)
-        common_notes = st.text_input("공통 특이사항 (선택)", placeholder="모든 학생에 동일 적용")
-        default_max = st.number_input("공통 만점", min_value=1, step=1, value=10)
+    with st.expander("적용된 공통 내용 보기", expanded=False):
+        st.write(
+            {
+                "난이도": common["난이도"],
+                "학습진도": common["학습진도"] or "(없음)",
+                "과제안내": common["과제안내"] or "(없음)",
+                "과제이행률": common["과제이행률"],
+                "공통 특이사항": common["특이사항"] or "(없음)",
+                "공통 만점": common["만점"],
+            }
+        )
 
-        st.subheader("학생별 테스트 점수")
-        st.caption("체크한 학생만 저장됩니다. 개별 특이사항이 있으면 공통 특이사항보다 우선합니다.")
+    st.caption(
+        "체크한 학생만 저장됩니다. 맞은 개수 · 만점 · (선택) 개별 특이사항만 입력하세요."
+    )
+
+    form_nonce = st.session_state.get("rec_batch_nonce", 0)
+    default_max = int(common.get("만점", 10))
+
+    with st.form(f"batch_scores_form_{form_nonce}"):
+        header = st.columns([2.2, 1.2, 1.2, 2.2])
+        header[0].markdown("**학생**")
+        header[1].markdown("**맞은 개수**")
+        header[2].markdown("**만점**")
+        header[3].markdown("**개별 특이사항**")
 
         entries_ui: list[dict] = []
         for _, row in students.iterrows():
             sid = str(row["학생ID"])
             sname = str(row["학생이름"])
             already = sid in existing_ids
-            label = f"{sname}" + (" · 기존기록 있음" if already else "")
+            label = f"{sname}" + (" · 기존" if already else "")
 
-            c1, c2, c3, c4 = st.columns([2.2, 1, 1.2, 1.2])
+            c1, c2, c3, c4 = st.columns([2.2, 1.2, 1.2, 2.2])
             with c1:
-                include = st.checkbox(label, value=True, key=f"rec_inc_{form_nonce}_{sid}")
+                include = st.checkbox(
+                    label, value=True, key=f"rec_inc_{form_nonce}_{sid}"
+                )
             with c2:
                 score = st.number_input(
                     "맞은 개수",
@@ -95,7 +248,7 @@ def _render_batch(class_id: str, students) -> None:
                     "만점",
                     min_value=1,
                     step=1,
-                    value=int(default_max),
+                    value=default_max,
                     key=f"rec_max_{form_nonce}_{sid}",
                     label_visibility="collapsed",
                 )
@@ -104,7 +257,7 @@ def _render_batch(class_id: str, students) -> None:
                     "개별 특이사항",
                     key=f"rec_note_{form_nonce}_{sid}",
                     label_visibility="collapsed",
-                    placeholder="개별 특이사항",
+                    placeholder="없으면 공통 특이사항 사용",
                 )
 
             with st.expander(f"{sname} · 공통값 개별 수정 (선택)", expanded=False):
@@ -116,14 +269,28 @@ def _render_batch(class_id: str, students) -> None:
                 c_diff = st.selectbox(
                     "난이도",
                     DIFFICULTY_OPTIONS,
-                    index=1,
+                    index=DIFFICULTY_OPTIONS.index(common["난이도"])
+                    if common["난이도"] in DIFFICULTY_OPTIONS
+                    else 1,
                     key=f"rec_cdiff_{form_nonce}_{sid}",
                 )
-                c_prog = st.text_input("학습진도", key=f"rec_cprog_{form_nonce}_{sid}")
-                c_hw = st.text_area("과제안내", key=f"rec_chw_{form_nonce}_{sid}", height=80)
+                c_prog = st.text_input(
+                    "학습진도",
+                    value=common.get("학습진도", ""),
+                    key=f"rec_cprog_{form_nonce}_{sid}",
+                )
+                c_hw = st.text_area(
+                    "과제안내",
+                    value=common.get("과제안내", ""),
+                    key=f"rec_chw_{form_nonce}_{sid}",
+                    height=80,
+                )
                 c_rate = st.selectbox(
                     "과제이행률",
                     HOMEWORK_RATE_OPTIONS,
+                    index=HOMEWORK_RATE_OPTIONS.index(common["과제이행률"])
+                    if common["과제이행률"] in HOMEWORK_RATE_OPTIONS
+                    else 0,
                     key=f"rec_crate_{form_nonce}_{sid}",
                 )
 
@@ -175,12 +342,12 @@ def _render_batch(class_id: str, students) -> None:
         st.error("이미 기록이 있는 학생이 있습니다. 덮어쓰기 확인 후 다시 저장해 주세요.")
         return
 
-    common = {
-        "난이도": difficulty,
-        "학습진도": progress.strip(),
-        "과제안내": homework.strip(),
-        "과제이행률": homework_rate,
-        "특이사항": common_notes.strip(),
+    common_payload = {
+        "난이도": common["난이도"],
+        "학습진도": common["학습진도"],
+        "과제안내": common["과제안내"],
+        "과제이행률": common["과제이행률"],
+        "특이사항": common["특이사항"],
     }
 
     batch_entries = []
@@ -201,7 +368,7 @@ def _render_batch(class_id: str, students) -> None:
     try:
         count = db.save_records_batch(
             date_str,
-            common,
+            common_payload,
             batch_entries,
             overwrite=need_overwrite and overwrite,
         )
@@ -241,7 +408,7 @@ def _render_individual(class_id: str) -> None:
         return
 
     if records.empty:
-        st.info("수정할 기록이 없습니다. 먼저 일괄 입력 또는 새 기록을 추가해 주세요.")
+        st.info("수정할 기록이 없습니다. 먼저 공통 내용 + 점수 일괄 입력 또는 새 기록을 추가해 주세요.")
         return
 
     labels = []
@@ -255,7 +422,6 @@ def _render_individual(class_id: str) -> None:
 
     form_nonce = st.session_state.get("rec_edit_nonce", 0)
     with st.form(f"edit_record_form_{form_nonce}"):
-        # date as text to avoid timezone issues with existing values
         try:
             default_d = date.fromisoformat(str(row["날짜"]))
         except ValueError:
@@ -267,13 +433,17 @@ def _render_individual(class_id: str) -> None:
                 score_default = int(float(row["테스트결과"]))
             except (TypeError, ValueError):
                 score_default = 0
-            score = st.number_input("테스트 맞은 개수", min_value=0, step=1, value=score_default)
+            score = st.number_input(
+                "테스트 맞은 개수", min_value=0, step=1, value=score_default
+            )
         with c2:
             try:
                 max_default = int(float(row["만점"]))
             except (TypeError, ValueError):
                 max_default = 10
-            max_score = st.number_input("만점", min_value=1, step=1, value=max(max_default, 1))
+            max_score = st.number_input(
+                "만점", min_value=1, step=1, value=max(max_default, 1)
+            )
 
         diff = str(row.get("난이도", "중") or "중")
         diff_idx = DIFFICULTY_OPTIONS.index(diff) if diff in DIFFICULTY_OPTIONS else 1
@@ -283,7 +453,9 @@ def _render_individual(class_id: str) -> None:
         homework = st.text_area(
             "과제안내", value=str(row.get("과제안내", "") or ""), height=100
         )
-        rate = str(row.get("과제이행률", HOMEWORK_RATE_OPTIONS[0]) or HOMEWORK_RATE_OPTIONS[0])
+        rate = str(
+            row.get("과제이행률", HOMEWORK_RATE_OPTIONS[0]) or HOMEWORK_RATE_OPTIONS[0]
+        )
         rate_idx = (
             HOMEWORK_RATE_OPTIONS.index(rate) if rate in HOMEWORK_RATE_OPTIONS else 0
         )
@@ -326,7 +498,9 @@ def _render_individual(class_id: str) -> None:
     if st.button("기록 삭제", disabled=not confirmed, key=f"rec_del_btn_{record_id}"):
         db.delete_record(record_id)
         st.session_state["rec_save_msg"] = True
-        st.session_state["rec_save_detail"] = f"{student_name} 학생 기록이 삭제되었습니다."
+        st.session_state["rec_save_detail"] = (
+            f"{student_name} 학생 기록이 삭제되었습니다."
+        )
         st.rerun()
 
 
@@ -356,18 +530,49 @@ def _render_single_add(student_id: str, student_name: str) -> None:
             key="single_overwrite_confirm",
         )
 
+    # Prefill from applied common lesson when available
+    common = _get_common()
+    use_common = bool(
+        common and common.get("날짜") == date_str
+    )
+
     form_nonce = st.session_state.get("rec_single_nonce", 0)
     with st.form(f"single_record_form_{form_nonce}", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             score = st.number_input("테스트 맞은 개수", min_value=0, step=1, value=0)
         with c2:
-            max_score = st.number_input("만점", min_value=1, step=1, value=10)
-        difficulty = st.selectbox("난이도", DIFFICULTY_OPTIONS, index=1)
-        progress = st.text_input("학습진도")
-        homework = st.text_area("과제안내", height=100)
-        homework_rate = st.selectbox("과제이행률", HOMEWORK_RATE_OPTIONS)
-        notes = st.text_input("특이사항 (선택)")
+            max_default = int(common["만점"]) if use_common else 10
+            max_score = st.number_input(
+                "만점", min_value=1, step=1, value=max_default
+            )
+        difficulty = st.selectbox(
+            "난이도",
+            DIFFICULTY_OPTIONS,
+            index=DIFFICULTY_OPTIONS.index(common["난이도"])
+            if use_common and common["난이도"] in DIFFICULTY_OPTIONS
+            else 1,
+        )
+        progress = st.text_input(
+            "학습진도",
+            value=common.get("학습진도", "") if use_common else "",
+        )
+        homework = st.text_area(
+            "과제안내",
+            value=common.get("과제안내", "") if use_common else "",
+            height=100,
+        )
+        homework_rate = st.selectbox(
+            "과제이행률",
+            HOMEWORK_RATE_OPTIONS,
+            index=HOMEWORK_RATE_OPTIONS.index(common["과제이행률"])
+            if use_common and common["과제이행률"] in HOMEWORK_RATE_OPTIONS
+            else 0,
+        )
+        notes = st.text_input(
+            "특이사항 (선택)",
+            value=common.get("특이사항", "") if use_common else "",
+        )
         submitted = st.form_submit_button(
             "저장",
             type="primary",
