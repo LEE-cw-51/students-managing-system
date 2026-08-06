@@ -275,7 +275,7 @@ def delete_rows_by_ids(sheet_name: str, id_column: str, ids: list[str]) -> int:
     if not ids:
         return 0
     ws = get_worksheet(sheet_name)
-    values = ws.get_all_values()
+    values = _with_sheets_retry(ws.get_all_values)
     if len(values) <= 1:
         return 0
     headers = values[0]
@@ -288,7 +288,7 @@ def delete_rows_by_ids(sheet_name: str, id_column: str, ids: list[str]) -> int:
     for row_num in range(len(values), 1, -1):
         row = values[row_num - 1]
         if col_idx < len(row) and row[col_idx] in id_set:
-            ws.delete_rows(row_num)
+            _with_sheets_retry(lambda r=row_num: ws.delete_rows(r))
             deleted += 1
     clear_data_cache()
     return deleted
@@ -302,7 +302,7 @@ def update_cells_by_id(
 ) -> bool:
     """Update columns for a single row matched by id. Returns True if found."""
     ws = get_worksheet(sheet_name)
-    values = ws.get_all_values()
+    values = _with_sheets_retry(ws.get_all_values)
     if len(values) <= 1:
         return False
     headers = values[0]
@@ -315,7 +315,9 @@ def update_cells_by_id(
                 if col_name not in headers:
                     continue
                 col_letter_idx = headers.index(col_name) + 1
-                ws.update_cell(row_num, col_letter_idx, new_val)
+                _with_sheets_retry(
+                    lambda r=row_num, c=col_letter_idx, v=new_val: ws.update_cell(r, c, v)
+                )
             clear_data_cache()
             return True
     return False
@@ -327,7 +329,7 @@ def find_row_indices(
 ) -> list[int]:
     """Return 1-based sheet row numbers (including header offset) matching filters."""
     ws = get_worksheet(sheet_name)
-    values = ws.get_all_values()
+    values = _with_sheets_retry(ws.get_all_values)
     if len(values) <= 1:
         return []
     headers = values[0]
@@ -355,7 +357,7 @@ def delete_row_numbers(sheet_name: str, row_numbers: list[int]) -> int:
     ws = get_worksheet(sheet_name)
     deleted = 0
     for row_num in sorted(row_numbers, reverse=True):
-        ws.delete_rows(row_num)
+        _with_sheets_retry(lambda r=row_num: ws.delete_rows(r))
         deleted += 1
     clear_data_cache()
     return deleted
@@ -696,7 +698,9 @@ def save_attendance_batch(
         )
     ws = get_worksheet("Attendance")
     if rows:
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        _with_sheets_retry(
+            lambda: ws.append_rows(rows, value_input_option="USER_ENTERED")
+        )
         clear_data_cache()
     return len(rows)
 
