@@ -1,129 +1,128 @@
-# 수학의 힘 · 학생 관리 시스템
+# 수학의 힘 · 학습관리 시스템 v1
 
-Streamlit 기반 학원 학생 관리 업무 툴입니다.  
-Google Sheets를 DB로 사용하며, Streamlit Community Cloud에 무료 배포할 수 있습니다.
+Google Sheets를 **공식 데이터베이스**로 사용하는 학원 학습관리 웹앱입니다.
 
-## 기능
+```text
+브라우저 (반응형 HTML/CSS/JS)
+        ↓  google.script.run
+Google Apps Script (API · 검증 · 통계 · 보고서)
+        ↓  getValues / setValues
+Google Sheets (Students, Classes, StudentClasses, Lessons, ...)
+```
 
-| 메뉴 | 설명 |
+웹앱은 시트를 직접 조작하지 않습니다. 모든 읽기/쓰기는 Apps Script API를 통과합니다.
+
+## 1차 완성 범위
+
+- 대시보드
+- 학생 등록 · 수정 · 퇴원(상태 변경) · 반 이동 이력
+- 반 등록 · 수정 · 종료 · 학생 배정
+- 오늘의 수업 일괄 입력 (전체 적용 + 학생별 수정)
+- 일일 보고서 생성 · 복사 (카카오톡 붙여넣기용)
+- 월간 통계 · 월간 보고서 임시/확정 저장
+- 학생별 · 반별 통계
+- 학원/보고서 설정
+
+Excel 가져오기, PDF, 스프레드시트 백업 복제는 다음 단계입니다.
+
+## 로컬에서 UI 확인 (Google 계정 없이)
+
+Node.js 22+가 있으면 시트 없이 같은 API를 JSON 파일로 흉내 냅니다.
+
+```bash
+npm test
+npm run dev
+```
+
+브라우저에서 `http://127.0.0.1:8787` 로 접속합니다. 최초 실행 시 중2 A반 데모 데이터가 들어갑니다.
+
+## Google에 배포 (clasp)
+
+1. [Apps Script API](https://script.google.com/home/usersettings) 를 사용 설정합니다.
+2. clasp를 설치하고 로그인합니다.
+
+```bash
+npm i -g @google/clasp
+clasp login
+```
+
+3. 스탠드얼론 스크립트를 만듭니다.
+
+```bash
+clasp create --title "수학의힘 LMS" --type standalone --rootDir src
+```
+
+생성 후 `.clasp.json`의 `scriptId`가 채워집니다. `src/appsscript.json`은 유지합니다.
+
+4. 코드를 올립니다.
+
+```bash
+clasp push
+```
+
+5. Apps Script 편집기에서 **배포 → 새 배포 → 웹 앱**:
+
+| 항목 | 권장 값 |
+|------|---------|
+| 실행 주체 | 나 |
+| 액세스 권한 | 나 자신 (또는 허용된 Google 계정만) |
+
+익명 공개 배포는 사용하지 마세요.
+
+6. 스크립트 속성 `SPREADSHEET_ID`를 넣을 수 있습니다.
+
+- 비어 있으면 첫 요청 때 `수학의힘_LMS_DB` 스프레드시트를 만들고 ID를 저장합니다.
+- 이미 쓸 시트가 있으면 [프로젝트 설정 → 스크립트 속성]에 `SPREADSHEET_ID`를 넣습니다.
+
+시트는 웹앱 첫 실행 시 아래 탭과 헤더를 자동 생성합니다.
+
+## 데이터베이스 (시트 = 테이블)
+
+1행은 컬럼명, 2행부터 데이터입니다. 관계 연결에는 이름 대신 ID를 씁니다.
+
+| 시트 | 역할 |
 |------|------|
-| 반 관리 | 반 목록 조회·추가·삭제 |
-| 학생 관리 | 반별 학생 추가·삭제·반 이동 |
-| 출결 체크 | 날짜별 반 전체 출석/결석 일괄 저장 |
-| 일일 기록 입력 | 반 공통 내용 + 학생별 시험점수 일괄 입력, 개별 수정/삭제 |
-| 카톡 문구 생성 | 학부모 알림 문구 자동 생성 (복사 붙여넣기용) |
-| 학생별 성적/출결 추이 | Plotly 점수 차트 + 출결·특이사항 이력 |
-| 반별 대시보드 | 반 평균·등급 분포·출석률 |
-| 데이터 내보내기 | Records / Attendance CSV 다운로드 |
+| Students | 학생. `STU_000001` |
+| Classes | 반. `CLS_000001` |
+| StudentClasses | 학생-반 이력. `REL_000001` |
+| Lessons | 일일 수업/학습 원본. `LES_000001` |
+| MonthlyReports | 확정/임시 월간 보고서. 원본이 아님 |
+| Settings | 학원명, 인사말, 과제 A/B/C 기준 등 |
+| _Meta | ID 시퀀스 |
 
-## 시트 구성 (Google Sheets)
+날짜는 `YYYY-MM-DD`로 저장하고, 화면에서만 `2026년 9월 10일 목요일`로 표시합니다.
 
-스프레드시트에 아래 4개 시트가 필요합니다.  
-앱 최초 실행 시 시트가 없으면 자동 생성·헤더를 맞춥니다.
+수업 기록 고유 키는 `lesson_date + student_id + class_id` 입니다. 같으면 UPDATE, 없으면 INSERT 합니다.
 
-1. **Classes** — 반ID, 반이름, 담당쌤, 생성일  
-2. **Students** — 학생ID, 반ID, 학생이름, 학년, 전화번호, 부모님연락처, 등록일, 상태(재원/퇴원)  
-3. **Records** — 기록ID, 학생ID, 날짜, 테스트결과, 만점, 평균, 난이도, 학습진도, 과제안내, 과제이행률, 특이사항  
-4. **Attendance** — 출결ID, 학생ID, 반ID, 날짜, 출결상태(출석/결석), 비고  
+학생 퇴원·반 종료는 행을 지우지 않고 상태를 바꿉니다. 과거 Lessons의 `class_id`는 반 이동 후에도 그대로입니다.
 
-## 1. Google 서비스 계정 생성 및 시트 공유
+테스트 평균은 `test_score / test_max_score × 100` 으로 정규화합니다. `미실시`와 만점 0은 평균에서 제외하고 `-`로 표시합니다.
 
-1. [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트 생성  
-2. **API 및 서비스 → 라이브러리**에서 아래 API 사용 설정  
-   - Google Sheets API  
-   - Google Drive API  
-3. **IAM 및 관리자 → 서비스 계정**에서 서비스 계정 생성  
-4. 생성된 서비스 계정의 **키 → 키 추가 → JSON** 다운로드  
-5. Google Sheets에서 새 스프레드시트 생성 (또는 기존 시트 사용)  
-6. 시트 **공유**에 서비스 계정 이메일(`client_email`)을 **편집자**로 추가  
-7. 시트 URL에서 ID 확인:  
-   `https://docs.google.com/spreadsheets/d/`**`SHEET_ID`**`/edit`
+## 보안
 
-> JSON 키 파일은 절대 Git에 커밋하지 마세요. `.gitignore`에 `*.json`이 포함되어 있습니다.
-
-## 2. secrets 설정
-
-### 로컬
-
-```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-```
-
-`.streamlit/secrets.toml`에 다음 값을 채웁니다.
-
-| 키 | 설명 |
-|----|------|
-| `APP_PASSWORD` | 앱 로그인 비밀번호 |
-| `SHEET_ID` | Google Spreadsheet ID |
-| `gcp_service_account` | 서비스 계정 JSON 전체 필드 (`type`, `project_id`, `private_key`, `client_email` 등) |
-
-예시 구조:
-
-```toml
-APP_PASSWORD = "your-password"
-SHEET_ID = "your-sheet-id"
-
-[gcp_service_account]
-type = "service_account"
-project_id = "..."
-private_key_id = "..."
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "...@....iam.gserviceaccount.com"
-client_id = "..."
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "..."
-```
-
-### Streamlit Community Cloud
-
-앱 배포 후 **Settings → Secrets**에 위와 동일한 TOML 내용을 붙여넣습니다.
-
-## 3. 로컬 실행
-
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-브라우저에서 `http://localhost:8501` 접속 후 `APP_PASSWORD`로 로그인합니다.
-
-## 4. Streamlit Community Cloud 배포
-
-1. 이 저장소를 GitHub에 push  
-2. [share.streamlit.io](https://share.streamlit.io/) (또는 [streamlit.io/cloud](https://streamlit.io/cloud))에 로그인  
-3. **New app** → 저장소·브랜치 선택  
-4. Main file path: `app.py`  
-5. **Advanced settings → Secrets**에 `secrets.toml` 내용 입력  
-6. Deploy  
-
-배포 후에도 Google 시트에 서비스 계정이 공유되어 있어야 합니다.
+- 웹앱을 공개(익명)로 배포하지 않습니다.
+- 설정 화면의 `allowed_emails`에 허용할 Google 계정을 쉼표로 넣을 수 있습니다. 비우면 배포 권한(나 자신)에만 의존합니다.
+- 보호자 연락처 등 불필요한 개인정보는 넣지 않는 것을 권장합니다.
 
 ## 프로젝트 구조
 
-```
-app.py                 # 진입점 · 로그인 · 사이드바 메뉴
-auth.py                # 비밀번호 로그인
-sheets_utils.py        # Google Sheets CRUD
-templates.py           # 카톡 문구 템플릿
-ui_helpers.py          # 반/학생 선택 공통 UI
-class_mgmt.py          # 반 관리
-student_mgmt.py        # 학생 관리
-attendance.py          # 출결 체크
-daily_records.py       # 일일 기록 입력
-kakao_msg.py           # 카톡 문구 생성
-student_trends.py      # 성적/출결 추이
-class_dashboard.py     # 반별 대시보드
-data_export.py         # CSV 내보내기
-requirements.txt
-.streamlit/secrets.toml.example
+```text
+src/00_Core.js      도메인 상수 · 순수 계산 · 보고서 문장
+src/01_Service.js   저장소에 의존하지 않는 업무 API
+src/02_Db.js        Google Sheets 저장소 (LockService, 일괄 읽기/쓰기)
+src/03_Api.js       google.script.run 공개 함수
+src/04_Code.js      doGet
+src/Index.html      셸
+src/Styles.html     반응형 스타일
+src/Client.html     화면 · 라우팅
+tests/              Node 테스트
+dev-server/         로컬 미리보기
 ```
 
-## 보안 주의사항
+## 개발 원칙
 
-- `.streamlit/secrets.toml`, 서비스 계정 `*.json`, `.env`는 커밋하지 마세요.  
-- 코드에 비밀번호·API 키·서비스계정 JSON을 하드코딩하지 마세요.  
-- 앱 비밀번호(`APP_PASSWORD`)는 주기적으로 변경하는 것을 권장합니다.
+1. Google Sheets가 Source of Truth다.
+2. 웹앱은 Sheet API를 직접 호출하지 않는다.
+3. 관계는 ID로만 연결한다.
+4. 보고서는 Lessons에서 필요할 때 생성한다. 완성 문장을 시트 셀에 저장하지 않는다.
+5. 월간 통계도 Lessons에서 계산한다.
