@@ -1,5 +1,7 @@
 'use strict';
 
+// Optional local demo data (홍길동 / 김철수 / 이영희). Real use starts empty.
+
 const fs = require('fs');
 const path = require('path');
 const postgres = require('postgres');
