@@ -133,7 +133,7 @@
           stat('기록 완료', d.recorded_count) +
           stat('기록 미완료', d.incomplete_count) +
         '</div>' +
-        '<div class="grid" style="grid-template-columns:2fr 1fr;margin-top:14px">' +
+        '<div class="split">' +
           '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
             (d.classes.length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
               d.classes.map(function (c) {
@@ -240,7 +240,7 @@
           '<button class="btn secondary" id="apply-bulk" type="button">전체 학생에게 적용</button></div>' +
         (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') +
         '<div class="bottom-bar"><button class="btn" id="save-today" style="width:100%">수업 기록 저장</button></div>' +
-        '<div style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
+        '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
 
       bindChips(body);
       var apply = document.getElementById('apply-bulk');
@@ -546,7 +546,7 @@
             return;
           }
           document.getElementById('daily-list').innerHTML = rows.map(function (r, i) {
-            return '<div class="card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +
+            return '<div class="card report-card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +
               '<div><button class="btn secondary copy-btn" data-i="' + i + '">복사</button> <button class="btn ghost sel-btn" data-i="' + i + '">전체 선택</button></div></div>' +
               '<textarea class="preview" id="rep-' + i + '">' + esc(r.text) + '</textarea></div>';
           }).join('');

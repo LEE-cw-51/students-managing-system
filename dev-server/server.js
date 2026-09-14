@@ -63,6 +63,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, { ok: true });
     }
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/favicon.ico') {
+      res.writeHead(204);
+      return res.end();
+    }
     if (req.method === 'POST' && url.pathname === '/api/resetDemo') {
       store.reset();
       seedDemo(LMS.createService(store));
