@@ -568,6 +568,67 @@ LMS.findById = function (rows, field, id) {
   return null;
 };
 
+LMS.TABLE_PK = {
+  Students: 'student_id',
+  Classes: 'class_id',
+  StudentClasses: 'id',
+  Lessons: 'lesson_id',
+  MonthlyReports: 'monthly_report_id',
+  Settings: 'key',
+  _Meta: 'prefix'
+};
+
+LMS.rowValues = function (row, headers) {
+  return (headers || []).map(function (h) {
+    var v = row ? row[h] : '';
+    return v === undefined || v === null ? '' : v;
+  });
+};
+
+/**
+ * Compare previous sheet rows to the next in-memory table.
+ * Sheet row numbers are 1-based with row 1 = headers, so data starts at 2.
+ */
+LMS.diffTableRows = function (prev, next, pk, headers) {
+  prev = prev || [];
+  next = next || [];
+  if (!pk) return { needsFullRewrite: true, updates: [], appends: [] };
+
+  var prevIndex = {};
+  for (var i = 0; i < prev.length; i++) {
+    var id = LMS.toStr(prev[i][pk]);
+    if (!id || prevIndex[id] !== undefined) {
+      return { needsFullRewrite: true, updates: [], appends: [] };
+    }
+    prevIndex[id] = i;
+  }
+
+  var seen = {};
+  var updates = [];
+  var appends = [];
+  for (var j = 0; j < next.length; j++) {
+    var nid = LMS.toStr(next[j][pk]);
+    if (!nid || seen[nid]) {
+      return { needsFullRewrite: true, updates: [], appends: [] };
+    }
+    seen[nid] = true;
+    var values = LMS.rowValues(next[j], headers);
+    var idx = prevIndex[nid];
+    if (idx === undefined) {
+      appends.push(values);
+    } else if (JSON.stringify(LMS.rowValues(prev[idx], headers)) !== JSON.stringify(values)) {
+      updates.push({ row: idx + 2, values: values });
+    }
+  }
+
+  for (var pid in prevIndex) {
+    if (!Object.prototype.hasOwnProperty.call(prevIndex, pid)) continue;
+    if (!seen[pid]) return { needsFullRewrite: true, updates: [], appends: [] };
+  }
+
+  return { needsFullRewrite: false, updates: updates, appends: appends };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = LMS;
 }

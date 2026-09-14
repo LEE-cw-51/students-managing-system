@@ -29,10 +29,11 @@
           <h1 id="page-title">대시보드</h1>
           <span id="top-date" class="muted"></span>
         </header>
-        <main id="main" class="main"></main>
+        <main id="main" class="main"><div class="card empty">불러오는 중...</div></main>
       </div>
     </div>
     <div id="toast" class="toast hidden"></div>
+    <script>window.__LMS_BOOT__ = <?!= bootJson; ?>;</script>
     <?!= include('Client'); ?>
   </body>
 </html>

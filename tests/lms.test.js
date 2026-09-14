@@ -207,3 +207,62 @@ describe('reports and stats', () => {
     assert.equal(dash.date_label, '2026년 9월 14일 월요일');
   });
 });
+
+describe('bootstrap and caching', () => {
+  it('returns dashboard, classes and students in one bootstrap payload', () => {
+    const api = svc();
+    seedDemo(api);
+    const boot = api.getBootstrap();
+    assert.equal(boot.settings.academy_name, '수학의 힘');
+    assert.equal(boot.today, '2026-09-14');
+    assert.equal(boot.classes.length, 1);
+    assert.equal(boot.students.length, 3);
+    assert.equal(boot.dashboard.today_student_count, 3);
+    assert.equal(boot.grades.length, LMS.GRADE_OPTIONS.length);
+  });
+
+  it('reads each table at most once per bootstrap', () => {
+    const store = createMemoryStore();
+    seedDemo(LMS.createService(store));
+    const counts = {};
+    const orig = store.readTable.bind(store);
+    store.readTable = function (name) {
+      counts[name] = (counts[name] || 0) + 1;
+      return orig(name);
+    };
+    LMS.createService(store).getBootstrap();
+    Object.keys(counts).forEach((name) => {
+      assert.ok(counts[name] <= 1, name + ' read ' + counts[name] + ' times');
+    });
+    assert.equal(counts.Students, 1);
+    assert.equal(counts.StudentClasses, 1);
+    assert.equal(counts.Classes, 1);
+    assert.equal(counts.Lessons, 1);
+  });
+
+  it('diffs table rows into updates and appends', () => {
+    const prev = [{ lesson_id: 'LES_000001', progress: 'a' }];
+    const next = [
+      { lesson_id: 'LES_000001', progress: 'b' },
+      { lesson_id: 'LES_000002', progress: 'c' }
+    ];
+    const headers = ['lesson_id', 'progress'];
+    const diff = LMS.diffTableRows(prev, next, 'lesson_id', headers);
+    assert.equal(diff.needsFullRewrite, false);
+    assert.equal(diff.updates.length, 1);
+    assert.equal(diff.updates[0].row, 2);
+    assert.deepEqual(diff.updates[0].values, ['LES_000001', 'b']);
+    assert.equal(diff.appends.length, 1);
+    assert.deepEqual(diff.appends[0], ['LES_000002', 'c']);
+  });
+
+  it('rewrites when a row is removed', () => {
+    const diff = LMS.diffTableRows(
+      [{ key: 'a', value: '1' }, { key: 'b', value: '2' }],
+      [{ key: 'a', value: '1' }],
+      'key',
+      ['key', 'value']
+    );
+    assert.equal(diff.needsFullRewrite, true);
+  });
+});

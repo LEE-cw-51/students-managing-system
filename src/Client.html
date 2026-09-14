@@ -6,8 +6,11 @@
     today: '',
     route: 'dashboard',
     params: {},
-    cache: {}
+    cache: {},
+    bootReady: false
   };
+
+  var BOOT_CACHE_KEY = 'lms_boot_v1';
 
   var MENUS = [
     { id: 'dashboard', label: '대시보드' },
@@ -37,6 +40,84 @@
         })
         .withFailureHandler(reject);
       runner[name].apply(runner, args);
+    });
+  }
+
+  function applyBoot(boot) {
+    if (!boot) return;
+    state.settings = boot.settings || {};
+    state.grades = boot.grades || state.grades || [];
+    state.today = boot.today || state.today;
+    state.cache.classes = boot.classes || [];
+    state.cache.students = boot.students || [];
+    state.cache.dashboard = boot.dashboard || null;
+    state.bootReady = true;
+  }
+
+  function persistBoot() {
+    try {
+      localStorage.setItem(BOOT_CACHE_KEY, JSON.stringify({
+        settings: state.settings,
+        grades: state.grades,
+        today: state.today,
+        classes: state.cache.classes || [],
+        students: state.cache.students || [],
+        dashboard: state.cache.dashboard || null
+      }));
+    } catch (e) {}
+  }
+
+  function readLocalBoot() {
+    try {
+      return JSON.parse(localStorage.getItem(BOOT_CACHE_KEY) || 'null');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function withBusy(btn, work) {
+    if (!btn) return Promise.resolve().then(work);
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '처리 중...';
+    return Promise.resolve().then(work).then(function (res) {
+      btn.disabled = false;
+      btn.textContent = label;
+      return res;
+    }, function (err) {
+      btn.disabled = false;
+      btn.textContent = label;
+      throw err;
+    });
+  }
+
+  function filterStudents(rows, filter) {
+    filter = filter || {};
+    var q = String(filter.query || '').toLowerCase();
+    return (rows || []).filter(function (s) {
+      if (filter.status && s.status !== filter.status) return false;
+      if (filter.grade && s.grade !== filter.grade) return false;
+      if (filter.classId) {
+        var ok = (s.current_classes || []).some(function (c) {
+          return c.class_id === filter.classId;
+        });
+        if (!ok) return false;
+      }
+      if (q && String(s.name || '').toLowerCase().indexOf(q) === -1 &&
+          String(s.student_id || '').toLowerCase().indexOf(q) === -1) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  function refreshLookups() {
+    return api('getLookups', []).then(function (res) {
+      state.cache.classes = res.classes || [];
+      state.cache.students = res.students || [];
+      state.cache.dashboard = null;
+      persistBoot();
+      return res;
     });
   }
 
@@ -101,11 +182,12 @@
     document.getElementById('top-date').textContent = state.today || '';
   }
 
-  function loadLookups() {
-    return Promise.all([api('getClasses', [{}]), api('getStudents', [{}])]).then(function (res) {
-      state.cache.classes = res[0];
-      state.cache.students = res[1];
-      return res;
+  function loadLookups(force) {
+    if (!force && state.cache.classes && state.cache.students) {
+      return Promise.resolve([state.cache.classes, state.cache.students]);
+    }
+    return refreshLookups().then(function (res) {
+      return [res.classes, res.students];
     });
   }
 
@@ -123,27 +205,38 @@
     return opts;
   }
 
+  function paintDashboard(root, d) {
+    root.innerHTML =
+      '<div class="grid stats">' +
+        stat('오늘 수업 반', d.today_class_count) +
+        stat('오늘 수업 학생', d.today_student_count) +
+        stat('기록 완료', d.recorded_count) +
+        stat('기록 미완료', d.incomplete_count) +
+      '</div>' +
+      '<div class="split">' +
+        '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
+          (d.classes.length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
+            d.classes.map(function (c) {
+              return '<tr><td>' + esc(c.class_name) + '</td><td>' + esc(c.weekday) + '</td><td>' +
+                esc(c.start_time) + (c.end_time ? '–' + esc(c.end_time) : '') + '</td><td>' + esc(c.teacher) + '</td></tr>';
+            }).join('') + '</tbody></table>' : '<div class="empty">오늘 배정된 운영 반이 없습니다.</div>') +
+        '</div>' +
+        '<div class="card"><h3>학생 현황</h3><p>재원 <b>' + d.enrolled_count + '</b></p><p>휴원 <b>' + d.paused_count + '</b></p><p>퇴원 <b>' + d.archived_count + '</b></p><p class="muted">보고서 생성 가능 ' + d.report_ready_count + '건</p></div>' +
+      '</div>';
+    document.getElementById('go-today').onclick = function () { go('today'); };
+  }
+
   function renderDashboard(root) {
+    var cached = state.cache.dashboard;
+    if (cached && cached.date === state.today) {
+      paintDashboard(root, cached);
+      return;
+    }
     spinner(root);
     api('getDashboard', [state.today]).then(function (d) {
-      root.innerHTML =
-        '<div class="grid stats">' +
-          stat('오늘 수업 반', d.today_class_count) +
-          stat('오늘 수업 학생', d.today_student_count) +
-          stat('기록 완료', d.recorded_count) +
-          stat('기록 미완료', d.incomplete_count) +
-        '</div>' +
-        '<div class="split">' +
-          '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
-            (d.classes.length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
-              d.classes.map(function (c) {
-                return '<tr><td>' + esc(c.class_name) + '</td><td>' + esc(c.weekday) + '</td><td>' +
-                  esc(c.start_time) + (c.end_time ? '–' + esc(c.end_time) : '') + '</td><td>' + esc(c.teacher) + '</td></tr>';
-              }).join('') + '</tbody></table>' : '<div class="empty">오늘 배정된 운영 반이 없습니다.</div>') +
-          '</div>' +
-          '<div class="card"><h3>학생 현황</h3><p>재원 <b>' + d.enrolled_count + '</b></p><p>휴원 <b>' + d.paused_count + '</b></p><p>퇴원 <b>' + d.archived_count + '</b></p><p class="muted">보고서 생성 가능 ' + d.report_ready_count + '건</p></div>' +
-        '</div>';
-      document.getElementById('go-today').onclick = function () { go('today'); };
+      state.cache.dashboard = d;
+      persistBoot();
+      paintDashboard(root, d);
     }).catch(fail(root));
   }
 
@@ -257,7 +350,7 @@
         });
         toast('공통 내용을 적용했습니다.');
       };
-      function save() {
+      function save(btn) {
         var items = [];
         body.querySelectorAll('.student-card').forEach(function (card) {
           items.push({
@@ -277,15 +370,22 @@
           });
         });
         if (!items.length) return toast('저장할 학생이 없습니다.', true);
-        api('saveLessonsBatch', [items]).then(function () {
-          toast('수업 기록을 저장했습니다.');
-          loadSession(date, classId);
+        withBusy(btn, function () {
+          return api('saveLessonsBatch', [items]).then(function () {
+            state.cache.dashboard = null;
+            persistBoot();
+            body.querySelectorAll('.student-card .badge').forEach(function (badge) {
+              badge.className = 'badge ok';
+              badge.textContent = '기록됨';
+            });
+            toast('수업 기록을 저장했습니다.');
+          });
         }).catch(function (e) { toast(e.message, true); });
       }
       var s1 = document.getElementById('save-today');
       var s2 = document.getElementById('save-today-desktop');
-      if (s1) s1.onclick = save;
-      if (s2) s2.onclick = save;
+      if (s1) s1.onclick = function () { save(s1); };
+      if (s2) s2.onclick = function () { save(s2); };
     }).catch(fail(body));
   }
 
@@ -298,11 +398,7 @@
   }
 
   function renderStudents(root) {
-    spinner(root);
-    Promise.all([api('getStudents', [{}]), api('getClasses', [{}])]).then(function (res) {
-      state.cache.students = res[0];
-      state.cache.classes = res[1];
-      var students = res[0];
+    function paint() {
       root.innerHTML =
         '<div class="card"><div class="row">' +
           field('검색', input('q', '', 'search', 'placeholder="이름"')) +
@@ -312,19 +408,24 @@
           '<button class="btn" id="student-filter">조회</button><button class="btn secondary" id="student-new">학생 등록</button>' +
         '</div></div><div id="student-list"></div><div id="student-form"></div>';
       function refresh() {
-        api('getStudents', [{
+        var rows = filterStudents(state.cache.students, {
           query: root.querySelector('[name=q]').value,
           grade: root.querySelector('[name=grade]').value,
           status: root.querySelector('[name=status]').value,
           classId: root.querySelector('[name=classId]').value
-        }]).then(function (rows) {
-          document.getElementById('student-list').innerHTML = studentTable(rows);
-        }).catch(function (e) { toast(e.message, true); });
+        });
+        document.getElementById('student-list').innerHTML = studentTable(rows);
       }
       document.getElementById('student-filter').onclick = refresh;
       document.getElementById('student-new').onclick = function () { showStudentForm(null); };
       refresh();
-    }).catch(fail(root));
+    }
+    if (state.cache.students && state.cache.classes) {
+      paint();
+      return;
+    }
+    spinner(root);
+    loadLookups(true).then(paint).catch(fail(root));
   }
 
   function studentTable(rows) {
@@ -365,15 +466,16 @@
         class_id: s.student_id ? undefined : form.querySelector('[name=class_id]').value
       };
       var p = s.student_id ? api('updateStudent', [data]) : api('createStudent', [data]);
-      p.then(function () { toast('저장했습니다.'); renderRoute(); }).catch(function (e) { toast(e.message, true); });
+      p.then(function () {
+        toast('저장했습니다.');
+        return refreshLookups().then(renderRoute);
+      }).catch(function (e) { toast(e.message, true); });
     };
   }
 
   function renderStudentDetail(root, id) {
     spinner(root);
-    Promise.all([api('getStudent', [id]), api('getClasses', [{}])]).then(function (res) {
-      var s = res[0];
-      state.cache.classes = res[1];
+    api('getStudent', [id]).then(function (s) {
       var current = (s.current_classes || []).map(function (c) { return c.class_name; }).join(', ') || '-';
       root.innerHTML =
         '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(s.name) + '</h2><button class="btn secondary" id="edit-one">수정</button></div>' +
@@ -391,7 +493,10 @@
       document.getElementById('edit-one').onclick = function () { showStudentForm(s); };
       document.getElementById('move-stu').onclick = function () {
         api('moveStudent', [{ student_id: s.student_id, class_id: root.querySelector('[name=move_class]').value, start_date: root.querySelector('[name=move_date]').value }])
-          .then(function () { toast('반을 변경했습니다.'); renderRoute(); })
+          .then(function () {
+            toast('반을 변경했습니다.');
+            return refreshLookups().then(renderRoute);
+          })
           .catch(function (e) { toast(e.message, true); });
       };
       document.getElementById('load-lessons').onclick = function () { loadHist(); };
@@ -441,13 +546,18 @@
   }
 
   function renderClasses(root) {
-    spinner(root);
-    api('getClasses', [{}]).then(function (rows) {
+    function paint(rows) {
       state.cache.classes = rows;
       root.innerHTML = '<div class="card toolbar"><h3 style="margin:0">반 목록</h3><button class="btn" id="new-class">반 등록</button></div>' +
         classTable(rows) + '<div id="class-form"></div>';
       document.getElementById('new-class').onclick = function () { showClassForm(null); };
-    }).catch(fail(root));
+    }
+    if (state.cache.classes) {
+      paint(state.cache.classes);
+      return;
+    }
+    spinner(root);
+    api('getClasses', [{}]).then(paint).catch(fail(root));
   }
 
   function classTable(rows) {
@@ -491,7 +601,10 @@
         memo: form.querySelector('[name=memo]').value
       };
       var p = c.class_id ? api('updateClass', [data]) : api('createClass', [data]);
-      p.then(function () { toast('저장했습니다.'); renderRoute(); }).catch(function (e) { toast(e.message, true); });
+      p.then(function () {
+        toast('저장했습니다.');
+        return refreshLookups().then(renderRoute);
+      }).catch(function (e) { toast(e.message, true); });
     };
   }
 
@@ -505,25 +618,31 @@
         '<div class="row" style="margin-top:12px">' + field('학생 배정', '<select id="assign-stu"></select>') +
         field('시작일', input('assign_date', state.today, 'date')) +
         '<button class="btn" id="assign-btn">배정</button></div></div><div id="class-form"></div>';
-      api('getStudents', [{ status: '재원' }]).then(function (all) {
-        var inClass = {};
-        (c.students || []).forEach(function (s) { inClass[s.student_id] = true; });
-        var others = all.filter(function (s) { return !inClass[s.student_id]; });
-        document.getElementById('assign-stu').innerHTML = '<option value="">학생 선택</option>' + others.map(function (s) {
-          return '<option value="' + esc(s.student_id) + '">' + esc(s.name) + '</option>';
-        }).join('');
+      var inClass = {};
+      (c.students || []).forEach(function (s) { inClass[s.student_id] = true; });
+      var others = (state.cache.students || []).filter(function (s) {
+        return s.status === '재원' && !inClass[s.student_id];
       });
+      document.getElementById('assign-stu').innerHTML = '<option value="">학생 선택</option>' + others.map(function (s) {
+        return '<option value="' + esc(s.student_id) + '">' + esc(s.name) + '</option>';
+      }).join('');
       document.getElementById('assign-btn').onclick = function () {
         var sid = document.getElementById('assign-stu').value;
         if (!sid) return toast('학생을 선택해 주세요.', true);
         api('assignStudentToClass', [{ student_id: sid, class_id: id, start_date: root.querySelector('[name=assign_date]').value }])
-          .then(function () { toast('배정했습니다.'); renderRoute(); })
+          .then(function () {
+            toast('배정했습니다.');
+            return refreshLookups().then(renderRoute);
+          })
           .catch(function (e) { toast(e.message, true); });
       };
       document.getElementById('edit-class').onclick = function () { showClassForm(c); };
       document.getElementById('close-class').onclick = function () {
         if (!confirm('이 반을 종료할까요? 과거 수업 기록은 유지됩니다.')) return;
-        api('closeClass', [id]).then(function () { toast('반을 종료했습니다.'); go('classes'); }).catch(function (e) { toast(e.message, true); });
+        api('closeClass', [id]).then(function () {
+          toast('반을 종료했습니다.');
+          return refreshLookups().then(function () { go('classes'); });
+        }).catch(function (e) { toast(e.message, true); });
       };
     }).catch(fail(root));
   }
@@ -662,34 +781,32 @@
   }
 
   function renderSettings(root) {
-    spinner(root);
-    api('getSettings', []).then(function (s) {
-      state.settings = s;
-      var keys = [
-        ['academy_name', '학원명'],
-        ['teacher_name', '담당 강사명'],
-        ['contact', '연락처'],
-        ['report_greeting', '보고서 인사말'],
-        ['report_closing', '보고서 맺음말'],
-        ['assignment_A', '과제 A 기준'],
-        ['assignment_B', '과제 B 기준'],
-        ['assignment_C', '과제 C 기준'],
-        ['allowed_emails', '허용 이메일(쉼표 구분)']
-      ];
-      root.innerHTML = '<div class="card">' + keys.map(function (k) {
-        var area = k[0] === 'report_closing' || k[0] === 'allowed_emails';
-        return field(k[1], area ? '<textarea name="' + k[0] + '">' + esc(s[k[0]]) + '</textarea>' : input(k[0], s[k[0]]));
-      }).join('') + '<button class="btn" id="save-set">설정 저장</button></div>';
-      document.getElementById('save-set').onclick = function () {
-        var map = {};
-        keys.forEach(function (k) { map[k[0]] = root.querySelector('[name="' + k[0] + '"]').value; });
-        api('saveSettings', [map]).then(function (next) {
-          state.settings = next;
-          toast('설정을 저장했습니다.');
-          renderNav();
-        }).catch(function (e) { toast(e.message, true); });
-      };
-    }).catch(fail(root));
+    var s = state.settings || {};
+    var keys = [
+      ['academy_name', '학원명'],
+      ['teacher_name', '담당 강사명'],
+      ['contact', '연락처'],
+      ['report_greeting', '보고서 인사말'],
+      ['report_closing', '보고서 맺음말'],
+      ['assignment_A', '과제 A 기준'],
+      ['assignment_B', '과제 B 기준'],
+      ['assignment_C', '과제 C 기준'],
+      ['allowed_emails', '허용 이메일(쉼표 구분)']
+    ];
+    root.innerHTML = '<div class="card">' + keys.map(function (k) {
+      var area = k[0] === 'report_closing' || k[0] === 'allowed_emails';
+      return field(k[1], area ? '<textarea name="' + k[0] + '">' + esc(s[k[0]]) + '</textarea>' : input(k[0], s[k[0]]));
+    }).join('') + '<button class="btn" id="save-set">설정 저장</button></div>';
+    document.getElementById('save-set').onclick = function () {
+      var map = {};
+      keys.forEach(function (k) { map[k[0]] = root.querySelector('[name="' + k[0] + '"]').value; });
+      api('saveSettings', [map]).then(function (next) {
+        state.settings = next;
+        persistBoot();
+        toast('설정을 저장했습니다.');
+        renderNav();
+      }).catch(function (e) { toast(e.message, true); });
+    };
   }
 
   function fail(root) {
@@ -728,18 +845,40 @@
   document.getElementById('main').addEventListener('click', function (e) {
     var btn = e.target.closest('.edit-stu');
     if (!btn) return;
-    api('getStudent', [btn.getAttribute('data-id')]).then(showStudentForm).catch(function (err) { toast(err.message, true); });
+    var id = btn.getAttribute('data-id');
+    var cached = (state.cache.students || []).filter(function (s) { return s.student_id === id; })[0];
+    if (cached) {
+      showStudentForm(cached);
+      return;
+    }
+    api('getStudent', [id]).then(showStudentForm).catch(function (err) { toast(err.message, true); });
   });
 
-  api('getBootstrap', []).then(function (boot) {
-    state.settings = boot.settings || {};
-    state.grades = boot.grades || [];
-    state.today = boot.today;
+  if (window.__LMS_BOOT__) {
+    applyBoot(window.__LMS_BOOT__);
+    persistBoot();
     renderNav();
     renderRoute();
-  }).catch(function (e) {
-    document.getElementById('main').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>';
-  });
+  } else {
+    var localBoot = readLocalBoot();
+    if (localBoot && localBoot.today) {
+      applyBoot(localBoot);
+      renderNav();
+      renderRoute();
+    }
+    api('getBootstrap', []).then(function (boot) {
+      applyBoot(boot);
+      persistBoot();
+      renderNav();
+      renderRoute();
+    }).catch(function (e) {
+      if (!state.bootReady) {
+        document.getElementById('main').innerHTML = '<div class="card empty">' + esc(e.message) + '</div>';
+      } else {
+        toast(e.message || String(e), true);
+      }
+    });
+  }
 
   window.addEventListener('hashchange', renderRoute);
 })();

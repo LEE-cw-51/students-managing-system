@@ -12,6 +12,8 @@ Google Sheets (Students, Classes, StudentClasses, Lessons, ...)
 
 웹앱은 시트를 직접 조작하지 않습니다. 모든 읽기/쓰기는 Apps Script API를 통과합니다.
 
+첫 화면 데이터는 웹앱 HTML에 같이 실어 보내고, 이후 화면은 브라우저 캐시와 Apps Script `CacheService`로 시트 왕복을 줄입니다. `google.script.run` 자체 지연은 남아 있지만, 페이지마다 시트를 여러 번 읽거나 수업 저장 때 시트 전체를 다시 쓰는 경로는 제거했습니다.
+
 ## 1차 완성 범위
 
 - 대시보드
