@@ -1,16 +1,23 @@
-# Secrets & local env (never commit real credentials)
-.streamlit/secrets.toml
-.env
-*.json
+# Dependencies
+node_modules/
 
-# Python
+# Local env / secrets
+.env
+.env.*
+.streamlit/secrets.toml
+service-account*.json
+*-credentials.json
+secrets.json
+
+# Local mock DB
+dev-server/data.json
+dev-server/data.json.bak
+
+# Python leftovers
 __pycache__/
 *.py[cod]
-*$py.class
-*.egg-info/
 .venv/
 venv/
-env/
 
 # IDE / OS
 .idea/
@@ -18,6 +25,6 @@ env/
 .DS_Store
 Thumbs.db
 
-# Streamlit / local
+# Logs / cache
 .cache/
 *.log
