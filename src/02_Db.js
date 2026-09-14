@@ -1,11 +1,25 @@
 /**
- * Google Sheets store: batch getValues/setValues, LockService, CacheService.
+ * Google Sheets store: request memo, CacheService, incremental writes.
  */
 var LMS = LMS || {};
 
+var SHEET_STORE_ = null;
+var SERVICE_ = null;
+var SCHEMA_VERSION_ = 'lms-schema-v1';
+var ALLOW_CACHE_KEY_ = 'lms_allow_emails';
+var CACHE_TTL_ = 180;
+var CACHEABLE_TABLES_ = {
+  Settings: true,
+  Classes: true,
+  Students: true,
+  StudentClasses: true,
+  _Meta: true
+};
+
 function createSheetStore_() {
-  var CACHEABLE = { Settings: true, Classes: true };
-  var cacheTtl = 120;
+  var ssHandle = null;
+  var tableCache = {};
+  var snapshots = {};
 
   function cache() {
     try { return CacheService.getScriptCache(); } catch (e) { return null; }
@@ -15,14 +29,23 @@ function createSheetStore_() {
     return 'lms_table_' + name;
   }
 
+  function putCache(name, rows) {
+    if (!CACHEABLE_TABLES_[name]) return;
+    var c = cache();
+    if (!c) return;
+    try { c.put(cacheKey(name), JSON.stringify(rows || []), CACHE_TTL_); } catch (e) {}
+  }
+
   function invalidate(name) {
     var c = cache();
     if (!c) return;
-    if (name) c.remove(cacheKey(name));
-    else {
-      c.remove(cacheKey('Settings'));
-      c.remove(cacheKey('Classes'));
+    if (name) {
+      c.remove(cacheKey(name));
+      if (name === 'Settings') c.remove(ALLOW_CACHE_KEY_);
+      return;
     }
+    Object.keys(CACHEABLE_TABLES_).forEach(function (n) { c.remove(cacheKey(n)); });
+    c.remove(ALLOW_CACHE_KEY_);
   }
 
   function formatNow() {
@@ -41,6 +64,7 @@ function createSheetStore_() {
   }
 
   function getSpreadsheet() {
+    if (ssHandle) return ssHandle;
     var props = PropertiesService.getScriptProperties();
     var id = props.getProperty('SPREADSHEET_ID');
     var ss;
@@ -50,15 +74,17 @@ function createSheetStore_() {
       ss = SpreadsheetApp.create('수학의힘_LMS_DB');
       props.setProperty('SPREADSHEET_ID', ss.getId());
     }
-    ensureSchema_(ss);
+    if (props.getProperty('SCHEMA_VERSION') !== SCHEMA_VERSION_) {
+      ensureSchema_(ss);
+      props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION_);
+    }
+    ssHandle = ss;
     return ss;
   }
 
   function sheetByName(ss, name) {
     var sh = ss.getSheetByName(name);
-    if (!sh) {
-      sh = ss.insertSheet(name);
-    }
+    if (!sh) sh = ss.insertSheet(name);
     return sh;
   }
 
@@ -71,7 +97,7 @@ function createSheetStore_() {
       if (empty) {
         sh.getRange(1, 1, 1, headers.length).setValues([headers]);
         sh.setFrozenRows(1);
-        sh.getRange(1, 1, Math.max(sh.getMaxRows(), 2), headers.length).setNumberFormat('@');
+        sh.getRange(1, 1, 1, headers.length).setNumberFormat('@');
       }
     });
     seedDefaults_(ss);
@@ -100,9 +126,10 @@ function createSheetStore_() {
   }
 
   function readRows_(sh, headers) {
-    var range = sh.getDataRange();
-    var values = range.getValues();
-    if (!values.length) return [];
+    var lastRow = sh.getLastRow();
+    var lastCol = Math.max(sh.getLastColumn(), (headers || []).length || 1);
+    if (lastRow < 2) return [];
+    var values = sh.getRange(1, 1, lastRow, lastCol).getValues();
     var head = values[0].map(function (h) { return String(h); });
     var cols = headers || head;
     var out = [];
@@ -127,43 +154,82 @@ function createSheetStore_() {
       sh.getRange(2, 1, last - 1, headers.length).clearContent();
     }
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.getRange(1, 1, 1, headers.length).setNumberFormat('@');
     if (!rows.length) return;
-    var values = rows.map(function (row) {
-      return headers.map(function (h) {
-        var v = row[h];
-        return v === undefined || v === null ? '' : v;
-      });
+    var values = rows.map(function (row) { return LMS.rowValues(row, headers); });
+    var range = sh.getRange(2, 1, values.length, headers.length);
+    range.setNumberFormat('@');
+    range.setValues(values);
+  }
+
+  function applyDiff_(sh, headers, diff, prevCount) {
+    diff.updates.forEach(function (u) {
+      var range = sh.getRange(u.row, 1, 1, headers.length);
+      range.setNumberFormat('@');
+      range.setValues([u.values]);
     });
-    sh.getRange(2, 1, values.length, headers.length).setValues(values);
+    if (diff.appends.length) {
+      var start = (prevCount || 0) + 2;
+      var range = sh.getRange(start, 1, diff.appends.length, headers.length);
+      range.setNumberFormat('@');
+      range.setValues(diff.appends);
+    }
+  }
+
+  function cloneRows_(rows) {
+    return JSON.parse(JSON.stringify(rows || []));
   }
 
   function readTable(name) {
-    if (CACHEABLE[name]) {
+    if (Object.prototype.hasOwnProperty.call(tableCache, name)) {
+      return tableCache[name];
+    }
+    if (CACHEABLE_TABLES_[name]) {
       var c = cache();
       if (c) {
         var hit = c.get(cacheKey(name));
         if (hit) {
-          try { return JSON.parse(hit); } catch (e) {}
+          try {
+            var parsed = JSON.parse(hit);
+            tableCache[name] = parsed;
+            snapshots[name] = cloneRows_(parsed);
+            return parsed;
+          } catch (e) {}
         }
       }
     }
     var ss = getSpreadsheet();
     var sh = sheetByName(ss, name);
     var rows = readRows_(sh, LMS.TABLES[name]);
-    if (CACHEABLE[name]) {
-      var c2 = cache();
-      if (c2) {
-        try { c2.put(cacheKey(name), JSON.stringify(rows), cacheTtl); } catch (e2) {}
-      }
-    }
+    tableCache[name] = rows;
+    snapshots[name] = cloneRows_(rows);
+    putCache(name, rows);
     return rows;
   }
 
   function writeTable(name, rows) {
-    var ss = getSpreadsheet();
-    var sh = sheetByName(ss, name);
-    writeRows_(sh, LMS.TABLES[name], rows || []);
-    invalidate(name);
+    rows = rows || [];
+    var headers = LMS.TABLES[name];
+    var prev = snapshots[name];
+    var pk = LMS.TABLE_PK[name];
+    var diff = prev ? LMS.diffTableRows(prev, rows, pk, headers) : { needsFullRewrite: true };
+    var changed = diff.needsFullRewrite ||
+      (diff.updates && diff.updates.length) ||
+      (diff.appends && diff.appends.length);
+    if (changed) {
+      var sh = sheetByName(getSpreadsheet(), name);
+      if (diff.needsFullRewrite) writeRows_(sh, headers, rows);
+      else applyDiff_(sh, headers, diff, prev ? prev.length : 0);
+    }
+    tableCache[name] = rows;
+    snapshots[name] = cloneRows_(rows);
+    putCache(name, rows);
+    if (changed && name === 'Settings') {
+      var c = cache();
+      if (c) {
+        try { c.remove(ALLOW_CACHE_KEY_); } catch (e) {}
+      }
+    }
   }
 
   return {
@@ -193,6 +259,29 @@ function createSheetStore_() {
   };
 }
 
+function getSheetStore_() {
+  if (!SHEET_STORE_) SHEET_STORE_ = createSheetStore_();
+  return SHEET_STORE_;
+}
+
 function getService_() {
-  return LMS.createService(createSheetStore_());
+  if (!SERVICE_) SERVICE_ = LMS.createService(getSheetStore_());
+  return SERVICE_;
+}
+
+function cachedAllowedEmails_() {
+  var c = null;
+  try { c = CacheService.getScriptCache(); } catch (e) {}
+  if (c) {
+    var hit = c.get(ALLOW_CACHE_KEY_);
+    if (hit !== null && hit !== undefined) {
+      return hit === '*' ? '' : hit;
+    }
+  }
+  var allowed = '';
+  try { allowed = LMS.toStr(getService_().getSettings().allowed_emails); } catch (e2) {}
+  if (c) {
+    try { c.put(ALLOW_CACHE_KEY_, allowed ? allowed : '*', 300); } catch (e3) {}
+  }
+  return allowed;
 }

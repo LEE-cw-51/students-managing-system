@@ -7,6 +7,8 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 }
 
 LMS.createService = function (store) {
+  var memo = {};
+
   function now() {
     return store.now();
   }
@@ -17,11 +19,15 @@ LMS.createService = function (store) {
   }
 
   function table(name) {
-    return store.readTable(name) || [];
+    if (!Object.prototype.hasOwnProperty.call(memo, name)) {
+      memo[name] = store.readTable(name) || [];
+    }
+    return memo[name];
   }
 
   function saveTable(name, rows) {
     store.writeTable(name, rows);
+    memo[name] = rows || [];
   }
 
   function settings() {
@@ -203,7 +209,6 @@ LMS.createService = function (store) {
       var rows = table('Classes');
       rows.push(row);
       saveTable('Classes', rows);
-      if (store.invalidateCache) store.invalidateCache('Classes');
       return row;
     });
   }
@@ -220,7 +225,6 @@ LMS.createService = function (store) {
       });
       row.updated_at = now();
       saveTable('Classes', rows);
-      if (store.invalidateCache) store.invalidateCache('Classes');
       return row;
     });
   }
@@ -558,7 +562,6 @@ LMS.createService = function (store) {
         current[k] = map[k];
       });
       saveTable('Settings', LMS.settingsToRows(current));
-      if (store.invalidateCache) store.invalidateCache('Settings');
       return current;
     });
   }
@@ -654,12 +657,23 @@ LMS.createService = function (store) {
     };
   }
 
+  function getLookups() {
+    return {
+      classes: getClasses({}),
+      students: getStudents({})
+    };
+  }
+
   function getBootstrap() {
+    var today = store.today();
     return {
       settings: settings(),
       grades: LMS.GRADE_OPTIONS,
-      today: store.today(),
-      user_email: store.currentUserEmail ? store.currentUserEmail() : ''
+      today: today,
+      user_email: store.currentUserEmail ? store.currentUserEmail() : '',
+      classes: getClasses({}),
+      students: getStudents({}),
+      dashboard: getDashboard(today)
     };
   }
 
@@ -696,6 +710,7 @@ LMS.createService = function (store) {
     saveSetting: saveSetting,
     getDashboard: getDashboard,
     getClassStats: getClassStats,
+    getLookups: getLookups,
     getBootstrap: getBootstrap
   };
 };

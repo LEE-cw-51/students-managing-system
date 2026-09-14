@@ -1,4 +1,3 @@
-<script>
 (function () {
   var state = {
     settings: {},
@@ -25,22 +24,18 @@
 
   function api(name, args) {
     args = args || [];
-    if (window.__LMS_DEV__) {
-      return fetch('/api/' + name, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ args: args })
-      }).then(function (r) { return r.json(); }).then(unwrap);
-    }
-    return new Promise(function (resolve, reject) {
-      var runner = google.script.run
-        .withSuccessHandler(function (res) {
-          try { resolve(unwrap(res)); }
-          catch (e) { reject(e); }
-        })
-        .withFailureHandler(reject);
-      runner[name].apply(runner, args);
-    });
+    return fetch('/api/' + name, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ args: args })
+    }).then(function (r) {
+      if (r.status === 401) {
+        location.href = '/login';
+        throw new Error('로그인이 필요합니다.');
+      }
+      return r.json();
+    }).then(unwrap);
   }
 
   function applyBoot(boot) {
@@ -175,7 +170,7 @@
   function renderNav() {
     document.getElementById('nav').innerHTML = MENUS.map(function (m) {
       return '<a href="#/' + m.id + '" class="' + (state.route === m.id ? 'active' : '') + '">' + m.label + '</a>';
-    }).join('');
+    }).join('') + '<a href="/login" id="logout-link">로그아웃</a>';
     var title = (MENUS.filter(function (m) { return m.id === state.route; })[0] || {}).label || '학습관리';
     document.getElementById('page-title').textContent = title;
     document.getElementById('brand-name').textContent = state.settings.academy_name || '수학의 힘';
@@ -841,6 +836,14 @@
   document.getElementById('menu-btn').onclick = function () {
     document.getElementById('sidebar').classList.toggle('open');
   };
+  document.getElementById('nav').addEventListener('click', function (e) {
+    var a = e.target.closest('#logout-link');
+    if (!a) return;
+    e.preventDefault();
+    fetch('/api/logout', { method: 'POST', credentials: 'include' }).finally(function () {
+      location.href = '/login';
+    });
+  });
 
   document.getElementById('main').addEventListener('click', function (e) {
     var btn = e.target.closest('.edit-stu');
@@ -882,4 +885,3 @@
 
   window.addEventListener('hashchange', renderRoute);
 })();
-</script>

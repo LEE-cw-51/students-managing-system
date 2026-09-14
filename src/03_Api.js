@@ -3,8 +3,9 @@
  */
 function wrap_(fn) {
   try {
+    var api = getService_();
     assertAllowed_();
-    return { ok: true, data: fn(getService_()) };
+    return { ok: true, data: fn(api) };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : String(e) };
   }
@@ -16,11 +17,7 @@ function assertAllowed_() {
   try { email = (Session.getActiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
   try { owner = (Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e2) {}
   if (!email) email = owner;
-  var allowed = '';
-  try {
-    var settings = getService_().getSettings();
-    allowed = LMS.toStr(settings.allowed_emails);
-  } catch (e3) {}
+  var allowed = cachedAllowedEmails_();
   if (!allowed) return;
   var list = allowed.split(/[,;\s]+/).map(function (s) { return s.toLowerCase(); }).filter(Boolean);
   if (list.indexOf(email) === -1 && email !== owner) {
@@ -28,7 +25,20 @@ function assertAllowed_() {
   }
 }
 
+function apiBatch(calls) {
+  return wrap_(function (api) {
+    return (calls || []).map(function (c) {
+      var name = c && c.name;
+      if (!name || typeof api[name] !== 'function') {
+        throw new Error('알 수 없는 API입니다.');
+      }
+      return api[name].apply(api, c.args || []);
+    });
+  });
+}
+
 function getBootstrap() { return wrap_(function (api) { return api.getBootstrap(); }); }
+function getLookups() { return wrap_(function (api) { return api.getLookups(); }); }
 function getDashboard(date) { return wrap_(function (api) { return api.getDashboard(date); }); }
 
 function getStudents(filter) { return wrap_(function (api) { return api.getStudents(filter || {}); }); }

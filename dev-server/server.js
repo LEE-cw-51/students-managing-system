@@ -28,6 +28,8 @@ function renderIndex() {
   html = html.replace(/<\?!=\s*include\('([^']+)'\);\s*\?>/g, (_, name) => {
     return fs.readFileSync(path.join(SRC, name + '.html'), 'utf8');
   });
+  const boot = LMS.createService(store).getBootstrap();
+  html = html.replace('<?!= bootJson; ?>', JSON.stringify(boot).replace(/</g, '\\u003c'));
   html = html.replace('<head>', '<head>\n    <script>window.__LMS_DEV__ = true;</script>');
   return html;
 }
@@ -75,11 +77,21 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
       const name = url.pathname.slice(5);
       const api = LMS.createService(store);
+      const body = await readBody(req);
+      const args = Array.isArray(body.args) ? body.args : [];
+      if (name === 'apiBatch') {
+        const calls = args[0] || [];
+        const data = calls.map((c) => {
+          if (!c || typeof api[c.name] !== 'function') {
+            throw new Error('알 수 없는 API입니다.');
+          }
+          return api[c.name].apply(api, c.args || []);
+        });
+        return json(res, { ok: true, data });
+      }
       if (typeof api[name] !== 'function') {
         return json(res, { ok: false, error: '알 수 없는 API입니다.' });
       }
-      const body = await readBody(req);
-      const args = Array.isArray(body.args) ? body.args : [];
       const data = api[name].apply(api, args);
       return json(res, { ok: true, data });
     }
