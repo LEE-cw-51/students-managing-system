@@ -21,11 +21,10 @@ cp .env.example .env.local
 # DATABASE_URL, AUTH_SECRET, LMS_PASSWORD 를 채웁니다.
 
 npm test
-npm run seed
 npm run dev
 ```
 
-브라우저에서 `http://127.0.0.1:8787` 로 접속합니다. 로그인 비밀번호는 `LMS_PASSWORD`입니다.
+브라우저에서 `http://127.0.0.1:8787` 로 접속합니다. 로그인 비밀번호는 `LMS_PASSWORD`입니다. 샘플 데이터가 필요하면 `npm run seed` 를 한 번 실행하세요.
 
 ## 데이터베이스
 
