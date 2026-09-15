@@ -869,7 +869,7 @@
             return;
           }
           var summary = avg && avg.test_count
-            ? '<div class="card"><div class="grid stats">' +
+            ? '<div class="card"><div class="grid stats stats-2">' +
               stat('실시 테스트', avg.test_count) +
               stat('반 평균', avg.test_average_display) +
               '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산으로 평균합니다. 각 학생 보고서에 반 평균이 포함됩니다.</p></div>'
