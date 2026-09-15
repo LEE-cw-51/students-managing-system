@@ -239,6 +239,170 @@
     return '<div class="card stat"><h3>' + esc(label) + '</h3><b>' + esc(n) + '</b></div>';
   }
 
+  function shortDate(iso) {
+    var parts = String(iso || '').split('-');
+    if (parts.length !== 3) return iso || '';
+    return Number(parts[1]) + '/' + Number(parts[2]);
+  }
+
+  function classNameById(classId) {
+    var rows = state.cache.classes || [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].class_id === classId) return rows[i].class_name;
+    }
+    return classId || '-';
+  }
+
+  function assignmentLabel(code) {
+    var c = String(code || '').charAt(0).toUpperCase();
+    if (c !== 'A' && c !== 'B' && c !== 'C') return '-';
+    var range = (state.settings && state.settings['assignment_' + c]) || '';
+    return range ? c + '(' + range + ')' : c;
+  }
+
+  function concentrationLabel(v) {
+    if (!v) return '-';
+    if (v === 'ABSENT' || v === '결석') return '결석';
+    return String(v);
+  }
+
+  function formatScoreDisplay(lesson) {
+    if (!lesson || lesson.test_status !== '실시') return '미실시';
+    if (lesson.test_score == null || lesson.test_score === '' ||
+        lesson.test_max_score == null || lesson.test_max_score === '') {
+      return '미실시';
+    }
+    return lesson.test_score + ' / ' + lesson.test_max_score;
+  }
+
+  function normalizedScore(lesson) {
+    if (!lesson || lesson.test_status !== '실시') return null;
+    var s = Number(lesson.test_score);
+    var m = Number(lesson.test_max_score);
+    if (!isFinite(s) || !isFinite(m) || m <= 0) return null;
+    return (s / m) * 100;
+  }
+
+  function formatAverage(v) {
+    if (v === null || v === undefined || !isFinite(Number(v))) return '-';
+    return (Math.round(Number(v) * 10) / 10).toFixed(1);
+  }
+
+  function summarizeLessons(rows) {
+    var present = 0;
+    var absent = 0;
+    var scores = [];
+    (rows || []).forEach(function (row) {
+      if (row.attendance === '결석') absent += 1;
+      else present += 1;
+      var n = normalizedScore(row);
+      if (n !== null) scores.push(n);
+    });
+    var avg = scores.length ? scores.reduce(function (a, b) { return a + b; }, 0) / scores.length : null;
+    return {
+      total_lessons: (rows || []).length,
+      present_count: present,
+      absent_count: absent,
+      test_count: scores.length,
+      test_average_display: formatAverage(avg),
+      test_high_display: scores.length ? formatAverage(Math.max.apply(null, scores)) : '-',
+      test_low_display: scores.length ? formatAverage(Math.min.apply(null, scores)) : '-'
+    };
+  }
+
+  function svgLineChart(points, opts) {
+    opts = opts || {};
+    if (!points.length) {
+      return '<div class="empty">' + esc(opts.empty || '표시할 데이터가 없습니다.') + '</div>';
+    }
+    var w = Math.max(520, points.length * 72);
+    var h = 220;
+    var padL = 40;
+    var padR = 16;
+    var padT = 22;
+    var padB = 36;
+    var innerW = w - padL - padR;
+    var innerH = h - padT - padB;
+    function xAt(i) {
+      if (points.length === 1) return padL + innerW / 2;
+      return padL + (i / (points.length - 1)) * innerW;
+    }
+    function yAt(v) {
+      return padT + (1 - (Number(v) / 100)) * innerH;
+    }
+    var grid = [0, 25, 50, 75, 100].map(function (tick) {
+      var y = yAt(tick);
+      return '<line class="chart-grid-line" x1="' + padL + '" y1="' + y + '" x2="' + (w - padR) + '" y2="' + y + '" />' +
+        '<text class="chart-axis" x="' + (padL - 8) + '" y="' + (y + 4) + '" text-anchor="end">' + tick + '</text>';
+    }).join('');
+    var d = points.map(function (p, i) {
+      return (i === 0 ? 'M' : 'L') + xAt(i).toFixed(1) + ' ' + yAt(p.y).toFixed(1);
+    }).join(' ');
+    var dots = points.map(function (p, i) {
+      return '<circle class="chart-dot" cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(p.y).toFixed(1) + '" r="4" />' +
+        '<text class="chart-value" x="' + xAt(i).toFixed(1) + '" y="' + (yAt(p.y) - 10).toFixed(1) + '" text-anchor="middle">' +
+        esc(p.label) + '</text>' +
+        '<text class="chart-axis" x="' + xAt(i).toFixed(1) + '" y="' + (h - 12) + '" text-anchor="middle">' +
+        esc(p.xLabel) + '</text>';
+    }).join('');
+    return '<div class="chart-wrap"><svg class="chart-svg" viewBox="0 0 ' + w + ' ' + h +
+      '" role="img" aria-label="' + esc(opts.title || '차트') + '">' +
+      grid + '<path class="chart-line" d="' + d + '" fill="none" />' + dots + '</svg></div>';
+  }
+
+  function gradeInfo(kind, value) {
+    if (kind === 'assignment') {
+      if (value === 'A' || value === 'B' || value === 'C') {
+        return { rank: value === 'A' ? 3 : value === 'B' ? 2 : 1, max: 3, label: value };
+      }
+      return null;
+    }
+    var v = value === '결석' ? 'ABSENT' : value;
+    if (v === 'A') return { rank: 4, max: 4, label: 'A' };
+    if (v === 'B') return { rank: 3, max: 4, label: 'B' };
+    if (v === 'C') return { rank: 2, max: 4, label: 'C' };
+    if (v === 'D') return { rank: 1, max: 4, label: 'D' };
+    if (v === 'ABSENT') return { rank: 0, max: 4, label: '결석', absent: true };
+    return null;
+  }
+
+  function svgGradeChart(rows, kind, opts) {
+    opts = opts || {};
+    var points = [];
+    (rows || []).forEach(function (row) {
+      var raw = kind === 'assignment' ? row.assignment_completion : row.concentration;
+      var g = gradeInfo(kind, raw);
+      if (!g) return;
+      points.push({ xLabel: shortDate(row.lesson_date), grade: g });
+    });
+    if (!points.length) {
+      return '<div class="empty">' + esc(opts.empty || '표시할 데이터가 없습니다.') + '</div>';
+    }
+    var w = Math.max(520, points.length * 56);
+    var h = 180;
+    var padL = 16;
+    var padR = 16;
+    var padT = 24;
+    var padB = 36;
+    var innerH = h - padT - padB;
+    var slot = (w - padL - padR) / points.length;
+    var barW = Math.min(28, slot * 0.5);
+    var bars = points.map(function (p, i) {
+      var cx = padL + (i + 0.5) * slot;
+      var height = p.grade.absent ? 12 : (p.grade.rank / p.grade.max) * innerH;
+      var y = padT + innerH - height;
+      var cls = p.grade.absent ? 'chart-bar absent' : 'chart-bar grade-' + p.grade.label;
+      return '<rect class="' + cls + '" x="' + (cx - barW / 2).toFixed(1) + '" y="' + y.toFixed(1) +
+        '" width="' + barW.toFixed(1) + '" height="' + height.toFixed(1) + '" rx="4" />' +
+        '<text class="chart-value" x="' + cx.toFixed(1) + '" y="' + (y - 6).toFixed(1) +
+        '" text-anchor="middle">' + esc(p.grade.label) + '</text>' +
+        '<text class="chart-axis" x="' + cx.toFixed(1) + '" y="' + (h - 12) +
+        '" text-anchor="middle">' + esc(p.xLabel) + '</text>';
+    }).join('');
+    return '<div class="chart-wrap"><svg class="chart-svg" viewBox="0 0 ' + w + ' ' + h +
+      '" role="img" aria-label="' + esc(opts.title || '차트') + '">' + bars + '</svg></div>';
+  }
+
   function renderToday(root) {
     spinner(root);
     loadLookups().then(function () {
@@ -470,7 +634,8 @@
 
   function renderStudentDetail(root, id) {
     spinner(root);
-    api('getStudent', [id]).then(function (s) {
+    Promise.all([api('getStudent', [id]), loadLookups()]).then(function (pair) {
+      var s = pair[0];
       var current = (s.current_classes || []).map(function (c) { return c.class_name; }).join(', ') || '-';
       root.innerHTML =
         '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(s.name) + '</h2><button class="btn secondary" id="edit-one">수정</button></div>' +
@@ -481,10 +646,11 @@
           '<button class="btn" id="move-stu">반 변경</button></div>' +
         '<h3>반 이동 이력</h3>' + historyTable(s.class_history) +
         '</div>' +
-        '<div class="card"><div class="row">' +
+        '<div class="card"><div class="toolbar"><h3 style="margin:0">수업 기록</h3></div><div class="row">' +
           field('기간', select('period', [{ value: 'week', label: '이번 주' }, { value: 'month', label: '이번 달' }, { value: '3m', label: '최근 3개월' }, { value: 'custom', label: '직접 선택' }], 'month')) +
           field('시작', input('start', '', 'date')) + field('끝', input('end', '', 'date')) +
-          '<button class="btn secondary" id="load-lessons">조회</button></div><div id="lesson-hist"></div></div>';
+          '<button class="btn secondary" id="load-lessons">조회</button></div></div>' +
+        '<div id="lesson-hist"></div>';
       document.getElementById('edit-one').onclick = function () { showStudentForm(s); };
       document.getElementById('move-stu').onclick = function () {
         api('moveStudent', [{ student_id: s.student_id, class_id: root.querySelector('[name=move_class]').value, start_date: root.querySelector('[name=move_date]').value }])
@@ -499,10 +665,46 @@
       function loadHist() {
         var range = lessonRange(root);
         api('getStudentLessons', [s.student_id, range.start, range.end]).then(function (rows) {
-          document.getElementById('lesson-hist').innerHTML = lessonTable(rows);
+          var ordered = (rows || []).slice().sort(function (a, b) {
+            return String(a.lesson_date || '').localeCompare(String(b.lesson_date || ''));
+          });
+          document.getElementById('lesson-hist').innerHTML = studentLessonHistory(ordered);
         }).catch(function (e) { toast(e.message, true); });
       }
     }).catch(fail(root));
+  }
+
+  function studentLessonHistory(rows) {
+    if (!rows.length) return '<div class="card empty">수업 기록이 없습니다.</div>';
+    var stats = summarizeLessons(rows);
+    var tests = rows.map(function (l) {
+      var y = normalizedScore(l);
+      if (y === null) return null;
+      return { xLabel: shortDate(l.lesson_date), y: y, label: formatAverage(y) };
+    }).filter(Boolean);
+    return '<div class="grid stats">' +
+      stat('수업', stats.total_lessons) +
+      stat('출석', stats.present_count) +
+      stat('결석', stats.absent_count) +
+      stat('테스트 평균', stats.test_average_display) +
+    '</div>' +
+    '<div class="grid chart-grid">' +
+      '<div class="card"><h3 style="margin-top:0">테스트 점수 추이</h3>' +
+        '<p class="muted">100점 환산 · 실시한 날만 표시합니다.</p>' +
+        svgLineChart(tests, { title: '테스트 점수 추이', empty: '실시된 테스트가 없습니다.' }) +
+        (stats.test_count
+          ? '<p class="muted">실시 ' + stats.test_count + '회 · 최고 ' + stats.test_high_display +
+            ' · 최저 ' + stats.test_low_display + '</p>'
+          : '') +
+      '</div>' +
+      '<div class="card"><h3 style="margin-top:0">과제 이행률 · 집중도</h3>' +
+        '<p class="muted">과제 이행률</p>' +
+        svgGradeChart(rows, 'assignment', { title: '과제 이행률', empty: '과제 이행률 기록이 없습니다.' }) +
+        '<p class="muted">집중도</p>' +
+        svgGradeChart(rows, 'concentration', { title: '집중도', empty: '집중도 기록이 없습니다.' }) +
+      '</div>' +
+    '</div>' +
+    '<div class="card"><h3 style="margin-top:0">수업 기록 (시간 순)</h3>' + lessonTable(rows) + '</div>';
   }
 
   function lessonRange(root) {
@@ -531,13 +733,18 @@
 
   function lessonTable(rows) {
     if (!rows.length) return '<div class="empty">수업 기록이 없습니다.</div>';
-    return '<table><thead><tr><th>날짜</th><th>출석</th><th>테스트</th><th>과제</th><th>집중도</th><th>진도</th><th>특이사항</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table><thead><tr>' +
+      '<th>날짜</th><th>반</th><th>출석</th><th>테스트</th><th>난이도</th><th>과제 이행률</th><th>집중도</th><th>진도</th><th>과제 안내</th><th>특이사항</th>' +
+      '</tr></thead><tbody>' +
       rows.map(function (l) {
-        var test = l.test_status === '실시' ? (l.test_score + ' / ' + l.test_max_score) : '미실시';
-        return '<tr><td>' + esc(l.lesson_date) + '</td><td>' + esc(l.attendance) + '</td><td>' + esc(test) + '</td><td>' +
-          esc(l.assignment_completion || '-') + '</td><td>' + esc(l.concentration === 'ABSENT' ? '결석' : (l.concentration || '-')) +
-          '</td><td>' + esc(l.progress) + '</td><td>' + esc(l.special_note) + '</td></tr>';
-      }).join('') + '</tbody></table>';
+        var diff = l.test_status === '실시' ? (l.test_difficulty || '-') : '-';
+        return '<tr><td>' + esc(l.lesson_date) + '</td><td>' + esc(classNameById(l.class_id)) +
+          '</td><td>' + esc(l.attendance || '-') + '</td><td>' + esc(formatScoreDisplay(l)) +
+          '</td><td>' + esc(diff) + '</td><td>' + esc(assignmentLabel(l.assignment_completion)) +
+          '</td><td>' + esc(concentrationLabel(l.concentration)) +
+          '</td><td class="cell-pre">' + esc(l.progress) + '</td><td class="cell-pre">' + esc(l.homework) +
+          '</td><td class="cell-pre">' + esc(l.special_note) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
 
   function renderClasses(root) {
@@ -654,12 +861,20 @@
       document.getElementById('load-daily').onclick = function () {
         var date = root.querySelector('[name=date]').value;
         var cid = root.querySelector('[name=class_id]').value;
-        api('generateDailyReports', [date, cid]).then(function (rows) {
+        api('generateDailyReports', [date, cid]).then(function (res) {
+          var rows = (res && res.reports) || [];
+          var avg = res && res.class_test_average;
           if (!rows.length) {
             document.getElementById('daily-list').innerHTML = '<div class="card empty">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</div>';
             return;
           }
-          document.getElementById('daily-list').innerHTML = rows.map(function (r, i) {
+          var summary = avg && avg.test_count
+            ? '<div class="card"><div class="grid stats stats-2">' +
+              stat('실시 테스트', avg.test_count) +
+              stat('반 평균', avg.test_average_display) +
+              '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산으로 평균합니다. 각 학생 보고서에 반 평균이 포함됩니다.</p></div>'
+            : '<div class="card"><p class="muted" style="margin:0">이날 실시된 테스트가 없어 반 평균은 표시하지 않습니다.</p></div>';
+          document.getElementById('daily-list').innerHTML = summary + rows.map(function (r, i) {
             return '<div class="card report-card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +
               '<div><button class="btn secondary copy-btn" data-i="' + i + '">복사</button> <button class="btn ghost sel-btn" data-i="' + i + '">전체 선택</button></div></div>' +
               '<textarea class="preview" id="rep-' + i + '">' + esc(r.text) + '</textarea></div>';

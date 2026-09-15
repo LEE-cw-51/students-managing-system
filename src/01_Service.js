@@ -466,23 +466,31 @@ LMS.createService = function (store) {
   function generateDailyReport(lessonId) {
     var lesson = getLesson(lessonId);
     var student = requireStudent(lesson.student_id);
-    var text = LMS.buildDailyReport(lesson, student, settings());
-    return { lesson: lesson, student: student, text: text };
+    var classAvg = LMS.computeDailyClassTestAverage(getLessons(lesson.lesson_date, lesson.class_id));
+    var text = LMS.buildDailyReport(lesson, student, settings(), classAvg);
+    return { lesson: lesson, student: student, text: text, class_test_average: classAvg };
   }
 
   function generateDailyReports(date, classId) {
     var lessons = getLessons(date, classId);
     var set = settings();
     var students = table('Students');
-    return lessons.map(function (lesson) {
+    var classAvg = LMS.computeDailyClassTestAverage(lessons);
+    var reports = lessons.map(function (lesson) {
       var student = LMS.findById(students, 'student_id', lesson.student_id) || { name: '학생' };
       return {
         lesson_id: lesson.lesson_id,
         student_id: lesson.student_id,
         student_name: student.name,
-        text: LMS.buildDailyReport(lesson, student, set)
+        text: LMS.buildDailyReport(lesson, student, set, classAvg)
       };
+    }).sort(function (a, b) {
+      return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
     });
+    return {
+      class_test_average: classAvg,
+      reports: reports
+    };
   }
 
   function getMonthlyStats(studentId, year, month) {
