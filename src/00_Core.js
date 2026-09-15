@@ -190,6 +190,33 @@ LMS.formatAverageDisplay = function (avg) {
   return (Math.round(Number(avg) * 10) / 10).toFixed(1);
 };
 
+LMS.collectNormalizedScores = function (lessons) {
+  var scores = [];
+  (lessons || []).forEach(function (row) {
+    if (LMS.toStr(row.test_status) !== '실시') return;
+    var n = LMS.normalizedScore(row.test_score, row.test_max_score);
+    if (n !== null) scores.push(n);
+  });
+  return scores;
+};
+
+LMS.averageOf = function (values) {
+  if (!values || !values.length) return null;
+  var sum = 0;
+  values.forEach(function (v) { sum += v; });
+  return sum / values.length;
+};
+
+LMS.computeDailyClassTestAverage = function (lessons) {
+  var scores = LMS.collectNormalizedScores(lessons);
+  var avg = LMS.averageOf(scores);
+  return {
+    test_count: scores.length,
+    test_average: avg,
+    test_average_display: LMS.formatAverageDisplay(avg)
+  };
+};
+
 LMS.assignmentCode = function (v) {
   var s = LMS.toStr(v).toUpperCase();
   if (!s) return '';
@@ -247,12 +274,8 @@ LMS.collectSpecialNotes = function (lessons) {
   return notes;
 };
 
-LMS.computeMonthlyStats = function (lessons, studentId, year, month) {
-  var range = LMS.monthRange(year, month);
-  var rows = (lessons || []).filter(function (row) {
-    return LMS.toStr(row.student_id) === LMS.toStr(studentId) &&
-      LMS.inRange(row.lesson_date, range.start, range.end);
-  }).sort(function (a, b) {
+LMS.summarizeLessonStats = function (lessons) {
+  var rows = (lessons || []).slice().sort(function (a, b) {
     return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
   });
 
@@ -279,21 +302,11 @@ LMS.computeMonthlyStats = function (lessons, studentId, year, month) {
     if (conc[cv] !== undefined) conc[cv] += 1;
   });
 
-  var avg = null;
-  var high = null;
-  var low = null;
-  if (scores.length) {
-    var sum = 0;
-    scores.forEach(function (s) { sum += s; });
-    avg = sum / scores.length;
-    high = Math.max.apply(null, scores);
-    low = Math.min.apply(null, scores);
-  }
+  var avg = LMS.averageOf(scores);
+  var high = scores.length ? Math.max.apply(null, scores) : null;
+  var low = scores.length ? Math.min.apply(null, scores) : null;
 
   return {
-    student_id: studentId,
-    year: Number(year),
-    month: Number(month),
     total_lessons: rows.length,
     present_count: present,
     absent_count: absent,
@@ -317,6 +330,19 @@ LMS.computeMonthlyStats = function (lessons, studentId, year, month) {
   };
 };
 
+LMS.computeMonthlyStats = function (lessons, studentId, year, month) {
+  var range = LMS.monthRange(year, month);
+  var rows = (lessons || []).filter(function (row) {
+    return LMS.toStr(row.student_id) === LMS.toStr(studentId) &&
+      LMS.inRange(row.lesson_date, range.start, range.end);
+  });
+  return Object.assign(LMS.summarizeLessonStats(rows), {
+    student_id: studentId,
+    year: Number(year),
+    month: Number(month)
+  });
+};
+
 LMS.concentrationSummary = function (stats) {
   var a = stats.concentration_A || 0;
   var b = stats.concentration_B || 0;
@@ -328,7 +354,21 @@ LMS.concentrationSummary = function (stats) {
   return '수업 집중도에 기복이 있었습니다.';
 };
 
-LMS.buildDailyReport = function (lesson, student, settings) {
+LMS.formatDailyTestLine = function (lesson, classAvg) {
+  lesson = lesson || {};
+  var testLine = LMS.formatScoreDisplay(lesson.test_status, lesson.test_score, lesson.test_max_score);
+  var extras = [];
+  if (LMS.toStr(lesson.test_status) === '실시' && LMS.toStr(lesson.test_difficulty)) {
+    extras.push('난이도: ' + lesson.test_difficulty);
+  }
+  if (classAvg && classAvg.test_count) {
+    extras.push('반 평균 ' + classAvg.test_average_display + '점');
+  }
+  if (extras.length) testLine += ' (' + extras.join(', ') + ')';
+  return testLine;
+};
+
+LMS.buildDailyReport = function (lesson, student, settings, classAvg) {
   settings = settings || {};
   student = student || {};
   lesson = lesson || {};
@@ -337,11 +377,6 @@ LMS.buildDailyReport = function (lesson, student, settings) {
   var teacher = settings.teacher_name || LMS.DEFAULT_SETTINGS.teacher_name;
   var contact = settings.contact || LMS.DEFAULT_SETTINGS.contact;
   var name = student.name || '학생';
-
-  var testLine = LMS.formatScoreDisplay(lesson.test_status, lesson.test_score, lesson.test_max_score);
-  if (LMS.toStr(lesson.test_status) === '실시' && LMS.toStr(lesson.test_difficulty)) {
-    testLine += ' (난이도: ' + lesson.test_difficulty + ')';
-  }
 
   var homework = LMS.toStr(lesson.homework);
   var hwLines = homework
@@ -357,16 +392,18 @@ LMS.buildDailyReport = function (lesson, student, settings) {
     greeting,
     '오늘 ' + name + ' 학생 학습 알림입니다.',
     '',
-    '1. 테스트: ' + testLine,
-    '2. 과제이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings),
-    '3. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'),
-    '4. 과제 안내:',
+    '1. 출석: ' + (LMS.toStr(lesson.attendance) || '-'),
+    '2. 테스트: ' + LMS.formatDailyTestLine(lesson, classAvg),
+    '3. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings),
+    '4. 집중도: ' + LMS.concentrationLabel(lesson.concentration),
+    '5. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'),
+    '6. 과제 안내:',
     hwLines
   ];
 
   var note = LMS.toStr(lesson.special_note);
   if (note) {
-    lines.push('5. 특이사항: ' + note);
+    lines.push('7. 특이사항: ' + note);
   }
 
   lines.push('');

@@ -142,21 +142,65 @@ describe('reports and stats', () => {
   it('builds daily reports from lessons and settings', () => {
     const api = svc();
     const seeded = seedDemo(api);
+    const batch = api.generateDailyReports('2026-09-14', seeded.class.class_id);
+    assert.equal(batch.class_test_average.test_count, 2);
+    assert.equal(batch.class_test_average.test_average, 95);
+    assert.equal(batch.class_test_average.test_average_display, '95.0');
+    assert.deepEqual(batch.reports.map((r) => r.student_name), ['김철수', '이영희', '홍길동']);
+
     const undone = api.getTodayClassSession('2026-09-14', seeded.class.class_id)
       .students.find((s) => s.name === '김철수');
     const text = api.generateDailyReport(undone.lesson.lesson_id).text;
     assert.match(text, /2026년 9월 14일 월요일/);
     assert.match(text, /김철수 학생/);
-    assert.match(text, /1\. 테스트: 미실시/);
-    assert.match(text, /A\(100~90%\)|B\(89~70%\)/);
+    assert.match(text, /1\. 출석: 출석/);
+    assert.match(text, /2\. 테스트: 미실시 \(반 평균 95\.0점\)/);
+    assert.match(text, /3\. 과제 이행률: B\(89~70%\)/);
+    assert.match(text, /4\. 집중도: B/);
+    assert.match(text, /5\. 학습 진도:/);
+    assert.match(text, /6\. 과제 안내:/);
+    assert.doesNotMatch(text, /과제이행률/);
     assert.doesNotMatch(text, /NaN|undefined|null|#DIV\/0!/);
 
     const hong = api.getTodayClassSession('2026-09-14', seeded.class.class_id)
       .students.find((s) => s.name === '홍길동');
     const t2 = api.generateDailyReport(hong.lesson.lesson_id).text;
     assert.match(t2, /18 \/ 20/);
-    assert.match(t2, /난이도: 중/);
-    assert.match(t2, /계산 실수가 잦음/);
+    assert.match(t2, /난이도: 중, 반 평균 95\.0점/);
+    assert.match(t2, /4\. 집중도: A/);
+    assert.match(t2, /7\. 특이사항: 계산 실수가 잦음/);
+  });
+
+  it('omits class average from daily reports when no tests were taken', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'B반' });
+    const s = api.createStudent({ name: '박민수', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-14',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '결석',
+      test_status: '미실시',
+      concentration: 'ABSENT'
+    });
+    const batch = api.generateDailyReports('2026-09-14', c.class_id);
+    assert.equal(batch.class_test_average.test_count, 0);
+    assert.equal(batch.class_test_average.test_average_display, '-');
+    assert.match(batch.reports[0].text, /1\. 출석: 결석/);
+    assert.match(batch.reports[0].text, /2\. 테스트: 미실시/);
+    assert.doesNotMatch(batch.reports[0].text, /반 평균/);
+    assert.match(batch.reports[0].text, /4\. 집중도: 결석/);
+  });
+
+  it('averages daily class tests after normalizing different max scores', () => {
+    const avg = LMS.computeDailyClassTestAverage([
+      { test_status: '실시', test_score: 18, test_max_score: 20 },
+      { test_status: '실시', test_score: 40, test_max_score: 50 },
+      { test_status: '미실시', test_score: 0, test_max_score: 20 }
+    ]);
+    assert.equal(avg.test_count, 2);
+    assert.equal(avg.test_average, 85);
+    assert.equal(avg.test_average_display, '85.0');
   });
 
   it('collapses repeated progress in monthly reports', () => {
