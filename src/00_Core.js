@@ -207,15 +207,49 @@ LMS.averageOf = function (values) {
   return sum / values.length;
 };
 
-LMS.computeDailyClassTestAverage = function (lessons) {
-  var scores = LMS.collectNormalizedScores(lessons);
-  var avg = LMS.averageOf(scores);
+LMS.median = function (values) {
+  if (!values || !values.length) return null;
+  var sorted = values.slice().sort(function (a, b) { return a - b; });
+  var mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[mid];
+  return (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+LMS.computeScoreStats = function (scores) {
+  var list = scores || [];
+  var avg = LMS.averageOf(list);
+  var med = LMS.median(list);
+  var high = list.length ? Math.max.apply(null, list) : null;
+  var low = list.length ? Math.min.apply(null, list) : null;
   return {
-    test_count: scores.length,
-    test_average: avg,
-    test_average_display: LMS.formatAverageDisplay(avg)
+    count: list.length,
+    average: avg,
+    median: med,
+    high: high,
+    low: low,
+    average_display: LMS.formatAverageDisplay(avg),
+    median_display: LMS.formatAverageDisplay(med),
+    high_display: LMS.formatAverageDisplay(high),
+    low_display: LMS.formatAverageDisplay(low)
   };
 };
+
+LMS.computeDailyClassTestAverage = function (lessons) {
+  var stats = LMS.computeScoreStats(LMS.collectNormalizedScores(lessons));
+  return {
+    test_count: stats.count,
+    test_average: stats.average,
+    test_median: stats.median,
+    test_high: stats.high,
+    test_low: stats.low,
+    test_average_display: stats.average_display,
+    test_median_display: stats.median_display,
+    test_high_display: stats.high_display,
+    test_low_display: stats.low_display
+  };
+};
+
+LMS.computeClassSessionTestStats = LMS.computeDailyClassTestAverage;
 
 LMS.assignmentCode = function (v) {
   var s = LMS.toStr(v).toUpperCase();
@@ -302,18 +336,17 @@ LMS.summarizeLessonStats = function (lessons) {
     if (conc[cv] !== undefined) conc[cv] += 1;
   });
 
-  var avg = LMS.averageOf(scores);
-  var high = scores.length ? Math.max.apply(null, scores) : null;
-  var low = scores.length ? Math.min.apply(null, scores) : null;
+  var scoreStats = LMS.computeScoreStats(scores);
 
   return {
     total_lessons: rows.length,
     present_count: present,
     absent_count: absent,
-    test_count: scores.length,
-    test_average: avg,
-    test_high: high,
-    test_low: low,
+    test_count: scoreStats.count,
+    test_average: scoreStats.average,
+    test_median: scoreStats.median,
+    test_high: scoreStats.high,
+    test_low: scoreStats.low,
     assignment_A: assign.A,
     assignment_B: assign.B,
     assignment_C: assign.C,
@@ -324,9 +357,10 @@ LMS.summarizeLessonStats = function (lessons) {
     concentration_ABSENT: conc.ABSENT,
     progress_summary: LMS.uniqProgress(rows),
     special_notes: LMS.collectSpecialNotes(rows),
-    test_average_display: LMS.formatAverageDisplay(avg),
-    test_high_display: LMS.formatAverageDisplay(high),
-    test_low_display: LMS.formatAverageDisplay(low)
+    test_average_display: scoreStats.average_display,
+    test_median_display: scoreStats.median_display,
+    test_high_display: scoreStats.high_display,
+    test_low_display: scoreStats.low_display
   };
 };
 
@@ -354,21 +388,24 @@ LMS.concentrationSummary = function (stats) {
   return '수업 집중도에 기복이 있었습니다.';
 };
 
-LMS.formatDailyTestLine = function (lesson, classAvg) {
+LMS.formatDailyTestLine = function (lesson) {
   lesson = lesson || {};
   var testLine = LMS.formatScoreDisplay(lesson.test_status, lesson.test_score, lesson.test_max_score);
-  var extras = [];
   if (LMS.toStr(lesson.test_status) === '실시' && LMS.toStr(lesson.test_difficulty)) {
-    extras.push('난이도: ' + lesson.test_difficulty);
+    testLine += ' (난이도: ' + lesson.test_difficulty + ')';
   }
-  if (classAvg && classAvg.test_count) {
-    extras.push('반 평균 ' + classAvg.test_average_display + '점');
-  }
-  if (extras.length) testLine += ' (' + extras.join(', ') + ')';
   return testLine;
 };
 
-LMS.buildDailyReport = function (lesson, student, settings, classAvg) {
+LMS.formatClassTestStatsLine = function (classStats) {
+  if (!classStats || !classStats.test_count) return '';
+  return '(반 평균 ' + classStats.test_average_display +
+    ' · 중간값 ' + classStats.test_median_display +
+    ' · 최고 ' + classStats.test_high_display +
+    ' · 최저 ' + classStats.test_low_display + ')';
+};
+
+LMS.buildDailyReport = function (lesson, student, settings, classStats) {
   settings = settings || {};
   student = student || {};
   lesson = lesson || {};
@@ -393,13 +430,18 @@ LMS.buildDailyReport = function (lesson, student, settings, classAvg) {
     '오늘 ' + name + ' 학생 학습 알림입니다.',
     '',
     '1. 출석: ' + (LMS.toStr(lesson.attendance) || '-'),
-    '2. 테스트: ' + LMS.formatDailyTestLine(lesson, classAvg),
-    '3. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings),
-    '4. 집중도: ' + LMS.concentrationLabel(lesson.concentration),
-    '5. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'),
-    '6. 과제 안내:',
-    hwLines
+    '2. 테스트: ' + LMS.formatDailyTestLine(lesson)
   ];
+
+  if (LMS.toStr(lesson.test_status) === '실시' && classStats && classStats.test_count) {
+    lines.push('   ' + LMS.formatClassTestStatsLine(classStats));
+  }
+
+  lines.push('3. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings));
+  lines.push('4. 집중도: ' + LMS.concentrationLabel(lesson.concentration));
+  lines.push('5. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'));
+  lines.push('6. 과제 안내:');
+  lines.push(hwLines);
 
   var note = LMS.toStr(lesson.special_note);
   if (note) {
@@ -427,8 +469,8 @@ LMS.buildMonthlyReport = function (stats, student, settings) {
 
   if (stats.test_count) {
     lines.push('테스트는 ' + stats.test_count + '회 실시되었고, 평균은 ' +
-      stats.test_average_display + '점입니다. (최고 ' + stats.test_high_display +
-      '점, 최저 ' + stats.test_low_display + '점)');
+      stats.test_average_display + '점입니다. (중간값 ' + stats.test_median_display +
+      '점, 최고 ' + stats.test_high_display + '점, 최저 ' + stats.test_low_display + '점)');
   } else {
     lines.push('이번 달 실시된 테스트는 없습니다.');
   }
