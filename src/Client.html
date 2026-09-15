@@ -659,12 +659,22 @@
       document.getElementById('load-daily').onclick = function () {
         var date = root.querySelector('[name=date]').value;
         var cid = root.querySelector('[name=class_id]').value;
-        api('generateDailyReports', [date, cid]).then(function (rows) {
+        api('generateDailyReports', [date, cid]).then(function (res) {
+          var rows = (res && res.reports) || [];
+          var avg = res && res.class_test_average;
           if (!rows.length) {
             document.getElementById('daily-list').innerHTML = '<div class="card empty">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</div>';
             return;
           }
-          document.getElementById('daily-list').innerHTML = rows.map(function (r, i) {
+          var summary = avg && avg.test_count
+            ? '<div class="card"><div class="grid stats stats-4">' +
+              stat('실시 테스트', avg.test_count) +
+              stat('반 평균', avg.test_average_display) +
+              stat('중간값', avg.test_median_display) +
+              stat('최고/최저', avg.test_high_display + ' / ' + avg.test_low_display) +
+              '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산합니다. 실시한 학생 보고서에 반 통계 한 줄이 포함됩니다.</p></div>'
+            : '<div class="card"><p class="muted" style="margin:0">이날 실시된 테스트가 없어 반 통계는 표시하지 않습니다.</p></div>';
+          document.getElementById('daily-list').innerHTML = summary + rows.map(function (r, i) {
             return '<div class="card report-card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +
               '<div><button class="btn secondary copy-btn" data-i="' + i + '">복사</button> <button class="btn ghost sel-btn" data-i="' + i + '">전체 선택</button></div></div>' +
               '<textarea class="preview" id="rep-' + i + '">' + esc(r.text) + '</textarea></div>';
@@ -716,6 +726,9 @@
             '<div class="grid stats">' +
               stat('수업', s.total_lessons) + stat('출석', s.present_count) +
               stat('결석', s.absent_count) + stat('테스트 평균', s.test_average_display) +
+              stat('중간값', s.test_median_display) +
+              stat('최고', s.test_high_display) +
+              stat('최저', s.test_low_display) +
             '</div>' +
             '<div class="card" style="margin-top:14px"><p>과제 A ' + s.assignment_A + ' · B ' + s.assignment_B + ' · C ' + s.assignment_C +
             ' / 집중도 A ' + s.concentration_A + ' B ' + s.concentration_B + ' C ' + s.concentration_C + ' D ' + s.concentration_D + '</p>' +
@@ -771,7 +784,9 @@
           api('getMonthlyStats', [sid, y, m]).then(function (s) {
             document.getElementById('stats-body').innerHTML = '<div class="grid stats">' +
               stat('수업', s.total_lessons) + stat('출석', s.present_count) + stat('결석', s.absent_count) +
-              stat('평균', s.test_average_display) + '</div>' +
+              stat('평균', s.test_average_display) +
+              stat('중간값', s.test_median_display) +
+              '</div>' +
               '<div class="card" style="margin-top:14px"><p>최고 ' + esc(s.test_high_display) + ' / 최저 ' + esc(s.test_low_display) +
               '</p><p>진도 ' + esc(s.progress_summary || '-') + '</p></div>';
           }).catch(function (e) { toast(e.message, true); });
