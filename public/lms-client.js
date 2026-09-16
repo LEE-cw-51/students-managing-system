@@ -234,10 +234,10 @@
           '<span><i class="cal-dot class-makeup"></i>반 보강</span>' +
           '<span><i class="cal-dot student-makeup"></i>개인 보강</span>' +
         '</div>' +
+        '<div id="makeup-form"></div>' +
         '<p class="muted" id="cal-label"></p>' +
         '<div id="cal-body"><div class="empty">달력을 불러오는 중...</div></div>' +
-      '</div>' +
-      '<div id="makeup-form"></div>';
+      '</div>';
     document.getElementById('go-today').onclick = function () { go('today'); };
     bindCalendar();
   }
@@ -475,6 +475,7 @@
         };
       }
       document.getElementById('close-makeup').onclick = function () { box.innerHTML = ''; };
+      if (box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(function (e) { toast(e.message, true); });
   }
 
