@@ -8,5 +8,10 @@
       "command": "npm run dev"
     }
   ],
-  "ports": [8787]
+  "ports": [
+    {
+      "name": "next-dev",
+      "port": 8787
+    }
+  ]
 }
