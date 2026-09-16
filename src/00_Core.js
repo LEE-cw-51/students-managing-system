@@ -11,17 +11,20 @@ LMS.PREFIX = {
   class: 'CLS',
   relation: 'REL',
   lesson: 'LES',
-  monthly: 'MTH'
+  monthly: 'MTH',
+  note: 'NTS',
+  makeup: 'MKP'
 };
 
 LMS.TABLES = {
   Students: [
-    'student_id', 'name', 'grade', 'parent_phone', 'enrollment_date',
-    'status', 'memo', 'created_at', 'updated_at'
+    'student_id', 'name', 'grade', 'school', 'student_phone', 'parent_phone',
+    'enrollment_date', 'status', 'memo', 'created_at', 'updated_at'
   ],
   Classes: [
     'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
-    'weekday', 'start_time', 'end_time', 'memo', 'status', 'created_at', 'updated_at'
+    'weekday', 'start_time', 'end_time', 'textbook', 'current_progress',
+    'class_homework', 'memo', 'status', 'created_at', 'updated_at'
   ],
   StudentClasses: [
     'id', 'student_id', 'class_id', 'start_date', 'end_date',
@@ -36,6 +39,14 @@ LMS.TABLES = {
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
     'generated_at', 'updated_at', 'status'
+  ],
+  CounselingNotes: [
+    'note_id', 'student_id', 'kind', 'counsel_date', 'title', 'content',
+    'created_at', 'updated_at'
+  ],
+  MakeupSessions: [
+    'makeup_id', 'makeup_date', 'start_time', 'end_time', 'kind',
+    'class_id', 'student_id', 'title', 'memo', 'status', 'created_at', 'updated_at'
   ],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
@@ -57,6 +68,9 @@ LMS.ASSIGNMENT = ['A', 'B', 'C'];
 LMS.CONCENTRATION = ['A', 'B', 'C', 'D', 'ABSENT'];
 LMS.ATTENDANCE = ['출석', '결석'];
 LMS.REPORT_STATUS = ['임시', '확정'];
+LMS.COUNSEL_KIND = ['학생', '학부모'];
+LMS.MAKEUP_KIND = ['반', '학생'];
+LMS.MAKEUP_STATUS = ['예정', '완료', '취소'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
@@ -71,7 +85,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -167,6 +181,63 @@ LMS.inRange = function (isoDate, start, end) {
   if (start && v < start) return false;
   if (end && v > end) return false;
   return true;
+};
+
+LMS.isTime = function (v) {
+  return /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(LMS.toStr(v));
+};
+
+LMS.nextGrade = function (grade) {
+  var i = LMS.GRADE_OPTIONS.indexOf(LMS.toStr(grade));
+  if (i < 0) return '';
+  var next = LMS.GRADE_OPTIONS[i + 1];
+  if (!next || next === '기타') return '';
+  return next;
+};
+
+LMS.datesInRange = function (start, end) {
+  var dates = [];
+  var cur = LMS.toStr(start);
+  var last = LMS.toStr(end);
+  if (!LMS.isIsoDate(cur) || !LMS.isIsoDate(last) || cur > last) return dates;
+  while (cur <= last) {
+    dates.push(cur);
+    cur = LMS.addDays(cur, 1);
+  }
+  return dates;
+};
+
+LMS.weekRange = function (isoDate) {
+  var raw = LMS.toStr(isoDate);
+  if (!LMS.isIsoDate(raw)) return { start: '', end: '' };
+  var parts = raw.split('-');
+  var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  var day = d.getDay();
+  var mondayOffset = day === 0 ? -6 : 1 - day;
+  var start = LMS.addDays(raw, mondayOffset);
+  return { start: start, end: LMS.addDays(start, 6) };
+};
+
+LMS.buildRegularClassEvents = function (classes, start, end) {
+  var events = [];
+  var dates = LMS.datesInRange(start, end);
+  (classes || []).forEach(function (cls) {
+    if (LMS.toStr(cls.status) !== '운영') return;
+    dates.forEach(function (date) {
+      if (!LMS.classMeetsOn(cls.weekday, date)) return;
+      events.push({
+        event_type: '정규',
+        date: date,
+        start_time: LMS.toStr(cls.start_time),
+        end_time: LMS.toStr(cls.end_time),
+        class_id: cls.class_id,
+        class_name: cls.class_name,
+        title: cls.class_name,
+        teacher: LMS.toStr(cls.teacher)
+      });
+    });
+  });
+  return events;
 };
 
 LMS.normalizedScore = function (score, maxScore) {
@@ -525,6 +596,8 @@ LMS.validateStudentInput = function (data, isUpdate) {
     student_id: LMS.toStr(data.student_id),
     name: name,
     grade: grade,
+    school: LMS.toStr(data.school),
+    student_phone: LMS.toStr(data.student_phone),
     parent_phone: LMS.toStr(data.parent_phone),
     enrollment_date: enrollment,
     status: status,
@@ -555,6 +628,69 @@ LMS.validateClassInput = function (data, isUpdate) {
     weekday: LMS.toStr(data.weekday),
     start_time: LMS.toStr(data.start_time),
     end_time: LMS.toStr(data.end_time),
+    textbook: LMS.toStr(data.textbook),
+    current_progress: LMS.toStr(data.current_progress),
+    class_homework: LMS.toStr(data.class_homework),
+    memo: LMS.toStr(data.memo),
+    status: status
+  };
+};
+
+LMS.validateCounselingNoteInput = function (data, isUpdate) {
+  data = data || {};
+  if (isUpdate && LMS.isBlank(data.note_id)) {
+    throw new Error('상담일지를 찾을 수 없습니다.');
+  }
+  if (LMS.isBlank(data.student_id)) throw new Error('학생 정보를 찾을 수 없습니다.');
+  var kind = LMS.assertEnum(data.kind, LMS.COUNSEL_KIND, '상담 종류');
+  var date = LMS.toStr(data.counsel_date);
+  if (!LMS.isIsoDate(date)) {
+    throw new Error('상담일 형식이 올바르지 않습니다. YYYY-MM-DD로 입력해 주세요.');
+  }
+  var content = LMS.toStr(data.content);
+  if (!content) throw new Error('상담 내용을 입력해 주세요.');
+  return {
+    note_id: LMS.toStr(data.note_id),
+    student_id: LMS.toStr(data.student_id),
+    kind: kind,
+    counsel_date: date,
+    title: LMS.toStr(data.title),
+    content: content
+  };
+};
+
+LMS.validateMakeupSessionInput = function (data, isUpdate) {
+  data = data || {};
+  if (isUpdate && LMS.isBlank(data.makeup_id)) {
+    throw new Error('보강 일정을 찾을 수 없습니다.');
+  }
+  if (!LMS.isIsoDate(data.makeup_date)) {
+    throw new Error('보강일 형식이 올바르지 않습니다. YYYY-MM-DD로 입력해 주세요.');
+  }
+  var kind = LMS.assertEnum(data.kind, LMS.MAKEUP_KIND, '보강 종류');
+  if (kind === '반' && LMS.isBlank(data.class_id)) {
+    throw new Error('반을 선택해 주세요.');
+  }
+  if (kind === '학생' && LMS.isBlank(data.student_id)) {
+    throw new Error('학생을 선택해 주세요.');
+  }
+  var start = LMS.toStr(data.start_time);
+  var end = LMS.toStr(data.end_time);
+  if (start && !LMS.isTime(start)) throw new Error('시작 시간 형식이 올바르지 않습니다.');
+  if (end && !LMS.isTime(end)) throw new Error('종료 시간 형식이 올바르지 않습니다.');
+  if (start) start = start.slice(0, 5);
+  if (end) end = end.slice(0, 5);
+  var status = LMS.toStr(data.status) || '예정';
+  LMS.assertEnum(status, LMS.MAKEUP_STATUS, '보강 상태');
+  return {
+    makeup_id: LMS.toStr(data.makeup_id),
+    makeup_date: LMS.toStr(data.makeup_date),
+    start_time: start,
+    end_time: end,
+    kind: kind,
+    class_id: LMS.toStr(data.class_id),
+    student_id: LMS.toStr(data.student_id),
+    title: LMS.toStr(data.title),
     memo: LMS.toStr(data.memo),
     status: status
   };
@@ -653,6 +789,8 @@ LMS.TABLE_PK = {
   StudentClasses: 'id',
   Lessons: 'lesson_id',
   MonthlyReports: 'monthly_report_id',
+  CounselingNotes: 'note_id',
+  MakeupSessions: 'makeup_id',
   Settings: 'key',
   _Meta: 'prefix'
 };
@@ -662,6 +800,26 @@ LMS.rowValues = function (row, headers) {
     var v = row ? row[h] : '';
     return v === undefined || v === null ? '' : v;
   });
+};
+
+LMS.compactHeaderRow = function (row) {
+  var out = [];
+  for (var i = 0; i < (row || []).length; i++) {
+    var v = LMS.toStr(row[i]);
+    if (!v) break;
+    out.push(v);
+  }
+  return out;
+};
+
+LMS.headersMatch = function (current, expected) {
+  current = current || [];
+  expected = expected || [];
+  if (current.length !== expected.length) return false;
+  for (var i = 0; i < expected.length; i++) {
+    if (LMS.toStr(current[i]) !== LMS.toStr(expected[i])) return false;
+  }
+  return true;
 };
 
 /**

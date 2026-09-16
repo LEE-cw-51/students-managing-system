@@ -99,7 +99,8 @@
         if (!ok) return false;
       }
       if (q && String(s.name || '').toLowerCase().indexOf(q) === -1 &&
-          String(s.student_id || '').toLowerCase().indexOf(q) === -1) {
+          String(s.student_id || '').toLowerCase().indexOf(q) === -1 &&
+          String(s.school || '').toLowerCase().indexOf(q) === -1) {
         return false;
       }
       return true;
@@ -217,8 +218,269 @@
             }).join('') + '</tbody></table>' : '<div class="empty">오늘 배정된 운영 반이 없습니다.</div>') +
         '</div>' +
         '<div class="card"><h3>학생 현황</h3><p>재원 <b>' + d.enrolled_count + '</b></p><p>휴원 <b>' + d.paused_count + '</b></p><p>퇴원 <b>' + d.archived_count + '</b></p><p class="muted">보고서 생성 가능 ' + d.report_ready_count + '건</p></div>' +
+      '</div>' +
+      '<div class="card" style="margin-top:14px">' +
+        '<div class="cal-toolbar">' +
+          '<h3>수업 · 보강 달력</h3>' +
+          '<button class="btn secondary" id="cal-prev">이전</button>' +
+          '<button class="btn secondary" id="cal-today">오늘</button>' +
+          '<button class="btn secondary" id="cal-next">다음</button>' +
+          '<button class="btn" id="cal-week">주간</button>' +
+          '<button class="btn" id="cal-month">월간</button>' +
+          '<button class="btn ok" id="cal-add">보강 추가</button>' +
+        '</div>' +
+        '<div class="cal-legend">' +
+          '<span><i class="cal-dot regular"></i>정규 수업</span>' +
+          '<span><i class="cal-dot class-makeup"></i>반 보강</span>' +
+          '<span><i class="cal-dot student-makeup"></i>개인 보강</span>' +
+        '</div>' +
+        '<div id="makeup-form"></div>' +
+        '<p class="muted" id="cal-label"></p>' +
+        '<div id="cal-body"><div class="empty">달력을 불러오는 중...</div></div>' +
       '</div>';
     document.getElementById('go-today').onclick = function () { go('today'); };
+    bindCalendar();
+  }
+
+  function pad2(n) {
+    var s = String(n);
+    return s.length < 2 ? '0' + s : s;
+  }
+
+  function addDaysIso(iso, delta) {
+    var parts = String(iso || '').split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    d.setDate(d.getDate() + delta);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  function weekRangeIso(iso) {
+    var parts = String(iso || '').split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    var day = d.getDay();
+    var mondayOffset = day === 0 ? -6 : 1 - day;
+    var start = addDaysIso(iso, mondayOffset);
+    return { start: start, end: addDaysIso(start, 6) };
+  }
+
+  function monthRangeIso(iso) {
+    var parts = String(iso || '').split('-');
+    var y = Number(parts[0]);
+    var m = Number(parts[1]);
+    var last = new Date(y, m, 0).getDate();
+    return { start: y + '-' + pad2(m) + '-01', end: y + '-' + pad2(m) + '-' + pad2(last), year: y, month: m };
+  }
+
+  function calEventClass(ev) {
+    if (ev.event_type === '반보강') return 'class-makeup';
+    if (ev.event_type === '개인보강') return 'student-makeup';
+    return 'regular';
+  }
+
+  function calEventLabel(ev) {
+    var time = ev.start_time ? ev.start_time + (ev.end_time ? '–' + ev.end_time : '') : '';
+    var title = ev.title || '';
+    return (time ? time + ' ' : '') + title;
+  }
+
+  function bindCalendar() {
+    if (!state.cal) state.cal = { view: 'month', cursor: state.today };
+    if (!state.cal.cursor) state.cal.cursor = state.today;
+    var weekBtn = document.getElementById('cal-week');
+    var monthBtn = document.getElementById('cal-month');
+    if (weekBtn) weekBtn.className = 'btn' + (state.cal.view === 'week' ? '' : ' secondary');
+    if (monthBtn) monthBtn.className = 'btn' + (state.cal.view === 'month' ? '' : ' secondary');
+    document.getElementById('cal-week').onclick = function () {
+      state.cal.view = 'week';
+      loadCalendar();
+    };
+    document.getElementById('cal-month').onclick = function () {
+      state.cal.view = 'month';
+      loadCalendar();
+    };
+    document.getElementById('cal-today').onclick = function () {
+      state.cal.cursor = state.today;
+      loadCalendar();
+    };
+    document.getElementById('cal-prev').onclick = function () {
+      if (state.cal.view === 'week') state.cal.cursor = addDaysIso(weekRangeIso(state.cal.cursor).start, -7);
+      else {
+        var r = monthRangeIso(state.cal.cursor);
+        state.cal.cursor = addDaysIso(r.start, -1);
+      }
+      loadCalendar();
+    };
+    document.getElementById('cal-next').onclick = function () {
+      if (state.cal.view === 'week') state.cal.cursor = addDaysIso(weekRangeIso(state.cal.cursor).start, 7);
+      else {
+        var r = monthRangeIso(state.cal.cursor);
+        state.cal.cursor = addDaysIso(r.end, 1);
+      }
+      loadCalendar();
+    };
+    document.getElementById('cal-add').onclick = function () {
+      showMakeupForm({ makeup_date: state.cal.cursor || state.today, kind: '반', status: '예정' });
+    };
+    loadCalendar();
+  }
+
+  function calendarRange() {
+    if (state.cal.view === 'week') return weekRangeIso(state.cal.cursor);
+    return monthRangeIso(state.cal.cursor);
+  }
+
+  function loadCalendar() {
+    var range = calendarRange();
+    var label = document.getElementById('cal-label');
+    if (label) {
+      label.textContent = state.cal.view === 'week'
+        ? range.start + ' ~ ' + range.end
+        : range.year + '년 ' + range.month + '월';
+    }
+    var weekBtn = document.getElementById('cal-week');
+    var monthBtn = document.getElementById('cal-month');
+    if (weekBtn) weekBtn.className = 'btn' + (state.cal.view === 'week' ? '' : ' secondary');
+    if (monthBtn) monthBtn.className = 'btn' + (state.cal.view === 'month' ? '' : ' secondary');
+    state.cal.req = (state.cal.req || 0) + 1;
+    var req = state.cal.req;
+    api('getCalendar', [range.start, range.end]).then(function (res) {
+      if (!state.cal || req !== state.cal.req) return;
+      paintCalendar(res.events || [], range);
+    }).catch(function (e) {
+      if (!state.cal || req !== state.cal.req) return;
+      var body = document.getElementById('cal-body');
+      if (body) body.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function eventsByDate(events) {
+    var map = {};
+    (events || []).forEach(function (ev) {
+      if (!map[ev.date]) map[ev.date] = [];
+      map[ev.date].push(ev);
+    });
+    return map;
+  }
+
+  function eventButtons(list) {
+    return (list || []).map(function (ev) {
+      var extra = ev.makeup_id ? ' data-makeup="' + esc(ev.makeup_id) + '"' : '';
+      return '<button type="button" class="cal-event ' + calEventClass(ev) + '"' + extra + '>' +
+        esc(calEventLabel(ev)) + '</button>';
+    }).join('');
+  }
+
+  function paintCalendar(events, range) {
+    var body = document.getElementById('cal-body');
+    if (!body) return;
+    var grouped = eventsByDate(events);
+    if (state.cal.view === 'week') {
+      var days = [];
+      var cur = range.start;
+      while (cur <= range.end) {
+        days.push(cur);
+        cur = addDaysIso(cur, 1);
+      }
+      body.innerHTML = '<div class="cal-week">' + days.map(function (date) {
+        var names = ['일', '월', '화', '수', '목', '금', '토'];
+        var d = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)));
+        var cls = date === state.today ? ' today' : '';
+        return '<div class="cal-week-col' + cls + '" data-date="' + esc(date) + '"><h4>' +
+          names[d.getDay()] + ' ' + esc(shortDate(date)) + '</h4>' +
+          (grouped[date] ? eventButtons(grouped[date]) : '<p class="muted">일정 없음</p>') +
+          '</div>';
+      }).join('') + '</div>';
+    } else {
+      var start = range.start;
+      var first = new Date(range.year, range.month - 1, 1);
+      var startPad = first.getDay() === 0 ? 6 : first.getDay() - 1;
+      var cells = [];
+      var i;
+      for (i = 0; i < startPad; i++) cells.push(addDaysIso(start, -(startPad - i)));
+      var curDate = start;
+      while (curDate <= range.end) {
+        cells.push(curDate);
+        curDate = addDaysIso(curDate, 1);
+      }
+      while (cells.length % 7) cells.push(addDaysIso(cells[cells.length - 1], 1));
+      var heads = ['월', '화', '수', '목', '금', '토', '일'];
+      body.innerHTML = '<div class="cal-month">' +
+        heads.map(function (h) { return '<div class="cal-head">' + h + '</div>'; }).join('') +
+        cells.map(function (date) {
+          var inMonth = date >= range.start && date <= range.end;
+          var cls = (inMonth ? '' : ' out') + (date === state.today ? ' today' : '');
+          return '<div class="cal-day' + cls + '" data-date="' + esc(date) + '"><div class="cal-day-num">' +
+            Number(date.slice(8, 10)) + '</div>' + eventButtons(grouped[date] || []) + '</div>';
+        }).join('') +
+        '</div>';
+    }
+    body.querySelectorAll('[data-date]').forEach(function (cell) {
+      cell.onclick = function (e) {
+        if (e.target.closest('.cal-event')) return;
+        showMakeupForm({ makeup_date: cell.getAttribute('data-date'), kind: '반', status: '예정' });
+      };
+    });
+    body.querySelectorAll('[data-makeup]').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var id = btn.getAttribute('data-makeup');
+        api('getMakeupSession', [id]).then(showMakeupForm).catch(function (err) { toast(err.message, true); });
+      };
+    });
+  }
+
+  function showMakeupForm(row) {
+    var box = document.getElementById('makeup-form');
+    if (!box) return;
+    loadLookups().then(function () {
+      row = row || { makeup_date: state.today, kind: '반', status: '예정' };
+      box.innerHTML = '<div class="card"><h3>' + (row.makeup_id ? '보강 수정' : '보강 추가') + '</h3><div class="row">' +
+        field('종류', select('kind', ['반', '학생'], row.kind || '반')) +
+        field('날짜', input('makeup_date', row.makeup_date || state.today, 'date')) +
+        field('시작', input('start_time', row.start_time || '18:00', 'time')) +
+        field('종료', input('end_time', row.end_time || '20:00', 'time')) +
+        field('반', select('class_id', classOptions(row.class_id, true), row.class_id || '')) +
+        field('학생', select('student_id', studentOptions(row.student_id), row.student_id || '')) +
+        field('제목', input('title', row.title || '')) +
+        field('상태', select('status', ['예정', '완료', '취소'], row.status || '예정')) +
+        field('메모', '<textarea name="memo">' + esc(row.memo) + '</textarea>') +
+        '</div><div class="row"><button class="btn" id="save-makeup">저장</button>' +
+        (row.makeup_id ? '<button class="btn danger" id="cancel-makeup">취소 처리</button>' : '') +
+        '<button class="btn secondary" id="close-makeup">닫기</button></div></div>';
+      document.getElementById('save-makeup').onclick = function () {
+        var form = this.closest('.card');
+        var data = {
+          makeup_id: row.makeup_id,
+          kind: form.querySelector('[name=kind]').value,
+          makeup_date: form.querySelector('[name=makeup_date]').value,
+          start_time: form.querySelector('[name=start_time]').value,
+          end_time: form.querySelector('[name=end_time]').value,
+          class_id: form.querySelector('[name=class_id]').value,
+          student_id: form.querySelector('[name=student_id]').value,
+          title: form.querySelector('[name=title]').value,
+          status: form.querySelector('[name=status]').value,
+          memo: form.querySelector('[name=memo]').value
+        };
+        api('saveMakeupSession', [data]).then(function () {
+          toast('보강 일정을 저장했습니다.');
+          box.innerHTML = '';
+          loadCalendar();
+        }).catch(function (e) { toast(e.message, true); });
+      };
+      var cancelBtn = document.getElementById('cancel-makeup');
+      if (cancelBtn) {
+        cancelBtn.onclick = function () {
+          if (!confirm('이 보강을 취소할까요?')) return;
+          api('cancelMakeupSession', [row.makeup_id]).then(function () {
+            toast('보강을 취소했습니다.');
+            box.innerHTML = '';
+            loadCalendar();
+          }).catch(function (e) { toast(e.message, true); });
+        };
+      }
+      document.getElementById('close-makeup').onclick = function () { box.innerHTML = ''; };
+      if (box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }).catch(function (e) { toast(e.message, true); });
   }
 
   function renderDashboard(root) {
@@ -567,12 +829,13 @@
     function paint() {
       root.innerHTML =
         '<div class="card"><div class="row">' +
-          field('검색', input('q', '', 'search', 'placeholder="이름"')) +
+          field('검색', input('q', '', 'search', 'placeholder="이름·학교"')) +
           field('학년', select('grade', [{ value: '', label: '전체 학년' }].concat(state.grades), '')) +
           field('상태', select('status', [{ value: '', label: '전체 상태' }, '재원', '휴원', '퇴원'], '재원')) +
           field('반', select('classId', classOptions('', true), '')) +
           '<button class="btn" id="student-filter">조회</button><button class="btn secondary" id="student-new">학생 등록</button>' +
-        '</div></div><div id="student-list"></div><div id="student-form"></div>';
+          '<button class="btn ghost" id="student-promote">학년 진급</button>' +
+        '</div></div><div id="student-list"></div><div id="student-form"></div><div id="promote-box"></div>';
       function refresh() {
         var rows = filterStudents(state.cache.students, {
           query: root.querySelector('[name=q]').value,
@@ -584,6 +847,7 @@
       }
       document.getElementById('student-filter').onclick = refresh;
       document.getElementById('student-new').onclick = function () { showStudentForm(null); };
+      document.getElementById('student-promote').onclick = function () { showGradePromotion(); };
       refresh();
     }
     if (state.cache.students && state.cache.classes) {
@@ -596,11 +860,12 @@
 
   function studentTable(rows) {
     if (!rows.length) return '<div class="card empty">학생이 없습니다.</div>';
-    return '<div class="card"><table><thead><tr><th>이름</th><th>학년</th><th>현재 반</th><th>상태</th><th></th></tr></thead><tbody>' +
+    return '<div class="card"><table><thead><tr><th>이름</th><th>학년</th><th>학교</th><th>현재 반</th><th>상태</th><th></th></tr></thead><tbody>' +
       rows.map(function (s) {
         var cls = (s.current_classes || []).map(function (c) { return c.class_name; }).join(', ') || '-';
         return '<tr><td><a class="link" href="#/students/' + esc(s.student_id) + '">' + esc(s.name) + '</a></td><td>' +
-          esc(s.grade) + '</td><td>' + esc(cls) + '</td><td>' + esc(s.status) + '</td><td><button class="btn ghost edit-stu" data-id="' +
+          esc(s.grade) + '</td><td>' + esc(s.school || '-') + '</td><td>' + esc(cls) + '</td><td>' + esc(s.status) +
+          '</td><td><button class="btn ghost edit-stu" data-id="' +
           esc(s.student_id) + '">수정</button></td></tr>';
       }).join('') + '</tbody></table></div>';
   }
@@ -611,6 +876,8 @@
     var html = '<div class="card"><h3>' + (s.student_id ? '학생 수정' : '학생 등록') + '</h3><div class="row">' +
       field('이름', input('name', s.name)) +
       field('학년', select('grade', state.grades, s.grade || '중2')) +
+      field('학교', input('school', s.school, 'text', 'placeholder="학교명"')) +
+      field('학생 연락처', input('student_phone', s.student_phone, 'tel', 'placeholder="010-0000-0000"')) +
       field('보호자 연락처', input('parent_phone', s.parent_phone)) +
       field('등록일', input('enrollment_date', s.enrollment_date, 'date')) +
       field('상태', select('status', ['재원', '휴원', '퇴원'], s.status)) +
@@ -625,6 +892,8 @@
         student_id: s.student_id,
         name: form.querySelector('[name=name]').value,
         grade: form.querySelector('[name=grade]').value,
+        school: form.querySelector('[name=school]').value,
+        student_phone: form.querySelector('[name=student_phone]').value,
         parent_phone: form.querySelector('[name=parent_phone]').value,
         enrollment_date: form.querySelector('[name=enrollment_date]').value,
         status: form.querySelector('[name=status]').value,
@@ -639,6 +908,42 @@
     };
   }
 
+  function showGradePromotion() {
+    var box = document.getElementById('promote-box') || document.getElementById('main');
+    api('previewGradePromotion', []).then(function (preview) {
+      var rows = (preview.items || []).filter(function (item) { return item.count > 0; });
+      var skipped = preview.skipped || [];
+      var html = '<div class="card"><h3>학년 진급</h3>' +
+        '<p class="muted">재원 학생을 한 학년씩 올립니다. 고3·기타는 대상에서 제외합니다.</p>';
+      if (!preview.total) {
+        html += '<div class="empty">진급할 재원 학생이 없습니다.</div></div>';
+        box.innerHTML = html;
+        return;
+      }
+      html += '<table><thead><tr><th>현재</th><th>진급 후</th><th>인원</th><th>학생</th></tr></thead><tbody>' +
+        rows.map(function (item) {
+          var names = item.students.map(function (s) { return s.name; }).join(', ');
+          return '<tr><td>' + esc(item.from_grade) + '</td><td>' + esc(item.to_grade) + '</td><td>' +
+            item.count + '</td><td>' + esc(names) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      if (skipped.length) {
+        html += '<p class="muted" style="margin-top:10px">제외: ' +
+          skipped.map(function (s) { return s.name + '(' + s.grade + ')'; }).join(', ') + '</p>';
+      }
+      html += '<div class="row" style="margin-top:12px"><button class="btn" id="confirm-promote">진급 적용</button>' +
+        '<button class="btn secondary" id="close-promote">닫기</button></div></div>';
+      box.innerHTML = html;
+      document.getElementById('confirm-promote').onclick = function () {
+        if (!confirm('재원 학생 ' + preview.total + '명의 학년을 진급할까요?')) return;
+        api('promoteGrades', []).then(function (res) {
+          toast((res.updated_count || 0) + '명 진급했습니다.');
+          return refreshLookups().then(renderRoute);
+        }).catch(function (e) { toast(e.message, true); });
+      };
+      document.getElementById('close-promote').onclick = function () { box.innerHTML = ''; };
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
   function renderStudentDetail(root, id) {
     spinner(root);
     Promise.all([api('getStudent', [id]), loadLookups()]).then(function (pair) {
@@ -646,7 +951,8 @@
       var current = (s.current_classes || []).map(function (c) { return c.class_name; }).join(', ') || '-';
       root.innerHTML =
         '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(s.name) + '</h2><button class="btn secondary" id="edit-one">수정</button></div>' +
-        '<p>' + esc(s.grade) + ' · ' + esc(s.status) + ' · 보호자 ' + esc(s.parent_phone || '-') + '</p>' +
+        '<p>' + esc(s.grade) + ' · ' + esc(s.school || '학교 미입력') + ' · ' + esc(s.status) + '</p>' +
+        '<p>학생 연락처 ' + esc(s.student_phone || '-') + ' · 보호자 ' + esc(s.parent_phone || '-') + '</p>' +
         '<p>현재 반: <b>' + esc(current) + '</b></p>' +
         '<div class="row">' + field('반 변경', select('move_class', classOptions('', false), '')) +
           field('시작일', input('move_date', state.today, 'date')) +
@@ -657,7 +963,11 @@
           field('기간', select('period', [{ value: 'week', label: '이번 주' }, { value: 'month', label: '이번 달' }, { value: '3m', label: '최근 3개월' }, { value: 'custom', label: '직접 선택' }], 'month')) +
           field('시작', input('start', '', 'date')) + field('끝', input('end', '', 'date')) +
           '<button class="btn secondary" id="load-lessons">조회</button></div></div>' +
-        '<div id="lesson-hist"></div>';
+        '<div id="lesson-hist"></div>' +
+        '<div class="split" style="margin-top:14px">' +
+          '<div class="card" id="note-student"></div>' +
+          '<div class="card" id="note-parent"></div>' +
+        '</div>';
       document.getElementById('edit-one').onclick = function () { showStudentForm(s); };
       document.getElementById('move-stu').onclick = function () {
         api('moveStudent', [{ student_id: s.student_id, class_id: root.querySelector('[name=move_class]').value, start_date: root.querySelector('[name=move_date]').value }])
@@ -669,6 +979,7 @@
       };
       document.getElementById('load-lessons').onclick = function () { loadHist(); };
       loadHist();
+      loadCounseling(s.student_id);
       function loadHist() {
         var range = lessonRange(root);
         api('getStudentLessons', [s.student_id, range.start, range.end]).then(function (rows) {
@@ -712,6 +1023,73 @@
       '</div>' +
     '</div>' +
     '<div class="card"><h3 style="margin-top:0">수업 기록 (시간 순)</h3>' + lessonTable(rows) + '</div>';
+  }
+
+  function loadCounseling(studentId) {
+    api('getCounselingNotes', [studentId]).then(function (rows) {
+      paintCounseling('학생', studentId, (rows || []).filter(function (n) { return n.kind === '학생'; }));
+      paintCounseling('학부모', studentId, (rows || []).filter(function (n) { return n.kind === '학부모'; }));
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function paintCounseling(kind, studentId, rows) {
+    var id = kind === '학생' ? 'note-student' : 'note-parent';
+    var box = document.getElementById(id);
+    if (!box) return;
+    box.innerHTML = '<div class="toolbar"><h3 style="margin:0">' + (kind === '학생' ? '학생 상담일지' : '학부모 상담일지') +
+      '</h3><button class="btn secondary add-note" data-kind="' + kind + '">작성</button></div>' +
+      (rows.length ? '<div class="note-list">' + rows.map(function (n) {
+        return '<div class="note-item"><h4>' + esc(n.title || '상담') + '</h4>' +
+          '<p class="muted">' + esc(n.counsel_date) + '</p>' +
+          '<p class="curriculum">' + esc(n.content) + '</p>' +
+          '<div class="row" style="margin-top:8px">' +
+          '<button class="btn ghost edit-note" data-id="' + esc(n.note_id) + '">수정</button>' +
+          '<button class="btn danger del-note" data-id="' + esc(n.note_id) + '">삭제</button></div></div>';
+      }).join('') + '</div>' : '<p class="muted">작성된 상담일지가 없습니다.</p>') +
+      '<div class="note-form"></div>';
+    box.querySelector('.add-note').onclick = function () {
+      showCounselForm(box, { student_id: studentId, kind: kind, counsel_date: state.today });
+    };
+    box.querySelectorAll('.edit-note').forEach(function (btn) {
+      btn.onclick = function () {
+        var note = rows.filter(function (n) { return n.note_id === btn.getAttribute('data-id'); })[0];
+        if (note) showCounselForm(box, note);
+      };
+    });
+    box.querySelectorAll('.del-note').forEach(function (btn) {
+      btn.onclick = function () {
+        if (!confirm('이 상담일지를 삭제할까요?')) return;
+        api('deleteCounselingNote', [btn.getAttribute('data-id')]).then(function () {
+          toast('삭제했습니다.');
+          loadCounseling(studentId);
+        }).catch(function (e) { toast(e.message, true); });
+      };
+    });
+  }
+
+  function showCounselForm(box, note) {
+    var host = box.querySelector('.note-form');
+    if (!host) return;
+    host.innerHTML = '<div class="row" style="margin-top:12px">' +
+      field('상담일', input('counsel_date', note.counsel_date || state.today, 'date')) +
+      field('제목', input('title', note.title || '')) +
+      field('내용', '<textarea name="content">' + esc(note.content) + '</textarea>') +
+      '</div><div class="row"><button class="btn save-note">저장</button>' +
+      '<button class="btn secondary close-note">닫기</button></div>';
+    host.querySelector('.save-note').onclick = function () {
+      api('saveCounselingNote', [{
+        note_id: note.note_id,
+        student_id: note.student_id,
+        kind: note.kind,
+        counsel_date: host.querySelector('[name=counsel_date]').value,
+        title: host.querySelector('[name=title]').value,
+        content: host.querySelector('[name=content]').value
+      }]).then(function () {
+        toast('상담일지를 저장했습니다.');
+        loadCounseling(note.student_id);
+      }).catch(function (e) { toast(e.message, true); });
+    };
+    host.querySelector('.close-note').onclick = function () { host.innerHTML = ''; };
   }
 
   function lessonRange(root) {
@@ -771,11 +1149,12 @@
 
   function classTable(rows) {
     if (!rows.length) return '<div class="card empty">반이 없습니다.</div>';
-    return '<div class="card"><table><thead><tr><th>반</th><th>학년도/학기</th><th>학년</th><th>요일</th><th>시간</th><th>담당</th><th>상태</th></tr></thead><tbody>' +
+    return '<div class="card"><table><thead><tr><th>반</th><th>학년도/학기</th><th>학년</th><th>요일</th><th>시간</th><th>교재</th><th>담당</th><th>상태</th></tr></thead><tbody>' +
       rows.map(function (c) {
         return '<tr><td><a class="link" href="#/classes/' + esc(c.class_id) + '">' + esc(c.class_name) + '</a></td><td>' +
           esc(c.school_year) + ' / ' + esc(c.semester) + '</td><td>' + esc(c.grade) + '</td><td>' + esc(c.weekday) +
-          '</td><td>' + esc(c.start_time) + (c.end_time ? '–' + esc(c.end_time) : '') + '</td><td>' + esc(c.teacher) +
+          '</td><td>' + esc(c.start_time) + (c.end_time ? '–' + esc(c.end_time) : '') + '</td><td>' +
+          esc(c.textbook || '-') + '</td><td>' + esc(c.teacher) +
           '</td><td>' + esc(c.status) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
@@ -791,6 +1170,9 @@
       field('요일', input('weekday', c.weekday, 'text', 'placeholder="월/수"')) +
       field('시작', input('start_time', c.start_time, 'time')) +
       field('종료', input('end_time', c.end_time, 'time')) +
+      field('교재', input('textbook', c.textbook, 'text', 'placeholder="현재 교재"')) +
+      field('진도', '<textarea name="current_progress" placeholder="현재 진도">' + esc(c.current_progress) + '</textarea>') +
+      field('숙제', '<textarea name="class_homework" placeholder="반 공통 숙제">' + esc(c.class_homework) + '</textarea>') +
       field('상태', select('status', ['운영', '종료'], c.status)) +
       field('메모', '<textarea name="memo">' + esc(c.memo) + '</textarea>') +
       '</div><button class="btn" id="save-class">저장</button></div>';
@@ -806,6 +1188,9 @@
         weekday: form.querySelector('[name=weekday]').value,
         start_time: form.querySelector('[name=start_time]').value,
         end_time: form.querySelector('[name=end_time]').value,
+        textbook: form.querySelector('[name=textbook]').value,
+        current_progress: form.querySelector('[name=current_progress]').value,
+        class_homework: form.querySelector('[name=class_homework]').value,
         status: form.querySelector('[name=status]').value,
         memo: form.querySelector('[name=memo]').value
       };
@@ -823,6 +1208,11 @@
       root.innerHTML = '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(c.class_name) + '</h2>' +
         '<div><button class="btn secondary" id="edit-class">수정</button> <button class="btn danger" id="close-class">반 종료</button></div></div>' +
         '<p>' + esc(c.grade) + ' · ' + esc(c.weekday) + ' · ' + esc(c.start_time) + '–' + esc(c.end_time) + ' · ' + esc(c.teacher) + '</p>' +
+        '<div class="grid stats-2">' +
+          '<div><h3>현재 교재</h3><p class="curriculum">' + esc(c.textbook || '-') + '</p></div>' +
+          '<div><h3>현재 진도</h3><p class="curriculum">' + esc(c.current_progress || '-') + '</p></div>' +
+        '</div>' +
+        '<h3>반 숙제</h3><p class="curriculum">' + esc(c.class_homework || '-') + '</p>' +
         '<h3>현재 학생</h3>' + studentTable((c.students || []).map(function (s) { return Object.assign({ current_classes: [{ class_name: c.class_name }] }, s); })) +
         '<div class="row" style="margin-top:12px">' + field('학생 배정', '<select id="assign-stu"></select>') +
         field('시작일', input('assign_date', state.today, 'date')) +

@@ -336,4 +336,164 @@ describe('bootstrap and caching', () => {
     );
     assert.equal(diff.needsFullRewrite, true);
   });
+
+  it('detects sheet header changes for new student and class columns', () => {
+    const oldStudents = [
+      'student_id', 'name', 'grade', 'parent_phone', 'enrollment_date',
+      'status', 'memo', 'created_at', 'updated_at'
+    ];
+    const oldClasses = [
+      'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
+      'weekday', 'start_time', 'end_time', 'memo', 'status', 'created_at', 'updated_at'
+    ];
+    assert.equal(LMS.headersMatch(oldStudents, LMS.TABLES.Students), false);
+    assert.equal(LMS.headersMatch(oldClasses, LMS.TABLES.Classes), false);
+    assert.equal(LMS.headersMatch(LMS.TABLES.Students, LMS.TABLES.Students), true);
+    assert.deepEqual(
+      LMS.compactHeaderRow(['student_id', 'name', '', 'grade']),
+      ['student_id', 'name']
+    );
+  });
+});
+
+describe('student extras counseling makeup and calendar', () => {
+  it('stores student phone and school', () => {
+    const api = svc();
+    const s = api.createStudent({
+      name: '최민아',
+      grade: '중1',
+      school: '한빛중학교',
+      student_phone: '010-7777-8888',
+      parent_phone: '010-9999-0000'
+    });
+    assert.equal(s.school, '한빛중학교');
+    assert.equal(s.student_phone, '010-7777-8888');
+    const updated = api.updateStudent(Object.assign({}, s, { school: '새봄중학교' }));
+    assert.equal(updated.school, '새봄중학교');
+    assert.equal(api.getStudents({ query: '새봄' })[0].student_id, s.student_id);
+  });
+
+  it('previews and promotes enrolled students one grade', () => {
+    const api = svc();
+    api.createStudent({ name: '중2학생', grade: '중2', status: '재원' });
+    api.createStudent({ name: '고3학생', grade: '고3', status: '재원' });
+    api.createStudent({ name: '휴원학생', grade: '중2', status: '휴원' });
+    const preview = api.previewGradePromotion();
+    const mid = preview.items.filter((i) => i.from_grade === '중2')[0];
+    assert.equal(mid.count, 1);
+    assert.equal(mid.to_grade, '중3');
+    assert.equal(preview.skipped.length, 1);
+    assert.equal(preview.skipped[0].name, '고3학생');
+    const result = api.promoteGrades();
+    assert.equal(result.updated_count, 1);
+    assert.equal(api.getStudent(result.updated[0].student_id).grade, '중3');
+    const paused = api.getStudents({ status: '휴원' })[0];
+    assert.equal(paused.grade, '중2');
+    const high = api.getStudents({ query: '고3학생' })[0];
+    assert.equal(high.grade, '고3');
+  });
+
+  it('saves class textbook progress and homework', () => {
+    const api = svc();
+    const c = api.createClass({
+      class_name: '중2 A반',
+      grade: '중2',
+      textbook: '개념원리 중2-2',
+      current_progress: '삼각형의 성질',
+      class_homework: '워크북 12쪽'
+    });
+    assert.equal(c.textbook, '개념원리 중2-2');
+    const updated = api.updateClass(Object.assign({}, c, { current_progress: '사각형의 성질' }));
+    assert.equal(updated.current_progress, '사각형의 성질');
+    assert.equal(api.getClass(c.class_id).class_homework, '워크북 12쪽');
+  });
+
+  it('creates updates and deletes counseling notes by kind', () => {
+    const api = svc();
+    const s = api.createStudent({ name: '상담학생', grade: '중2' });
+    const note = api.saveCounselingNote({
+      student_id: s.student_id,
+      kind: '학생',
+      counsel_date: '2026-09-10',
+      title: '집중도',
+      content: '수업 중 산만함'
+    });
+    assert.match(note.note_id, /^NTS_/);
+    const parent = api.saveCounselingNote({
+      student_id: s.student_id,
+      kind: '학부모',
+      counsel_date: '2026-09-12',
+      title: '통화',
+      content: '숙제 점검 요청'
+    });
+    const list = api.getCounselingNotes(s.student_id);
+    assert.equal(list.length, 2);
+    const edited = api.saveCounselingNote(Object.assign({}, note, { content: '집중이 좋아짐' }));
+    assert.equal(edited.note_id, note.note_id);
+    assert.equal(edited.content, '집중이 좋아짐');
+    api.deleteCounselingNote(parent.note_id);
+    assert.equal(api.getCounselingNotes(s.student_id).length, 1);
+  });
+
+  it('rejects invalid counseling and makeup input', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반' });
+    const s = api.createStudent({ name: '김학생', class_id: c.class_id });
+    assert.throws(() => api.saveCounselingNote({
+      student_id: s.student_id,
+      kind: '학생',
+      counsel_date: '2026-09-10',
+      content: ''
+    }), /상담 내용/);
+    assert.throws(() => api.saveMakeupSession({
+      kind: '반',
+      makeup_date: '2026-09-16'
+    }), /반을 선택/);
+    assert.throws(() => api.saveMakeupSession({
+      kind: '학생',
+      makeup_date: '2026-09-16',
+      student_id: ''
+    }), /학생을 선택/);
+  });
+
+  it('puts regular classes and makeup sessions on the calendar', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    const classMakeup = api.saveMakeupSession({
+      kind: '반',
+      class_id: seeded.class.class_id,
+      makeup_date: '2026-09-16',
+      start_time: '18:00',
+      end_time: '20:00',
+      title: '중간고사 보강'
+    });
+    const personal = api.saveMakeupSession({
+      kind: '학생',
+      student_id: seeded.students[0].student_id,
+      class_id: seeded.class.class_id,
+      makeup_date: '2026-09-17',
+      start_time: '19:00:00',
+      end_time: '20:00:00'
+    });
+    assert.equal(personal.start_time, '19:00');
+    const cal = api.getCalendar('2026-09-14', '2026-09-17');
+    const regularMon = cal.events.filter((e) => e.event_type === '정규' && e.date === '2026-09-14');
+    const regularTue = cal.events.filter((e) => e.event_type === '정규' && e.date === '2026-09-15');
+    assert.equal(regularMon.length, 1);
+    assert.equal(regularTue.length, 0);
+    assert.equal(cal.events.filter((e) => e.event_type === '반보강').length, 1);
+    assert.equal(cal.events.filter((e) => e.event_type === '개인보강')[0].title, '홍길동 보강');
+    api.cancelMakeupSession(classMakeup.makeup_id);
+    const after = api.getCalendar('2026-09-14', '2026-09-17');
+    assert.equal(after.events.filter((e) => e.event_type === '반보강').length, 0);
+  });
+
+  it('computes monday-based week range', () => {
+    const week = LMS.weekRange('2026-09-16');
+    assert.equal(week.start, '2026-09-14');
+    assert.equal(week.end, '2026-09-20');
+    assert.equal(LMS.nextGrade('중2'), '중3');
+    assert.equal(LMS.nextGrade('고3'), '');
+    assert.equal(LMS.nextGrade('기타'), '');
+  });
 });
