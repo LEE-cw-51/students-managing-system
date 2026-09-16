@@ -134,9 +134,16 @@ describe('reports and stats', () => {
     const stats = api.getMonthlyStats(seeded.students[0].student_id, 2026, 9);
     assert.equal(stats.test_count, 2);
     assert.equal(stats.test_average, 85);
+    assert.equal(stats.test_median, 85);
+    assert.equal(stats.test_high, 90);
+    assert.equal(stats.test_low, 80);
+    assert.equal(stats.test_median_display, '85.0');
+    const monthly = api.generateMonthlyReport(seeded.students[0].student_id, 2026, 9);
+    assert.match(monthly.text, /평균은 85\.0점입니다\. \(중간값 85\.0점, 최고 90\.0점, 최저 80\.0점\)/);
     const none = api.getMonthlyStats(seeded.students[1].student_id, 2026, 9);
     assert.equal(none.test_count, 0);
     assert.equal(none.test_average_display, '-');
+    assert.equal(none.test_median_display, '-');
   });
 
   it('builds daily reports from lessons and settings', () => {
@@ -145,7 +152,13 @@ describe('reports and stats', () => {
     const batch = api.generateDailyReports('2026-09-14', seeded.class.class_id);
     assert.equal(batch.class_test_average.test_count, 2);
     assert.equal(batch.class_test_average.test_average, 95);
+    assert.equal(batch.class_test_average.test_median, 95);
+    assert.equal(batch.class_test_average.test_high, 100);
+    assert.equal(batch.class_test_average.test_low, 90);
     assert.equal(batch.class_test_average.test_average_display, '95.0');
+    assert.equal(batch.class_test_average.test_median_display, '95.0');
+    assert.equal(batch.class_test_average.test_high_display, '100.0');
+    assert.equal(batch.class_test_average.test_low_display, '90.0');
     assert.deepEqual(batch.reports.map((r) => r.student_name), ['김철수', '이영희', '홍길동']);
 
     const undone = api.getTodayClassSession('2026-09-14', seeded.class.class_id)
@@ -154,7 +167,8 @@ describe('reports and stats', () => {
     assert.match(text, /2026년 9월 14일 월요일/);
     assert.match(text, /김철수 학생/);
     assert.match(text, /1\. 출석: 출석/);
-    assert.match(text, /2\. 테스트: 미실시 \(반 평균 95\.0점\)/);
+    assert.match(text, /2\. 테스트: 미실시/);
+    assert.doesNotMatch(text, /반 평균/);
     assert.match(text, /3\. 과제 이행률: B\(89~70%\)/);
     assert.match(text, /4\. 집중도: B/);
     assert.match(text, /5\. 학습 진도:/);
@@ -166,7 +180,8 @@ describe('reports and stats', () => {
       .students.find((s) => s.name === '홍길동');
     const t2 = api.generateDailyReport(hong.lesson.lesson_id).text;
     assert.match(t2, /18 \/ 20/);
-    assert.match(t2, /난이도: 중, 반 평균 95\.0점/);
+    assert.match(t2, /난이도: 중/);
+    assert.match(t2, /\(반 평균 95\.0 · 중간값 95\.0 · 최고 100\.0 · 최저 90\.0\)/);
     assert.match(t2, /4\. 집중도: A/);
     assert.match(t2, /7\. 특이사항: 계산 실수가 잦음/);
   });
@@ -200,7 +215,19 @@ describe('reports and stats', () => {
     ]);
     assert.equal(avg.test_count, 2);
     assert.equal(avg.test_average, 85);
+    assert.equal(avg.test_median, 85);
+    assert.equal(avg.test_high, 90);
+    assert.equal(avg.test_low, 80);
     assert.equal(avg.test_average_display, '85.0');
+    assert.equal(avg.test_median_display, '85.0');
+    assert.equal(avg.test_high_display, '90.0');
+    assert.equal(avg.test_low_display, '80.0');
+  });
+
+  it('computes median for odd and even score lists', () => {
+    assert.equal(LMS.median([10, 30, 20]), 20);
+    assert.equal(LMS.median([10, 40, 20, 30]), 25);
+    assert.equal(LMS.median([]), null);
   });
 
   it('collapses repeated progress in monthly reports', () => {

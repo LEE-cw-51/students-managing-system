@@ -299,12 +299,19 @@
       if (n !== null) scores.push(n);
     });
     var avg = scores.length ? scores.reduce(function (a, b) { return a + b; }, 0) / scores.length : null;
+    var median = null;
+    if (scores.length) {
+      var sorted = scores.slice().sort(function (a, b) { return a - b; });
+      var mid = Math.floor(sorted.length / 2);
+      median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
     return {
       total_lessons: (rows || []).length,
       present_count: present,
       absent_count: absent,
       test_count: scores.length,
       test_average_display: formatAverage(avg),
+      test_median_display: formatAverage(median),
       test_high_display: scores.length ? formatAverage(Math.max.apply(null, scores)) : '-',
       test_low_display: scores.length ? formatAverage(Math.min.apply(null, scores)) : '-'
     };
@@ -693,8 +700,8 @@
         '<p class="muted">100점 환산 · 실시한 날만 표시합니다.</p>' +
         svgLineChart(tests, { title: '테스트 점수 추이', empty: '실시된 테스트가 없습니다.' }) +
         (stats.test_count
-          ? '<p class="muted">실시 ' + stats.test_count + '회 · 최고 ' + stats.test_high_display +
-            ' · 최저 ' + stats.test_low_display + '</p>'
+          ? '<p class="muted">실시 ' + stats.test_count + '회 · 중간값 ' + stats.test_median_display +
+            ' · 최고 ' + stats.test_high_display + ' · 최저 ' + stats.test_low_display + '</p>'
           : '') +
       '</div>' +
       '<div class="card"><h3 style="margin-top:0">과제 이행률 · 집중도</h3>' +
@@ -869,11 +876,13 @@
             return;
           }
           var summary = avg && avg.test_count
-            ? '<div class="card"><div class="grid stats stats-2">' +
+            ? '<div class="card"><div class="grid stats stats-4">' +
               stat('실시 테스트', avg.test_count) +
               stat('반 평균', avg.test_average_display) +
-              '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산으로 평균합니다. 각 학생 보고서에 반 평균이 포함됩니다.</p></div>'
-            : '<div class="card"><p class="muted" style="margin:0">이날 실시된 테스트가 없어 반 평균은 표시하지 않습니다.</p></div>';
+              stat('중간값', avg.test_median_display) +
+              stat('최고/최저', avg.test_high_display + ' / ' + avg.test_low_display) +
+              '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산합니다. 실시한 학생 보고서에 반 통계 한 줄이 포함됩니다.</p></div>'
+            : '<div class="card"><p class="muted" style="margin:0">이날 실시된 테스트가 없어 반 통계는 표시하지 않습니다.</p></div>';
           document.getElementById('daily-list').innerHTML = summary + rows.map(function (r, i) {
             return '<div class="card report-card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +
               '<div><button class="btn secondary copy-btn" data-i="' + i + '">복사</button> <button class="btn ghost sel-btn" data-i="' + i + '">전체 선택</button></div></div>' +
@@ -926,6 +935,9 @@
             '<div class="grid stats">' +
               stat('수업', s.total_lessons) + stat('출석', s.present_count) +
               stat('결석', s.absent_count) + stat('테스트 평균', s.test_average_display) +
+              stat('중간값', s.test_median_display) +
+              stat('최고', s.test_high_display) +
+              stat('최저', s.test_low_display) +
             '</div>' +
             '<div class="card" style="margin-top:14px"><p>과제 A ' + s.assignment_A + ' · B ' + s.assignment_B + ' · C ' + s.assignment_C +
             ' / 집중도 A ' + s.concentration_A + ' B ' + s.concentration_B + ' C ' + s.concentration_C + ' D ' + s.concentration_D + '</p>' +
@@ -981,7 +993,9 @@
           api('getMonthlyStats', [sid, y, m]).then(function (s) {
             document.getElementById('stats-body').innerHTML = '<div class="grid stats">' +
               stat('수업', s.total_lessons) + stat('출석', s.present_count) + stat('결석', s.absent_count) +
-              stat('평균', s.test_average_display) + '</div>' +
+              stat('평균', s.test_average_display) +
+              stat('중간값', s.test_median_display) +
+              '</div>' +
               '<div class="card" style="margin-top:14px"><p>최고 ' + esc(s.test_high_display) + ' / 최저 ' + esc(s.test_low_display) +
               '</p><p>진도 ' + esc(s.progress_summary || '-') + '</p></div>';
           }).catch(function (e) { toast(e.message, true); });
