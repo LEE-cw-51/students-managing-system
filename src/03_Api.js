@@ -46,6 +46,8 @@ function getStudent(studentId) { return wrap_(function (api) { return api.getStu
 function createStudent(data) { return wrap_(function (api) { return api.createStudent(data); }); }
 function updateStudent(data) { return wrap_(function (api) { return api.updateStudent(data); }); }
 function archiveStudent(studentId) { return wrap_(function (api) { return api.archiveStudent(studentId); }); }
+function previewGradePromotion() { return wrap_(function (api) { return api.previewGradePromotion(); }); }
+function promoteGrades() { return wrap_(function (api) { return api.promoteGrades(); }); }
 
 function getClasses(filter) { return wrap_(function (api) { return api.getClasses(filter || {}); }); }
 function getClass(classId) { return wrap_(function (api) { return api.getClass(classId); }); }
@@ -82,6 +84,16 @@ function generateMonthlyReport(studentId, year, month) {
   return wrap_(function (api) { return api.generateMonthlyReport(studentId, year, month); });
 }
 function saveMonthlyReport(data) { return wrap_(function (api) { return api.saveMonthlyReport(data); }); }
+
+function getCounselingNotes(studentId) { return wrap_(function (api) { return api.getCounselingNotes(studentId); }); }
+function saveCounselingNote(data) { return wrap_(function (api) { return api.saveCounselingNote(data); }); }
+function deleteCounselingNote(noteId) { return wrap_(function (api) { return api.deleteCounselingNote(noteId); }); }
+
+function getMakeupSession(makeupId) { return wrap_(function (api) { return api.getMakeupSession(makeupId); }); }
+function saveMakeupSession(data) { return wrap_(function (api) { return api.saveMakeupSession(data); }); }
+function updateMakeupSession(data) { return wrap_(function (api) { return api.updateMakeupSession(data); }); }
+function cancelMakeupSession(makeupId) { return wrap_(function (api) { return api.cancelMakeupSession(makeupId); }); }
+function getCalendar(start, end) { return wrap_(function (api) { return api.getCalendar(start, end); }); }
 
 function getSettings() { return wrap_(function (api) { return api.getSettings(); }); }
 function saveSettings(map) { return wrap_(function (api) { return api.saveSettings(map); }); }
