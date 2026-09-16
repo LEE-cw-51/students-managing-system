@@ -802,6 +802,26 @@ LMS.rowValues = function (row, headers) {
   });
 };
 
+LMS.compactHeaderRow = function (row) {
+  var out = [];
+  for (var i = 0; i < (row || []).length; i++) {
+    var v = LMS.toStr(row[i]);
+    if (!v) break;
+    out.push(v);
+  }
+  return out;
+};
+
+LMS.headersMatch = function (current, expected) {
+  current = current || [];
+  expected = expected || [];
+  if (current.length !== expected.length) return false;
+  for (var i = 0; i < expected.length; i++) {
+    if (LMS.toStr(current[i]) !== LMS.toStr(expected[i])) return false;
+  }
+  return true;
+};
+
 /**
  * Compare previous sheet rows to the next in-memory table.
  * Sheet row numbers are 1-based with row 1 = headers, so data starts at 2.

@@ -5,7 +5,7 @@ var LMS = LMS || {};
 
 var SHEET_STORE_ = null;
 var SERVICE_ = null;
-var SCHEMA_VERSION_ = 'lms-schema-v1';
+var SCHEMA_VERSION_ = 'lms-schema-v2';
 var ALLOW_CACHE_KEY_ = 'lms_allow_emails';
 var CACHE_TTL_ = 180;
 var CACHEABLE_TABLES_ = {
@@ -92,12 +92,19 @@ function createSheetStore_() {
     Object.keys(LMS.TABLES).forEach(function (name) {
       var headers = LMS.TABLES[name];
       var sh = sheetByName(ss, name);
-      var first = sh.getRange(1, 1, 1, headers.length).getValues()[0];
-      var empty = first.every(function (v) { return v === '' || v === null; });
-      if (empty) {
+      var lastCol = Math.max(sh.getLastColumn(), headers.length);
+      var first = lastCol < 1 ? [] : sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      var current = LMS.compactHeaderRow(first);
+      if (!current.length) {
         sh.getRange(1, 1, 1, headers.length).setValues([headers]);
         sh.setFrozenRows(1);
         sh.getRange(1, 1, 1, headers.length).setNumberFormat('@');
+        return;
+      }
+      if (!LMS.headersMatch(current, headers)) {
+        var rows = readRows_(sh, headers);
+        writeRows_(sh, headers, rows);
+        sh.setFrozenRows(1);
       }
     });
     seedDefaults_(ss);
@@ -117,12 +124,15 @@ function createSheetStore_() {
       writeRows_(settingsSheet, LMS.TABLES.Settings, rows);
     }
     var metaSheet = sheetByName(ss, '_Meta');
-    if (metaSheet.getLastRow() < 2) {
-      var meta = LMS.META_PREFIXES.map(function (p) {
-        return { prefix: p, next_seq: 1 };
-      });
-      writeRows_(metaSheet, LMS.TABLES._Meta, meta);
-    }
+    var meta = readRows_(metaSheet, LMS.TABLES._Meta);
+    var changed = !meta.length;
+    LMS.META_PREFIXES.forEach(function (prefix) {
+      if (!LMS.findById(meta, 'prefix', prefix)) {
+        meta.push({ prefix: prefix, next_seq: 1 });
+        changed = true;
+      }
+    });
+    if (changed) writeRows_(metaSheet, LMS.TABLES._Meta, meta);
   }
 
   function readRows_(sh, headers) {

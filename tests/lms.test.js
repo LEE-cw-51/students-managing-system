@@ -336,6 +336,24 @@ describe('bootstrap and caching', () => {
     );
     assert.equal(diff.needsFullRewrite, true);
   });
+
+  it('detects sheet header changes for new student and class columns', () => {
+    const oldStudents = [
+      'student_id', 'name', 'grade', 'parent_phone', 'enrollment_date',
+      'status', 'memo', 'created_at', 'updated_at'
+    ];
+    const oldClasses = [
+      'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
+      'weekday', 'start_time', 'end_time', 'memo', 'status', 'created_at', 'updated_at'
+    ];
+    assert.equal(LMS.headersMatch(oldStudents, LMS.TABLES.Students), false);
+    assert.equal(LMS.headersMatch(oldClasses, LMS.TABLES.Classes), false);
+    assert.equal(LMS.headersMatch(LMS.TABLES.Students, LMS.TABLES.Students), true);
+    assert.deepEqual(
+      LMS.compactHeaderRow(['student_id', 'name', '', 'grade']),
+      ['student_id', 'name']
+    );
+  });
 });
 
 describe('student extras counseling makeup and calendar', () => {

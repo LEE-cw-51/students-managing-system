@@ -341,9 +341,13 @@
     var monthBtn = document.getElementById('cal-month');
     if (weekBtn) weekBtn.className = 'btn' + (state.cal.view === 'week' ? '' : ' secondary');
     if (monthBtn) monthBtn.className = 'btn' + (state.cal.view === 'month' ? '' : ' secondary');
+    state.cal.req = (state.cal.req || 0) + 1;
+    var req = state.cal.req;
     api('getCalendar', [range.start, range.end]).then(function (res) {
+      if (!state.cal || req !== state.cal.req) return;
       paintCalendar(res.events || [], range);
     }).catch(function (e) {
+      if (!state.cal || req !== state.cal.req) return;
       var body = document.getElementById('cal-body');
       if (body) body.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
     });
