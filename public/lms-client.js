@@ -429,40 +429,113 @@
     });
   }
 
+  function selectedMakeupStudentIds(root) {
+    return Array.prototype.map.call(root.querySelectorAll('[name=student_ids]:checked'), function (el) {
+      return el.value;
+    });
+  }
+
+  function makeupStudentListHtml(classId, selectedIds) {
+    selectedIds = selectedIds || [];
+    var selected = {};
+    selectedIds.forEach(function (id) { selected[id] = true; });
+    var list = (state.cache.students || []).filter(function (s) {
+      if (!(s.status === '재원' || selected[s.student_id])) return false;
+      if (!classId) return true;
+      var inClass = (s.current_classes || []).some(function (c) {
+        return String(c.class_id) === String(classId);
+      });
+      return inClass || selected[s.student_id];
+    });
+    if (!list.length) {
+      return '<p class="muted" style="margin:0">선택할 학생이 없습니다. 반을 선택하거나 학생을 먼저 배정하세요.</p>';
+    }
+    return '<div class="multi-check-actions">' +
+      '<button type="button" class="btn ghost" id="makeup-select-all">전체 선택</button>' +
+      '<button type="button" class="btn ghost" id="makeup-select-none">선택 해제</button>' +
+      '</div>' +
+      '<div class="multi-check">' +
+      list.map(function (s) {
+        return '<label class="check-item"><input type="checkbox" name="student_ids" value="' +
+          esc(s.student_id) + '"' + (selected[s.student_id] ? ' checked' : '') + '> ' +
+          esc(s.name) + ' · ' + esc(s.grade) + '</label>';
+      }).join('') +
+      '</div>';
+  }
+
+  function bindMakeupStudentControls(box) {
+    var allBtn = box.querySelector('#makeup-select-all');
+    var noneBtn = box.querySelector('#makeup-select-none');
+    if (allBtn) {
+      allBtn.onclick = function () {
+        box.querySelectorAll('[name=student_ids]').forEach(function (el) { el.checked = true; });
+      };
+    }
+    if (noneBtn) {
+      noneBtn.onclick = function () {
+        box.querySelectorAll('[name=student_ids]').forEach(function (el) { el.checked = false; });
+      };
+    }
+  }
+
+  function refreshMakeupStudents(box) {
+    var host = box.querySelector('#makeup-students');
+    if (!host) return;
+    var classId = box.querySelector('[name=class_id]').value;
+    host.innerHTML = makeupStudentListHtml(classId, selectedMakeupStudentIds(box));
+    bindMakeupStudentControls(box);
+  }
+
   function showMakeupForm(row) {
     var box = document.getElementById('makeup-form');
     if (!box) return;
     loadLookups().then(function () {
       row = row || { makeup_date: state.today, kind: '반', status: '예정' };
+      var selectedIds = row.student_id ? [row.student_id] : [];
       box.innerHTML = '<div class="card"><h3>' + (row.makeup_id ? '보강 수정' : '보강 추가') + '</h3><div class="row">' +
         field('종류', select('kind', ['반', '학생'], row.kind || '반')) +
         field('날짜', input('makeup_date', row.makeup_date || state.today, 'date')) +
         field('시작', input('start_time', row.start_time || '18:00', 'time')) +
         field('종료', input('end_time', row.end_time || '20:00', 'time')) +
         field('반', select('class_id', classOptions(row.class_id, true), row.class_id || '')) +
-        field('학생', select('student_id', studentOptions(row.student_id), row.student_id || '')) +
+        '<div class="field field-wide" id="makeup-students-field"><label>학생 (여러 명 선택 가능)</label><div id="makeup-students">' +
+          makeupStudentListHtml(row.class_id || '', selectedIds) +
+        '</div></div>' +
         field('제목', input('title', row.title || '')) +
         field('상태', select('status', ['예정', '완료', '취소'], row.status || '예정')) +
         field('메모', '<textarea name="memo">' + esc(row.memo) + '</textarea>') +
         '</div><div class="row"><button class="btn" id="save-makeup">저장</button>' +
         (row.makeup_id ? '<button class="btn danger" id="cancel-makeup">취소 처리</button>' : '') +
         '<button class="btn secondary" id="close-makeup">닫기</button></div></div>';
+      function syncKind() {
+        var k = box.querySelector('[name=kind]').value;
+        var stuField = box.querySelector('#makeup-students-field');
+        if (stuField) stuField.style.display = k === '학생' ? '' : 'none';
+      }
+      syncKind();
+      bindMakeupStudentControls(box);
+      box.querySelector('[name=kind]').onchange = syncKind;
+      box.querySelector('[name=class_id]').onchange = function () { refreshMakeupStudents(box); };
       document.getElementById('save-makeup').onclick = function () {
         var form = this.closest('.card');
+        var kind = form.querySelector('[name=kind]').value;
+        var ids = kind === '학생' ? selectedMakeupStudentIds(form) : [];
         var data = {
           makeup_id: row.makeup_id,
-          kind: form.querySelector('[name=kind]').value,
+          kind: kind,
           makeup_date: form.querySelector('[name=makeup_date]').value,
           start_time: form.querySelector('[name=start_time]').value,
           end_time: form.querySelector('[name=end_time]').value,
           class_id: form.querySelector('[name=class_id]').value,
-          student_id: form.querySelector('[name=student_id]').value,
+          student_id: ids[0] || '',
+          student_ids: ids,
           title: form.querySelector('[name=title]').value,
           status: form.querySelector('[name=status]').value,
           memo: form.querySelector('[name=memo]').value
         };
-        api('saveMakeupSession', [data]).then(function () {
-          toast('보강 일정을 저장했습니다.');
+        api('saveMakeupSession', [data]).then(function (res) {
+          var n = res && res.created_count ? res.created_count : 1;
+          toast(n > 1 ? n + '건의 보강 일정을 저장했습니다.' : '보강 일정을 저장했습니다.');
           box.innerHTML = '';
           loadCalendar();
         }).catch(function (e) { toast(e.message, true); });
@@ -584,11 +657,12 @@
     if (!points.length) {
       return '<div class="empty">' + esc(opts.empty || '표시할 데이터가 없습니다.') + '</div>';
     }
-    var w = Math.max(520, points.length * 72);
-    var h = 220;
+    var hasClass = points.some(function (p) { return p.y2 != null && isFinite(Number(p.y2)); });
+    var w = Math.max(520, points.length * (hasClass ? 88 : 72));
+    var h = hasClass ? 248 : 220;
     var padL = 40;
     var padR = 16;
-    var padT = 22;
+    var padT = hasClass ? 28 : 22;
     var padB = 36;
     var innerW = w - padL - padR;
     var innerH = h - padT - padB;
@@ -607,16 +681,46 @@
     var d = points.map(function (p, i) {
       return (i === 0 ? 'M' : 'L') + xAt(i).toFixed(1) + ' ' + yAt(p.y).toFixed(1);
     }).join(' ');
+    var classD = '';
+    if (hasClass) {
+      var started = false;
+      points.forEach(function (p, i) {
+        if (p.y2 == null || !isFinite(Number(p.y2))) {
+          started = false;
+          return;
+        }
+        classD += (started ? 'L' : 'M') + xAt(i).toFixed(1) + ' ' + yAt(p.y2).toFixed(1);
+        started = true;
+      });
+    }
     var dots = points.map(function (p, i) {
-      return '<circle class="chart-dot" cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(p.y).toFixed(1) + '" r="4" />' +
+      var html = '';
+      if (hasClass && p.y2 != null && isFinite(Number(p.y2))) {
+        html += '<circle class="chart-dot class-avg" cx="' + xAt(i).toFixed(1) + '" cy="' +
+          yAt(p.y2).toFixed(1) + '" r="3.5" />' +
+          '<text class="chart-value class-avg" x="' + xAt(i).toFixed(1) + '" y="' +
+          (yAt(p.y2) + 16).toFixed(1) + '" text-anchor="middle">' + esc(p.label2) + '</text>';
+      }
+      html += '<circle class="chart-dot" cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(p.y).toFixed(1) + '" r="4" />' +
         '<text class="chart-value" x="' + xAt(i).toFixed(1) + '" y="' + (yAt(p.y) - 10).toFixed(1) + '" text-anchor="middle">' +
         esc(p.label) + '</text>' +
         '<text class="chart-axis" x="' + xAt(i).toFixed(1) + '" y="' + (h - 12) + '" text-anchor="middle">' +
         esc(p.xLabel) + '</text>';
+      return html;
     }).join('');
+    var classPath = classD
+      ? '<path class="chart-line class-avg" d="' + classD + '" fill="none" />'
+      : '';
+    var legend = hasClass
+      ? '<div class="chart-legend">' +
+        '<span><i class="chart-legend-swatch"></i>학생 점수</span>' +
+        '<span><i class="chart-legend-swatch class-avg"></i>그날 반 평균</span>' +
+        '</div>'
+      : '';
     return '<div class="chart-wrap"><svg class="chart-svg" viewBox="0 0 ' + w + ' ' + h +
       '" role="img" aria-label="' + esc(opts.title || '차트') + '">' +
-      grid + '<path class="chart-line" d="' + d + '" fill="none" />' + dots + '</svg></div>';
+      grid + classPath + '<path class="chart-line" d="' + d + '" fill="none" />' + dots + '</svg>' +
+      legend + '</div>';
   }
 
   function gradeInfo(kind, value) {
@@ -998,7 +1102,16 @@
     var tests = rows.map(function (l) {
       var y = normalizedScore(l);
       if (y === null) return null;
-      return { xLabel: shortDate(l.lesson_date), y: y, label: formatAverage(y) };
+      var classAvg = l.class_test_average && l.class_test_average.test_count
+        ? l.class_test_average.test_average
+        : null;
+      return {
+        xLabel: shortDate(l.lesson_date),
+        y: y,
+        label: formatAverage(y),
+        y2: classAvg,
+        label2: classAvg == null ? '' : formatAverage(classAvg)
+      };
     }).filter(Boolean);
     return '<div class="grid stats">' +
       stat('수업', stats.total_lessons) +
@@ -1008,7 +1121,7 @@
     '</div>' +
     '<div class="grid chart-grid">' +
       '<div class="card"><h3 style="margin-top:0">테스트 점수 추이</h3>' +
-        '<p class="muted">100점 환산 · 실시한 날만 표시합니다.</p>' +
+        '<p class="muted">100점 환산 · 실시한 날만 표시합니다. 주황은 학생 점수, 남색 점선은 그날 반 평균입니다.</p>' +
         svgLineChart(tests, { title: '테스트 점수 추이', empty: '실시된 테스트가 없습니다.' }) +
         (stats.test_count
           ? '<p class="muted">실시 ' + stats.test_count + '회 · 중간값 ' + stats.test_median_display +

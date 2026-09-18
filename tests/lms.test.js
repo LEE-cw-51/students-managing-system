@@ -166,13 +166,13 @@ describe('reports and stats', () => {
     const text = api.generateDailyReport(undone.lesson.lesson_id).text;
     assert.match(text, /2026년 9월 14일 월요일/);
     assert.match(text, /김철수 학생/);
-    assert.match(text, /1\. 출석: 출석/);
-    assert.match(text, /2\. 테스트: 미실시/);
+    assert.doesNotMatch(text, /출석:/);
+    assert.doesNotMatch(text, /집중도:/);
+    assert.match(text, /1\. 테스트: 미실시/);
     assert.doesNotMatch(text, /반 평균/);
-    assert.match(text, /3\. 과제 이행률: B\(89~70%\)/);
-    assert.match(text, /4\. 집중도: B/);
-    assert.match(text, /5\. 학습 진도:/);
-    assert.match(text, /6\. 과제 안내:/);
+    assert.match(text, /2\. 과제 이행률: B\(89~70%\)/);
+    assert.match(text, /3\. 학습 진도:/);
+    assert.match(text, /4\. 과제 안내:/);
     assert.doesNotMatch(text, /과제이행률/);
     assert.doesNotMatch(text, /NaN|undefined|null|#DIV\/0!/);
 
@@ -182,8 +182,8 @@ describe('reports and stats', () => {
     assert.match(t2, /18 \/ 20/);
     assert.match(t2, /난이도: 중/);
     assert.match(t2, /\(반 평균 95\.0 · 중간값 95\.0 · 최고 100\.0 · 최저 90\.0\)/);
-    assert.match(t2, /4\. 집중도: A/);
-    assert.match(t2, /7\. 특이사항: 계산 실수가 잦음/);
+    assert.doesNotMatch(t2, /집중도:/);
+    assert.match(t2, /5\. 특이사항: 계산 실수가 잦음/);
   });
 
   it('omits class average from daily reports when no tests were taken', () => {
@@ -201,10 +201,10 @@ describe('reports and stats', () => {
     const batch = api.generateDailyReports('2026-09-14', c.class_id);
     assert.equal(batch.class_test_average.test_count, 0);
     assert.equal(batch.class_test_average.test_average_display, '-');
-    assert.match(batch.reports[0].text, /1\. 출석: 결석/);
-    assert.match(batch.reports[0].text, /2\. 테스트: 미실시/);
+    assert.match(batch.reports[0].text, /1\. 테스트: 미실시/);
+    assert.doesNotMatch(batch.reports[0].text, /출석:/);
     assert.doesNotMatch(batch.reports[0].text, /반 평균/);
-    assert.match(batch.reports[0].text, /4\. 집중도: 결석/);
+    assert.doesNotMatch(batch.reports[0].text, /집중도:/);
   });
 
   it('averages daily class tests after normalizing different max scores', () => {
@@ -454,6 +454,63 @@ describe('student extras counseling makeup and calendar', () => {
       makeup_date: '2026-09-16',
       student_id: ''
     }), /학생을 선택/);
+  });
+
+  it('creates one makeup session per selected student', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    const res = api.saveMakeupSession({
+      kind: '학생',
+      class_id: seeded.class.class_id,
+      makeup_date: '2026-09-18',
+      start_time: '18:00',
+      end_time: '19:00',
+      student_ids: [seeded.students[0].student_id, seeded.students[1].student_id]
+    });
+    assert.equal(res.created_count, 2);
+    assert.equal(res.sessions.length, 2);
+    const cal = api.getCalendar('2026-09-18', '2026-09-18');
+    const personal = cal.events.filter((e) => e.event_type === '개인보강');
+    assert.equal(personal.length, 2);
+    assert.deepEqual(personal.map((e) => e.title).sort(), ['김철수 보강', '홍길동 보강']);
+    assert.throws(() => api.saveMakeupSession({
+      makeup_id: res.sessions[0].makeup_id,
+      kind: '학생',
+      makeup_date: '2026-09-18',
+      student_ids: [seeded.students[0].student_id, seeded.students[1].student_id]
+    }), /한 명만/);
+  });
+
+  it('attaches that day class average to student lessons', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    api.saveLessonsBatch([
+      {
+        lesson_date: '2026-09-16',
+        student_id: seeded.students[0].student_id,
+        class_id: seeded.class.class_id,
+        attendance: '출석',
+        test_status: '실시',
+        test_score: 10,
+        test_max_score: 20
+      },
+      {
+        lesson_date: '2026-09-16',
+        student_id: seeded.students[2].student_id,
+        class_id: seeded.class.class_id,
+        attendance: '출석',
+        test_status: '실시',
+        test_score: 16,
+        test_max_score: 20
+      }
+    ]);
+    const rows = api.getStudentLessons(seeded.students[0].student_id, '2026-09-01', '2026-09-30');
+    const byDate = {};
+    rows.forEach((r) => { byDate[r.lesson_date] = r; });
+    assert.equal(byDate['2026-09-14'].class_test_average.test_average, 95);
+    assert.equal(byDate['2026-09-14'].class_test_average.test_average_display, '95.0');
+    assert.equal(byDate['2026-09-16'].class_test_average.test_average, 65);
+    assert.equal(byDate['2026-09-16'].class_test_average.test_average_display, '65.0');
   });
 
   it('puts regular classes and makeup sessions on the calendar', () => {

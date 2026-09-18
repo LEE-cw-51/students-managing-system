@@ -413,9 +413,26 @@ LMS.createService = function (store) {
 
   function getStudentLessons(studentId, startDate, endDate) {
     requireStudent(studentId);
-    return table('Lessons').filter(function (row) {
+    var all = table('Lessons');
+    var rows = all.filter(function (row) {
       if (LMS.toStr(row.student_id) !== LMS.toStr(studentId)) return false;
       return LMS.inRange(row.lesson_date, startDate, endDate);
+    });
+    var cache = {};
+    function classAvg(date, classId) {
+      var key = LMS.toStr(date) + '|' + LMS.toStr(classId);
+      if (!Object.prototype.hasOwnProperty.call(cache, key)) {
+        cache[key] = LMS.computeDailyClassTestAverage(all.filter(function (row) {
+          return LMS.toStr(row.lesson_date) === LMS.toStr(date) &&
+            LMS.toStr(row.class_id) === LMS.toStr(classId);
+        }));
+      }
+      return cache[key];
+    }
+    return rows.map(function (row) {
+      return Object.assign({}, row, {
+        class_test_average: classAvg(row.lesson_date, row.class_id)
+      });
     }).sort(function (a, b) {
       return LMS.toStr(b.lesson_date).localeCompare(LMS.toStr(a.lesson_date));
     });
@@ -689,30 +706,52 @@ LMS.createService = function (store) {
     return row;
   }
 
+  function makeupRecord(input, studentId, makeupId, ts, prev) {
+    return {
+      makeup_id: makeupId,
+      makeup_date: input.makeup_date,
+      start_time: input.start_time,
+      end_time: input.end_time,
+      kind: input.kind,
+      class_id: input.class_id,
+      student_id: studentId || '',
+      title: input.title,
+      memo: input.memo,
+      status: input.status,
+      created_at: prev && prev.created_at ? prev.created_at : ts,
+      updated_at: ts
+    };
+  }
+
   function saveMakeupSession(data) {
     return withLock(function () {
       var isUpdate = !LMS.isBlank(data && data.makeup_id);
       var input = LMS.validateMakeupSessionInput(data, isUpdate);
       if (input.class_id) requireClass(input.class_id);
-      if (input.student_id) requireStudent(input.student_id);
+      input.student_ids.forEach(function (id) { requireStudent(id); });
       var rows = table('MakeupSessions');
       var ts = now();
       if (isUpdate) {
         var prev = LMS.findById(rows, 'makeup_id', input.makeup_id);
         if (!prev) throw new Error('보강 일정을 찾을 수 없습니다.');
-        Object.keys(input).forEach(function (k) {
-          if (k === 'makeup_id') return;
-          prev[k] = input[k];
+        var updated = makeupRecord(input, input.student_id, prev.makeup_id, ts, prev);
+        Object.keys(updated).forEach(function (k) {
+          prev[k] = updated[k];
         });
-        prev.updated_at = ts;
         saveTable('MakeupSessions', rows);
         return prev;
       }
-      var row = Object.assign({}, input, {
-        makeup_id: nextIds('MKP', 1)[0],
-        created_at: ts,
-        updated_at: ts
-      });
+      if (input.kind === '학생' && input.student_ids.length > 1) {
+        var ids = nextIds('MKP', input.student_ids.length);
+        var created = input.student_ids.map(function (sid, i) {
+          var row = makeupRecord(input, sid, ids[i], ts);
+          rows.push(row);
+          return row;
+        });
+        saveTable('MakeupSessions', rows);
+        return { sessions: created, created_count: created.length };
+      }
+      var row = makeupRecord(input, input.student_id, nextIds('MKP', 1)[0], ts);
       rows.push(row);
       saveTable('MakeupSessions', rows);
       return row;

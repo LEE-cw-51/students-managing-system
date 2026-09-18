@@ -500,23 +500,21 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats) {
     greeting,
     '오늘 ' + name + ' 학생 학습 알림입니다.',
     '',
-    '1. 출석: ' + (LMS.toStr(lesson.attendance) || '-'),
-    '2. 테스트: ' + LMS.formatDailyTestLine(lesson)
+    '1. 테스트: ' + LMS.formatDailyTestLine(lesson)
   ];
 
   if (LMS.toStr(lesson.test_status) === '실시' && classStats && classStats.test_count) {
     lines.push('   ' + LMS.formatClassTestStatsLine(classStats));
   }
 
-  lines.push('3. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings));
-  lines.push('4. 집중도: ' + LMS.concentrationLabel(lesson.concentration));
-  lines.push('5. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'));
-  lines.push('6. 과제 안내:');
+  lines.push('2. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings));
+  lines.push('3. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'));
+  lines.push('4. 과제 안내:');
   lines.push(hwLines);
 
   var note = LMS.toStr(lesson.special_note);
   if (note) {
-    lines.push('7. 특이사항: ' + note);
+    lines.push('5. 특이사항: ' + note);
   }
 
   lines.push('');
@@ -659,6 +657,26 @@ LMS.validateCounselingNoteInput = function (data, isUpdate) {
   };
 };
 
+LMS.uniqueIds = function (values) {
+  var seen = {};
+  var out = [];
+  (values || []).forEach(function (v) {
+    var s = LMS.toStr(v);
+    if (!s || seen[s]) return;
+    seen[s] = true;
+    out.push(s);
+  });
+  return out;
+};
+
+LMS.makeupStudentIds = function (data) {
+  data = data || {};
+  var ids = [];
+  if (Array.isArray(data.student_ids)) ids = ids.concat(data.student_ids);
+  if (!LMS.isBlank(data.student_id)) ids.push(data.student_id);
+  return LMS.uniqueIds(ids);
+};
+
 LMS.validateMakeupSessionInput = function (data, isUpdate) {
   data = data || {};
   if (isUpdate && LMS.isBlank(data.makeup_id)) {
@@ -671,8 +689,12 @@ LMS.validateMakeupSessionInput = function (data, isUpdate) {
   if (kind === '반' && LMS.isBlank(data.class_id)) {
     throw new Error('반을 선택해 주세요.');
   }
-  if (kind === '학생' && LMS.isBlank(data.student_id)) {
+  var studentIds = kind === '학생' ? LMS.makeupStudentIds(data) : [];
+  if (kind === '학생' && !studentIds.length) {
     throw new Error('학생을 선택해 주세요.');
+  }
+  if (isUpdate && studentIds.length > 1) {
+    throw new Error('수정할 때는 학생을 한 명만 선택해 주세요.');
   }
   var start = LMS.toStr(data.start_time);
   var end = LMS.toStr(data.end_time);
@@ -689,7 +711,8 @@ LMS.validateMakeupSessionInput = function (data, isUpdate) {
     end_time: end,
     kind: kind,
     class_id: LMS.toStr(data.class_id),
-    student_id: LMS.toStr(data.student_id),
+    student_id: studentIds[0] || '',
+    student_ids: studentIds,
     title: LMS.toStr(data.title),
     memo: LMS.toStr(data.memo),
     status: status
