@@ -829,6 +829,153 @@ LMS.createService = function (store) {
     return saveSettings(obj);
   }
 
+  function rosterStudentIds(classId) {
+    var rels = table('StudentClasses');
+    var students = table('Students');
+    var ids = [];
+    rels.forEach(function (r) {
+      if (LMS.toStr(r.class_id) !== LMS.toStr(classId)) return;
+      if (LMS.toStr(r.status) !== '현재') return;
+      var s = LMS.findById(students, 'student_id', r.student_id);
+      if (s && LMS.toStr(s.status) === '재원') ids.push(s.student_id);
+    });
+    return ids;
+  }
+
+  function getTodayTeachingTasks(date) {
+    date = date || store.today();
+    if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var classes = table('Classes').filter(function (c) {
+      return LMS.toStr(c.status) === '운영' && LMS.classMeetsOn(c.weekday, date);
+    });
+    var lessons = table('Lessons').filter(function (l) {
+      return LMS.toStr(l.lesson_date) === date;
+    });
+    var students = table('Students');
+    var regularClasses = classes.map(function (cls) {
+      var rosterIds = rosterStudentIds(cls.class_id);
+      var recorded = {};
+      lessons.forEach(function (l) {
+        if (LMS.toStr(l.class_id) !== LMS.toStr(cls.class_id)) return;
+        if (rosterIds.indexOf(l.student_id) !== -1) recorded[l.student_id] = true;
+      });
+      var recordedCount = Object.keys(recorded).length;
+      return {
+        type: 'regular',
+        class_id: cls.class_id,
+        class_name: cls.class_name,
+        start_time: cls.start_time,
+        student_count: rosterIds.length,
+        recorded_count: recordedCount,
+        incomplete_count: Math.max(0, rosterIds.length - recordedCount),
+        complete: rosterIds.length > 0 && recordedCount >= rosterIds.length
+      };
+    });
+    var makeupSessions = table('MakeupSessions').filter(function (row) {
+      return LMS.toStr(row.makeup_date) === date && LMS.toStr(row.status) !== '취소';
+    }).map(function (row) {
+      var cls = LMS.findById(table('Classes'), 'class_id', row.class_id);
+      var student = LMS.findById(students, 'student_id', row.student_id);
+      return {
+        type: 'makeup',
+        makeup_id: row.makeup_id,
+        kind: row.kind,
+        class_id: row.class_id,
+        class_name: cls ? cls.class_name : '',
+        student_id: row.student_id,
+        student_name: student ? student.name : '',
+        title: makeupTitle(row, cls, student),
+        status: row.status,
+        start_time: row.start_time
+      };
+    });
+    return {
+      date: date,
+      regular_classes: regularClasses,
+      makeup_sessions: makeupSessions
+    };
+  }
+
+  function getLastLessonSnapshot(classId, beforeDate) {
+    requireClass(classId);
+    beforeDate = beforeDate || store.today();
+    if (!LMS.isIsoDate(beforeDate)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var lessons = table('Lessons').filter(function (row) {
+      return LMS.toStr(row.class_id) === LMS.toStr(classId) &&
+        LMS.toStr(row.lesson_date) < LMS.toStr(beforeDate);
+    });
+    if (!lessons.length) {
+      var cls = requireClass(classId);
+      return {
+        lesson_date: null,
+        progress: LMS.toStr(cls.current_progress),
+        homework: LMS.toStr(cls.class_homework),
+        student_assignments: {}
+      };
+    }
+    var byDate = {};
+    lessons.forEach(function (row) {
+      var d = LMS.toStr(row.lesson_date);
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(row);
+    });
+    var latestDate = Object.keys(byDate).sort().pop();
+    var dayLessons = byDate[latestDate];
+    var sample = dayLessons[0];
+    var studentAssignments = {};
+    dayLessons.forEach(function (row) {
+      if (row.student_id && row.assignment_completion) {
+        studentAssignments[row.student_id] = row.assignment_completion;
+      }
+    });
+    return {
+      lesson_date: latestDate,
+      progress: LMS.toStr(sample.progress),
+      homework: LMS.toStr(sample.homework),
+      student_assignments: studentAssignments
+    };
+  }
+
+  function getStudentLearningContext(studentId) {
+    var student = requireStudent(studentId);
+    var end = store.today();
+    var start = LMS.addDays(end, -28);
+    var lessons = getStudentLessons(studentId, start, end);
+    return {
+      student_id: student.student_id,
+      student_name: student.name,
+      period: { start: start, end: end },
+      summary: LMS.summarizeRecentLearning(lessons),
+      signals: LMS.detectLearningSignals(lessons)
+    };
+  }
+
+  function getLearningAlerts(limit) {
+    limit = limit || 8;
+    var end = store.today();
+    var start = LMS.addDays(end, -60);
+    var alerts = [];
+    table('Students').forEach(function (student) {
+      if (LMS.toStr(student.status) !== '재원') return;
+      var lessons = table('Lessons').filter(function (row) {
+        return LMS.toStr(row.student_id) === LMS.toStr(student.student_id) &&
+          LMS.inRange(row.lesson_date, start, end);
+      });
+      var signals = LMS.detectLearningSignals(lessons);
+      if (!signals.length) return;
+      alerts.push({
+        student_id: student.student_id,
+        student_name: student.name,
+        grade: student.grade,
+        signals: signals
+      });
+    });
+    alerts.sort(function (a, b) {
+      return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
+    });
+    return alerts.slice(0, limit);
+  }
+
   function getDashboard(date) {
     date = date || store.today();
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
@@ -867,7 +1014,9 @@ LMS.createService = function (store) {
       enrolled_count: allStudents.filter(function (s) { return s.status === '재원'; }).length,
       paused_count: allStudents.filter(function (s) { return s.status === '휴원'; }).length,
       archived_count: allStudents.filter(function (s) { return s.status === '퇴원'; }).length,
-      classes: classes
+      classes: classes,
+      teaching_tasks: getTodayTeachingTasks(date),
+      learning_alerts: getLearningAlerts(8)
     };
   }
 
@@ -976,6 +1125,10 @@ LMS.createService = function (store) {
     saveSettings: saveSettings,
     saveSetting: saveSetting,
     getDashboard: getDashboard,
+    getTodayTeachingTasks: getTodayTeachingTasks,
+    getLastLessonSnapshot: getLastLessonSnapshot,
+    getStudentLearningContext: getStudentLearningContext,
+    getLearningAlerts: getLearningAlerts,
     getClassStats: getClassStats,
     getLookups: getLookups,
     getBootstrap: getBootstrap

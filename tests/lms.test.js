@@ -284,7 +284,7 @@ describe('bootstrap and caching', () => {
     const api = svc();
     seedDemo(api);
     const boot = api.getBootstrap();
-    assert.equal(boot.settings.academy_name, '수학의 힘');
+    assert.equal(boot.settings.academy_name, '학생 관리 시스템');
     assert.equal(boot.today, '2026-09-14');
     assert.equal(boot.classes.length, 1);
     assert.equal(boot.students.length, 3);
@@ -552,5 +552,57 @@ describe('student extras counseling makeup and calendar', () => {
     assert.equal(LMS.nextGrade('중2'), '중3');
     assert.equal(LMS.nextGrade('고3'), '');
     assert.equal(LMS.nextGrade('기타'), '');
+  });
+});
+
+describe('teacher features', () => {
+  it('detects learning signals from recent lessons', () => {
+    const lessons = [
+      { lesson_date: '2026-09-01', test_status: '실시', test_score: 18, test_max_score: 20, assignment_completion: 'A', concentration: 'A' },
+      { lesson_date: '2026-09-08', test_status: '실시', test_score: 17, test_max_score: 20, assignment_completion: 'A', concentration: 'A' },
+      { lesson_date: '2026-09-10', test_status: '실시', test_score: 16, test_max_score: 20, assignment_completion: 'A', concentration: 'A' },
+      { lesson_date: '2026-09-11', test_status: '실시', test_score: 15, test_max_score: 20, assignment_completion: 'B', concentration: 'B' },
+      { lesson_date: '2026-09-12', test_status: '실시', test_score: 10, test_max_score: 20, assignment_completion: 'C', concentration: 'D' },
+      { lesson_date: '2026-09-14', test_status: '실시', test_score: 9, test_max_score: 20, assignment_completion: 'C', concentration: 'D' }
+    ];
+    const signals = LMS.detectLearningSignals(lessons);
+    assert.ok(signals.some((s) => s.code === 'assignment_c_streak'));
+    assert.ok(signals.some((s) => s.code === 'concentration_low_streak'));
+    assert.ok(signals.some((s) => s.code === 'test_score_drop'));
+  });
+
+  it('returns last lesson snapshot for a class', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
+    const s = api.createStudent({ name: '김철수', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-10',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      progress: '이차방정식',
+      homework: 'p.20',
+      assignment_completion: 'B'
+    });
+    const snap = api.getLastLessonSnapshot(c.class_id, '2026-09-14');
+    assert.equal(snap.lesson_date, '2026-09-10');
+    assert.equal(snap.progress, '이차방정식');
+    assert.equal(snap.homework, 'p.20');
+    assert.equal(snap.student_assignments[s.student_id], 'B');
+  });
+
+  it('builds teaching tasks and learning alerts on dashboard', () => {
+    const api = svc();
+    seedDemo(api);
+    const tasks = api.getTodayTeachingTasks('2026-09-14');
+    assert.equal(tasks.regular_classes.length, 1);
+    assert.equal(tasks.regular_classes[0].complete, true);
+    const dash = api.getDashboard('2026-09-14');
+    assert.ok(dash.teaching_tasks);
+    assert.ok(Array.isArray(dash.learning_alerts));
+    const ctx = api.getStudentLearningContext(api.getStudents({})[0].student_id);
+    assert.ok(ctx.summary);
+    assert.ok(Array.isArray(ctx.signals));
   });
 });

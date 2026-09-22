@@ -161,11 +161,28 @@
   function parseHash() {
     var raw = (location.hash || '#/dashboard').replace(/^#\/?/, '');
     var parts = raw.split('/').filter(Boolean);
-    return { route: parts[0] || 'dashboard', params: { id: parts[1] || '' } };
+    var route = parts[0] || 'dashboard';
+    var params = { id: parts[1] || '' };
+    if (route === 'today') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parts[1] || '')) {
+        params.date = parts[1];
+        params.classId = parts[2] || '';
+      } else if (parts[1]) {
+        params.classId = parts[1];
+      }
+    }
+    return { route: route, params: params };
   }
 
   function go(path) {
     location.hash = '#/' + path.replace(/^#\/?/, '');
+  }
+
+  function goToToday(date, classId) {
+    var path = 'today';
+    if (date) path += '/' + date;
+    if (classId) path += '/' + classId;
+    go(path);
   }
 
   function renderNav() {
@@ -174,7 +191,7 @@
     }).join('') + '<a href="/login" id="logout-link">로그아웃</a>';
     var title = (MENUS.filter(function (m) { return m.id === state.route; })[0] || {}).label || '학습관리';
     document.getElementById('page-title').textContent = title;
-    document.getElementById('brand-name').textContent = state.settings.academy_name || '수학의 힘';
+    document.getElementById('brand-name').textContent = state.settings.academy_name || '학생 관리 시스템';
     document.getElementById('top-date').textContent = state.today || '';
   }
 
@@ -201,7 +218,52 @@
     return opts;
   }
 
+  function teachingTasksHtml(tasks) {
+    tasks = tasks || { regular_classes: [], makeup_sessions: [] };
+    var incomplete = (tasks.regular_classes || []).filter(function (c) {
+      return c.student_count > 0 && !c.complete;
+    });
+    var makeups = (tasks.makeup_sessions || []).filter(function (m) {
+      return m.status === '예정';
+    });
+    if (!incomplete.length && !makeups.length) {
+      return '<div class="empty">오늘 처리할 미기록 수업이 없습니다.</div>';
+    }
+    var html = '<ul class="task-list">';
+    incomplete.forEach(function (c) {
+      html += '<li class="task-item"><button type="button" class="task-link" data-date="' + esc(tasks.date) +
+        '" data-class="' + esc(c.class_id) + '"><span class="task-title">' + esc(c.class_name) + '</span>' +
+        '<span class="muted">미기록 ' + c.incomplete_count + '명 / ' + c.student_count + '명</span></button></li>';
+    });
+    makeups.forEach(function (m) {
+      var label = m.title || (m.kind === '반' ? m.class_name + ' 보강' : m.student_name + ' 보강');
+      html += '<li class="task-item makeup"><span class="task-title">' + esc(label) + '</span>' +
+        '<span class="muted">보강 ' + esc(m.status) + (m.start_time ? ' · ' + esc(m.start_time) : '') + '</span>';
+      if (m.class_id) {
+        html += '<button type="button" class="btn ghost task-open" data-date="' + esc(tasks.date) +
+          '" data-class="' + esc(m.class_id) + '">수업 기록</button>';
+      }
+      html += '</li>';
+    });
+    html += '</ul>';
+    return html;
+  }
+
+  function learningAlertsHtml(alerts) {
+    if (!alerts || !alerts.length) {
+      return '<div class="empty">학습 주의 신호가 없습니다.</div>';
+    }
+    return '<ul class="alert-list">' + alerts.map(function (item) {
+      return '<li class="alert-item"><a class="link" href="#/students/' + esc(item.student_id) + '">' +
+        esc(item.student_name) + ' <span class="muted">' + esc(item.grade) + '</span></a>' +
+        '<div class="alert-tags">' + item.signals.map(function (sig) {
+          return '<span class="badge warn">' + esc(sig.label) + '</span>';
+        }).join('') + '</div></li>';
+    }).join('') + '</ul>';
+  }
+
   function paintDashboard(root, d) {
+    var tasks = d.teaching_tasks || { date: d.date, regular_classes: [], makeup_sessions: [] };
     root.innerHTML =
       '<div class="grid stats">' +
         stat('오늘 수업 반', d.today_class_count) +
@@ -210,7 +272,13 @@
         stat('기록 미완료', d.incomplete_count) +
       '</div>' +
       '<div class="split">' +
-        '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
+        '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 할 일</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
+          teachingTasksHtml(tasks) +
+        '</div>' +
+        '<div class="card"><h3>학습 주의 신호</h3>' + learningAlertsHtml(d.learning_alerts) + '</div>' +
+      '</div>' +
+      '<div class="split" style="margin-top:14px">' +
+        '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3></div>' +
           (d.classes.length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
             d.classes.map(function (c) {
               return '<tr><td>' + esc(c.class_name) + '</td><td>' + esc(c.weekday) + '</td><td>' +
@@ -238,7 +306,12 @@
         '<p class="muted" id="cal-label"></p>' +
         '<div id="cal-body"><div class="empty">달력을 불러오는 중...</div></div>' +
       '</div>';
-    document.getElementById('go-today').onclick = function () { go('today'); };
+    document.getElementById('go-today').onclick = function () { goToToday(d.date); };
+    root.querySelectorAll('.task-link, .task-open').forEach(function (btn) {
+      btn.onclick = function () {
+        goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
+      };
+    });
     bindCalendar();
   }
 
@@ -538,6 +611,9 @@
           toast(n > 1 ? n + '건의 보강 일정을 저장했습니다.' : '보강 일정을 저장했습니다.');
           box.innerHTML = '';
           loadCalendar();
+          if (data.status === '완료' && data.class_id) {
+            goToToday(data.makeup_date, data.class_id);
+          }
         }).catch(function (e) { toast(e.message, true); });
       };
       var cancelBtn = document.getElementById('cancel-makeup');
@@ -824,11 +900,29 @@
     return on ? on.getAttribute('data-value') : '';
   }
 
+  function applyLessonSnapshot(body, snapshot) {
+    if (!snapshot) return;
+    var bulkProgress = document.getElementById('bulk-progress');
+    var bulkHomework = document.getElementById('bulk-homework');
+    if (bulkProgress && !bulkProgress.value) bulkProgress.value = snapshot.progress || '';
+    if (bulkHomework && !bulkHomework.value) bulkHomework.value = snapshot.homework || '';
+    var assignments = snapshot.student_assignments || {};
+    body.querySelectorAll('.student-card').forEach(function (card) {
+      var sid = card.getAttribute('data-student');
+      if (assignments[sid]) setChip(card, 'assignment_completion', assignments[sid]);
+    });
+  }
+
   function loadSession(date, classId) {
     var body = document.getElementById('today-body');
     if (!classId) return;
     spinner(body);
-    api('getTodayClassSession', [date, classId]).then(function (session) {
+    Promise.all([
+      api('getTodayClassSession', [date, classId]),
+      api('getLastLessonSnapshot', [classId, date])
+    ]).then(function (pair) {
+      var session = pair[0];
+      var snapshot = pair[1];
       var cards = session.students.map(function (s) {
         var l = s.lesson || {};
         var tested = (l.test_status || '미실시') === '실시';
@@ -852,8 +946,12 @@
         '</article>';
       }).join('');
 
+      var snapshotHint = snapshot && snapshot.lesson_date
+        ? '<p class="muted">직전 수업: ' + esc(snapshot.lesson_date) + '</p>'
+        : '<p class="muted">이전 수업 기록이 없습니다. 반 설정의 진도·숙제를 참고합니다.</p>';
       body.innerHTML =
         '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 내용을 한 번에 넣은 뒤 학생별로 수정하세요.</p>' +
+          snapshotHint +
           '<div class="row">' +
             field('학습 진도', '<textarea id="bulk-progress"></textarea>') +
             field('과제 안내', '<textarea id="bulk-homework"></textarea>') +
@@ -862,12 +960,34 @@
             field('난이도', chipGroup('bulk_difficulty', ['상', '중', '하'], '중')) +
             field('과제 이행률', chipGroup('bulk_assign', ['A', 'B', 'C'], 'A')) +
           '</div>' +
-          '<button class="btn secondary" id="apply-bulk" type="button">전체 학생에게 적용</button></div>' +
+          '<div class="row">' +
+            '<button class="btn secondary" id="load-snapshot" type="button">직전 수업 진도·과제 불러오기</button>' +
+            '<button class="btn secondary" id="copy-assignments" type="button">지난 수업 과제 이행률 복사</button>' +
+            '<button class="btn secondary" id="apply-bulk" type="button">전체 학생에게 적용</button>' +
+          '</div></div>' +
         (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') +
         '<div class="bottom-bar"><button class="btn" id="save-today" style="width:100%">수업 기록 저장</button></div>' +
         '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
 
       bindChips(body);
+      var bulkProgress = document.getElementById('bulk-progress');
+      var bulkHomework = document.getElementById('bulk-homework');
+      applyLessonSnapshot(body, snapshot);
+      var loadSnapshotBtn = document.getElementById('load-snapshot');
+      if (loadSnapshotBtn) {
+        loadSnapshotBtn.onclick = function () {
+          if (bulkProgress) bulkProgress.value = snapshot.progress || '';
+          if (bulkHomework) bulkHomework.value = snapshot.homework || '';
+          toast('직전 수업 진도·과제를 불러왔습니다.');
+        };
+      }
+      var copyAssignmentsBtn = document.getElementById('copy-assignments');
+      if (copyAssignmentsBtn) {
+        copyAssignmentsBtn.onclick = function () {
+          applyLessonSnapshot(body, snapshot);
+          toast('지난 수업 과제 이행률을 복사했습니다.');
+        };
+      }
       var apply = document.getElementById('apply-bulk');
       if (apply) apply.onclick = function () {
         var p = document.getElementById('bulk-progress').value;
@@ -919,6 +1039,28 @@
       if (s1) s1.onclick = function () { save(s1); };
       if (s2) s2.onclick = function () { save(s2); };
     }).catch(fail(body));
+  }
+
+  function learningContextHtml(ctx) {
+    if (!ctx) return '';
+    var summary = ctx.summary || {};
+    var assignment = summary.assignment || {};
+    var concentration = summary.concentration || {};
+    var signals = ctx.signals || [];
+    return '<div class="card" id="learning-context"><h3 style="margin-top:0">최근 4주 학습 맥락</h3>' +
+      '<p class="muted">' + esc(ctx.period.start) + ' ~ ' + esc(ctx.period.end) + '</p>' +
+      '<div class="grid stats">' +
+        stat('수업', summary.lesson_count || 0) +
+        stat('시험 평균', summary.test_average_display || '-') +
+        stat('과제 A', assignment.A || 0) +
+        stat('집중도 D/결석', (concentration.D || 0) + (concentration.ABSENT || 0)) +
+      '</div>' +
+      (signals.length
+        ? '<div class="alert-tags" style="margin-top:10px">' + signals.map(function (sig) {
+          return '<span class="badge warn">' + esc(sig.label) + '</span>';
+        }).join('') + '</div>'
+        : '<p class="muted">특별한 학습 주의 신호가 없습니다.</p>') +
+      '</div>';
   }
 
   function setChip(scope, name, value) {
@@ -1050,8 +1192,10 @@
 
   function renderStudentDetail(root, id) {
     spinner(root);
-    Promise.all([api('getStudent', [id]), loadLookups()]).then(function (pair) {
+    Promise.all([api('getStudent', [id]), api('getStudentLearningContext', [id]), loadLookups()]).then(function (pair) {
       var s = pair[0];
+      var learningCtx = pair[1];
+      state.cache.learningContext = learningCtx;
       var current = (s.current_classes || []).map(function (c) { return c.class_name; }).join(', ') || '-';
       root.innerHTML =
         '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(s.name) + '</h2><button class="btn secondary" id="edit-one">수정</button></div>' +
@@ -1063,6 +1207,7 @@
           '<button class="btn" id="move-stu">반 변경</button></div>' +
         '<h3>반 이동 이력</h3>' + historyTable(s.class_history) +
         '</div>' +
+        learningContextHtml(learningCtx) +
         '<div class="card"><div class="toolbar"><h3 style="margin:0">수업 기록</h3></div><div class="row">' +
           field('기간', select('period', [{ value: 'week', label: '이번 주' }, { value: 'month', label: '이번 달' }, { value: '3m', label: '최근 3개월' }, { value: 'custom', label: '직접 선택' }], 'month')) +
           field('시작', input('start', '', 'date')) + field('끝', input('end', '', 'date')) +
@@ -1180,15 +1325,36 @@
     });
   }
 
+  function counselIssueChips(signals) {
+    if (!signals || !signals.length) return '';
+    return '<div class="field field-wide"><label>이번 달 학습 이슈 (선택)</label><div class="issue-chips">' +
+      signals.map(function (sig) {
+        return '<button type="button" class="chip issue-chip" data-label="' + esc(sig.label) + '">' +
+          esc(sig.label) + '</button>';
+      }).join('') + '</div></div>';
+  }
+
   function showCounselForm(box, note) {
     var host = box.querySelector('.note-form');
     if (!host) return;
+    var signals = (state.cache.learningContext && state.cache.learningContext.signals) || [];
     host.innerHTML = '<div class="row" style="margin-top:12px">' +
       field('상담일', input('counsel_date', note.counsel_date || state.today, 'date')) +
       field('제목', input('title', note.title || '')) +
+      counselIssueChips(signals) +
       field('내용', '<textarea name="content">' + esc(note.content) + '</textarea>') +
       '</div><div class="row"><button class="btn save-note">저장</button>' +
       '<button class="btn secondary close-note">닫기</button></div>';
+    host.querySelectorAll('.issue-chip').forEach(function (btn) {
+      btn.onclick = function () {
+        var textarea = host.querySelector('[name=content]');
+        var label = btn.getAttribute('data-label');
+        if (!textarea || !label) return;
+        var line = '- ' + label;
+        textarea.value = textarea.value ? (textarea.value + '\n' + line) : line;
+        btn.classList.add('on');
+      };
+    });
     host.querySelector('.save-note').onclick = function () {
       api('saveCounselingNote', [{
         note_id: note.note_id,
