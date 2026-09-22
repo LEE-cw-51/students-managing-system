@@ -11,7 +11,7 @@ export default async function LoginPage({ searchParams }) {
         <div className="brand login-brand">
           <div className="brand-mark" aria-hidden="true">학</div>
           <div>
-            <h1>학생 관리 시스템</h1>
+            <h1 className="display">학생 관리 시스템</h1>
             <p className="muted">수업 · 성적 · 상담 관리</p>
           </div>
         </div>

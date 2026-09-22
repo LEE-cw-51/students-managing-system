@@ -1,31 +1,37 @@
 :root {
     --ink: #1c2430;
     --muted: #5c6777;
-    --line: #d9deE6;
-    --paper: #f4efe6;
+    --line: #e4ddd2;
+    --paper: #f3efe6;
     --card: #fffdf8;
     --navy: #1b4f72;
     --navy-2: #163e59;
     --terracotta: #c45c26;
     --green: #2f6f4e;
     --red: #a33b32;
-    --shadow: 0 10px 30px rgba(28, 36, 48, 0.08);
-    --radius: 16px;
+    --shadow: 0 1px 2px rgba(28, 36, 48, 0.06);
+    --radius: 10px;
     --sidebar: 248px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
   body {
     font-family: "Noto Sans KR", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
     color: var(--ink);
-    background:
-      radial-gradient(circle at top left, rgba(196, 92, 38, 0.08), transparent 28%),
-      linear-gradient(180deg, #f7f4ee 0%, var(--paper) 100%);
+    background: var(--paper);
+  }
+  .display {
+    font-family: "Gowun Batang", "Noto Sans KR", serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.35;
   }
   #app { display: flex; min-height: 100vh; }
   .sidebar {
     width: var(--sidebar);
-    background: var(--navy);
+    background: var(--navy-2);
     color: #eef5fb;
     padding: 22px 16px;
     position: sticky;
@@ -40,13 +46,14 @@
     width: 40px; height: 40px; border-radius: 12px;
     background: var(--terracotta); color: white;
     display: grid; place-items: center; font-weight: 700;
+    font-family: "Gowun Batang", "Noto Sans KR", serif;
   }
-  .brand strong { display: block; font-size: 16px; }
-  .brand span { font-size: 12px; opacity: .75; }
+  .brand strong { display: block; font-size: 18px; font-weight: 700; }
+  .brand span { font-size: 12px; color: #d5e2ec; }
   #nav { flex: 1; overflow: auto; }
   .nav-group { margin-bottom: 16px; }
   .nav-label {
-    font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    font-size: 12px; font-weight: 500;
     color: #d5e2ec; padding: 0 12px 6px;
   }
   nav a {
@@ -71,17 +78,17 @@
   .shell { flex: 1; min-width: 0; }
   .topbar {
     display: flex; align-items: center; gap: 12px;
-    padding: 18px 24px 12px;
+    padding: 20px 28px 14px;
     position: sticky; top: 0; z-index: 5;
-    background: rgba(247, 244, 238, .94);
-    border-bottom: 1px solid rgba(27, 79, 114, .08);
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
   }
-  .topbar h1 { font-size: 22px; margin: 0; flex: 1; }
+  .topbar h1 { font-size: 28px; margin: 0; flex: 1; }
   .icon-btn {
     display: none; border: 0; background: white; width: 40px; height: 40px;
     border-radius: 12px; box-shadow: var(--shadow); cursor: pointer;
   }
-  .main { padding: 8px 24px 96px; }
+  .main { padding: 20px 28px 96px; }
   .muted { color: var(--muted); font-size: 13px; }
   .grid { display: grid; gap: 14px; }
   .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -89,10 +96,10 @@
 .stats-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .card {
     background: var(--card);
-    border: 1px solid rgba(27, 79, 114, .08);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    padding: 16px;
+    padding: 16px 18px;
   }
   .stat h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
   .stat b { font-size: 28px; }
@@ -104,14 +111,14 @@
   }
   input, select, textarea {
     width: 100%;
-    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
     background: white;
   }
   input, select { min-height: 42px; }
   textarea { min-height: 84px; resize: vertical; }
   .split { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-top: 14px; }
   .btn {
-    border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer;
+    border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
     background: var(--navy); color: white; font-weight: 600;
     min-height: 42px;
   }
@@ -246,7 +253,7 @@
 }
 .login-card { width: min(420px, 100%); }
 .login-brand { margin-bottom: 18px; }
-.login-brand h1 { margin: 0; font-size: 22px; color: var(--ink); }
+.login-brand h1 { margin: 0; font-size: 26px; color: var(--ink); }
 .login-brand p { margin: 4px 0 0; }
 .login-card .btn[type="submit"] { width: 100%; margin-top: 8px; }
 .password-row { display: flex; gap: 8px; align-items: center; }
@@ -327,6 +334,9 @@
 @media (max-width: 720px) {
   .cal-month, .cal-week { display: flex; flex-direction: column; }
   .cal-day { min-height: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
 }
 
 

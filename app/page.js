@@ -24,7 +24,7 @@ export default async function Page() {
           <div className="brand">
             <div className="brand-mark">학</div>
             <div>
-              <strong id="brand-name">학생 관리 시스템</strong>
+              <strong id="brand-name" className="display">학생 관리 시스템</strong>
               <span>수업 · 성적 · 상담</span>
             </div>
           </div>
@@ -36,7 +36,7 @@ export default async function Page() {
         <div className="shell">
           <header className="topbar">
             <button className="icon-btn" id="menu-btn" type="button" aria-label="메뉴" aria-expanded="false" aria-controls="sidebar">☰</button>
-            <h1 id="page-title">대시보드</h1>
+            <h1 id="page-title" className="display">대시보드</h1>
             <span id="top-date" className="muted"></span>
           </header>
           <main id="main" className="main"><div className="card empty">불러오는 중...</div></main>
