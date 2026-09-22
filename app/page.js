@@ -19,6 +19,7 @@ export default async function Page() {
   return (
     <>
       <div id="app">
+        <div id="nav-backdrop" className="nav-backdrop" hidden></div>
         <aside className="sidebar" id="sidebar">
           <div className="brand">
             <div className="brand-mark">학</div>
@@ -27,11 +28,14 @@ export default async function Page() {
               <span>수업 · 성적 · 상담</span>
             </div>
           </div>
-          <nav id="nav"></nav>
+          <nav id="nav" aria-label="주요 메뉴"></nav>
+          <div className="sidebar-foot">
+            <button className="nav-logout" id="logout-btn" type="button">로그아웃</button>
+          </div>
         </aside>
         <div className="shell">
           <header className="topbar">
-            <button className="icon-btn" id="menu-btn" type="button" aria-label="메뉴">☰</button>
+            <button className="icon-btn" id="menu-btn" type="button" aria-label="메뉴" aria-expanded="false" aria-controls="sidebar">☰</button>
             <h1 id="page-title">대시보드</h1>
             <span id="top-date" className="muted"></span>
           </header>

@@ -22,6 +22,13 @@
     { id: 'settings', label: '설정' }
   ];
 
+  var MENU_GROUPS = [
+    { label: '오늘', items: ['dashboard', 'today'] },
+    { label: '관리', items: ['students', 'classes'] },
+    { label: '보고서', items: ['daily', 'monthly', 'stats'] },
+    { label: '설정', items: ['settings'] }
+  ];
+
   function api(name, args) {
     args = args || [];
     return fetch('/api/' + name, {
@@ -142,8 +149,19 @@
     root.innerHTML = '<div class="card empty">' + esc(msg || '불러오는 중...') + '</div>';
   }
 
+  var fieldSeq = 0;
+
   function field(label, inner) {
-    return '<div class="field"><label>' + esc(label) + '</label>' + inner + '</div>';
+    fieldSeq += 1;
+    var id = 'fld-' + fieldSeq;
+    var labelId = id + '-label';
+    var tagged = inner.replace(/<(input|select|textarea)\b/, '<$1 id="' + id + '"');
+    var linked = tagged !== inner;
+    if (!linked) {
+      tagged = inner.replace(/<(div|ul)\b/, '<$1 aria-labelledby="' + labelId + '"');
+    }
+    return '<div class="field"><label id="' + labelId + '"' +
+      (linked ? ' for="' + id + '"' : '') + '>' + esc(label) + '</label>' + tagged + '</div>';
   }
 
   function input(name, value, type, extra) {
@@ -186,13 +204,33 @@
   }
 
   function renderNav() {
-    document.getElementById('nav').innerHTML = MENUS.map(function (m) {
-      return '<a href="#/' + m.id + '" class="' + (state.route === m.id ? 'active' : '') + '">' + m.label + '</a>';
-    }).join('') + '<a href="/login" id="logout-link">로그아웃</a>';
+    var byId = {};
+    MENUS.forEach(function (m) { byId[m.id] = m; });
+    document.getElementById('nav').innerHTML = MENU_GROUPS.map(function (group) {
+      var links = group.items.map(function (id) {
+        var m = byId[id];
+        var active = state.route === m.id;
+        return '<a href="#/' + m.id + '"' +
+          (active ? ' class="active" aria-current="page"' : '') + '>' + esc(m.label) + '</a>';
+      }).join('');
+      return '<div class="nav-group"><div class="nav-label">' + esc(group.label) + '</div>' + links + '</div>';
+    }).join('');
     var title = (MENUS.filter(function (m) { return m.id === state.route; })[0] || {}).label || '학습관리';
     document.getElementById('page-title').textContent = title;
     document.getElementById('brand-name').textContent = state.settings.academy_name || '학생 관리 시스템';
     document.getElementById('top-date').textContent = state.today || '';
+  }
+
+  function setDrawer(open) {
+    var sidebar = document.getElementById('sidebar');
+    var backdrop = document.getElementById('nav-backdrop');
+    var btn = document.getElementById('menu-btn');
+    var mobile = window.matchMedia('(max-width: 980px)').matches;
+    var next = !!open && mobile;
+    sidebar.classList.toggle('open', next);
+    if (backdrop) backdrop.hidden = !next;
+    if (btn) btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+    document.body.classList.toggle('drawer-open', next);
   }
 
   function loadLookups(force) {
@@ -1715,7 +1753,7 @@
     state.params = parsed.params;
     renderNav();
     var root = document.getElementById('main');
-    document.getElementById('sidebar').classList.remove('open');
+    setDrawer(false);
     if (parsed.route === 'students' && parsed.params.id) return renderStudentDetail(root, parsed.params.id);
     if (parsed.route === 'classes' && parsed.params.id) return renderClassDetail(root, parsed.params.id);
     var map = {
@@ -1732,16 +1770,21 @@
   }
 
   document.getElementById('menu-btn').onclick = function () {
-    document.getElementById('sidebar').classList.toggle('open');
+    var open = document.getElementById('menu-btn').getAttribute('aria-expanded') === 'true';
+    setDrawer(!open);
   };
-  document.getElementById('nav').addEventListener('click', function (e) {
-    var a = e.target.closest('#logout-link');
-    if (!a) return;
-    e.preventDefault();
+  document.getElementById('nav-backdrop').onclick = function () { setDrawer(false); };
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') setDrawer(false);
+  });
+  window.addEventListener('resize', function () {
+    if (!window.matchMedia('(max-width: 980px)').matches) setDrawer(false);
+  });
+  document.getElementById('logout-btn').onclick = function () {
     fetch('/api/logout', { method: 'POST', credentials: 'include' }).finally(function () {
       location.href = '/login';
     });
-  });
+  };
 
   document.getElementById('main').addEventListener('click', function (e) {
     var btn = e.target.closest('.edit-stu');
