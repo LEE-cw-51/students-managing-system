@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: '수학의 힘 · 학습관리',
-  description: '학원 학습관리 시스템'
+  title: '학생 관리 시스템',
+  description: '학생 수업·성적·상담 관리 시스템'
 };
 
 export const viewport = {

@@ -271,6 +271,14 @@
 .note-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: white; }
 .note-item h4 { margin: 0 0 4px; font-size: 14px; }
 .curriculum { white-space: pre-wrap; margin: 0; }
+.task-list, .alert-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.task-item, .alert-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: white; }
+.task-link { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.task-title { font-weight: 600; }
+.task-item.makeup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.alert-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.issue-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.issue-chip.on { background: var(--navy); color: white; }
 @media (max-width: 720px) {
   .cal-month, .cal-week { display: flex; flex-direction: column; }
   .cal-day { min-height: auto; }
