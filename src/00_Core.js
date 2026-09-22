@@ -74,10 +74,10 @@ LMS.MAKEUP_STATUS = ['예정', '완료', '취소'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
-  academy_name: '수학의 힘',
+  academy_name: '학생 관리 시스템',
   teacher_name: '이찬우',
   contact: '010-4552-4496',
-  report_greeting: '안녕하세요, 수학의 힘 입니다.',
+  report_greeting: '안녕하세요.',
   report_closing: '궁금하신 점이 있으시면 언제든지 문의해주시길 바랍니다.\n항상 최선을 다해 지도하겠습니다. 감사합니다.',
   assignment_A: '100~90%',
   assignment_B: '89~70%',
@@ -317,6 +317,95 @@ LMS.computeDailyClassTestAverage = function (lessons) {
     test_median_display: stats.median_display,
     test_high_display: stats.high_display,
     test_low_display: stats.low_display
+  };
+};
+
+LMS.detectLearningSignals = function (lessons) {
+  var rows = (lessons || []).slice().sort(function (a, b) {
+    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
+  });
+  var signals = [];
+
+  var consecC = 0;
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (LMS.toStr(rows[i].assignment_completion) === 'C') {
+      consecC += 1;
+      if (consecC >= 2) {
+        signals.push({
+          code: 'assignment_c_streak',
+          label: '과제 이행률 C 2회 연속'
+        });
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  var consecLow = 0;
+  for (var j = rows.length - 1; j >= 0; j--) {
+    var conc = LMS.toStr(rows[j].concentration);
+    if (conc === 'D' || conc === 'ABSENT') {
+      consecLow += 1;
+      if (consecLow >= 2) {
+        signals.push({
+          code: 'concentration_low_streak',
+          label: '집중도 저하 2회 연속'
+        });
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  var testLessons = rows.filter(function (row) {
+    return LMS.toStr(row.test_status) === '실시' &&
+      LMS.normalizedScore(row.test_score, row.test_max_score) !== null;
+  });
+  if (testLessons.length >= 6) {
+    var recent = testLessons.slice(-3);
+    var previous = testLessons.slice(-6, -3);
+    var recentAvg = LMS.averageOf(recent.map(function (row) {
+      return LMS.normalizedScore(row.test_score, row.test_max_score);
+    }));
+    var prevAvg = LMS.averageOf(previous.map(function (row) {
+      return LMS.normalizedScore(row.test_score, row.test_max_score);
+    }));
+    if (prevAvg !== null && recentAvg !== null && prevAvg > 0) {
+      var dropPct = ((prevAvg - recentAvg) / prevAvg) * 100;
+      if (dropPct >= 10) {
+        signals.push({
+          code: 'test_score_drop',
+          label: '최근 시험 평균 ' + Math.round(dropPct) + '% 하락'
+        });
+      }
+    }
+  }
+
+  return signals;
+};
+
+LMS.summarizeRecentLearning = function (lessons) {
+  var rows = (lessons || []).slice().sort(function (a, b) {
+    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
+  });
+  var scores = LMS.collectNormalizedScores(rows);
+  var stats = LMS.computeScoreStats(scores);
+  var assignment = { A: 0, B: 0, C: 0 };
+  var concentration = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
+  rows.forEach(function (row) {
+    var a = LMS.toStr(row.assignment_completion).charAt(0);
+    if (assignment[a] !== undefined) assignment[a] += 1;
+    var c = LMS.toStr(row.concentration);
+    if (concentration[c] !== undefined) concentration[c] += 1;
+  });
+  return {
+    lesson_count: rows.length,
+    test_average_display: stats.average_display,
+    test_count: stats.count,
+    assignment: assignment,
+    concentration: concentration
   };
 };
 

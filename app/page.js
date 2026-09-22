@@ -21,10 +21,10 @@ export default async function Page() {
       <div id="app">
         <aside className="sidebar" id="sidebar">
           <div className="brand">
-            <div className="brand-mark">수</div>
+            <div className="brand-mark">학</div>
             <div>
-              <strong id="brand-name">수학의 힘</strong>
-              <span>학습관리 시스템</span>
+              <strong id="brand-name">학생 관리 시스템</strong>
+              <span>수업 · 성적 · 상담</span>
             </div>
           </div>
           <nav id="nav"></nav>
