@@ -155,8 +155,18 @@
     fieldSeq += 1;
     var id = 'fld-' + fieldSeq;
     var labelId = id + '-label';
-    var tagged = inner.replace(/<(input|select|textarea)\b/, '<$1 id="' + id + '"');
-    var linked = tagged !== inner;
+    var control = inner.match(/<(input|select|textarea)\b[^>]*>/);
+    var tagged = inner;
+    var linked = false;
+    if (control) {
+      var existingId = control[0].match(/\sid=(['"])([^'"]+)\1/);
+      if (existingId) {
+        id = existingId[2];
+      } else {
+        tagged = inner.replace(/<(input|select|textarea)\b/, '<$1 id="' + id + '"');
+      }
+      linked = true;
+    }
     if (!linked) {
       tagged = inner.replace(/<(div|ul)\b/, '<$1 aria-labelledby="' + labelId + '"');
     }
