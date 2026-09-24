@@ -151,7 +151,8 @@
 
   var fieldSeq = 0;
 
-  function field(label, inner) {
+  function field(label, inner, opts) {
+    opts = opts || {};
     fieldSeq += 1;
     var id = 'fld-' + fieldSeq;
     var labelId = id + '-label';
@@ -170,7 +171,7 @@
     if (!linked) {
       tagged = inner.replace(/<(div|ul)\b/, '<$1 aria-labelledby="' + labelId + '"');
     }
-    return '<div class="field"><label id="' + labelId + '"' +
+    return '<div class="field' + (opts.wide ? ' field-wide' : '') + '"><label id="' + labelId + '"' +
       (linked ? ' for="' + id + '"' : '') + '>' + esc(label) + '</label>' + tagged + '</div>';
   }
 
@@ -624,7 +625,7 @@
         '</div></div>' +
         field('제목', input('title', row.title || '')) +
         field('상태', select('status', ['예정', '완료', '취소'], row.status || '예정')) +
-        field('메모', '<textarea name="memo">' + esc(row.memo) + '</textarea>') +
+        field('메모', '<textarea name="memo">' + esc(row.memo) + '</textarea>', { wide: true }) +
         '</div><div class="row"><button class="btn" id="save-makeup">저장</button>' +
         (row.makeup_id ? '<button class="btn danger" id="cancel-makeup">취소 처리</button>' : '') +
         '<button class="btn secondary" id="close-makeup">닫기</button></div></div>';
@@ -988,9 +989,9 @@
             field('과제 이행률', chipGroup('assignment_completion', ['A', 'B', 'C'], l.assignment_completion || 'A')) +
             field('집중도', chipGroup('concentration', ['A', 'B', 'C', 'D', 'ABSENT'], l.concentration || 'A', ['A', 'B', 'C', 'D', '결석'])) +
           '</div>' +
-          field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>') +
-          field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>') +
-          field('특이사항', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>') +
+          field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>', { wide: true }) +
+          field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>', { wide: true }) +
+          field('학생 피드백', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>', { wide: true }) +
         '</article>';
       }).join('');
 
@@ -1001,9 +1002,10 @@
         '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 내용을 한 번에 넣은 뒤 학생별로 수정하세요.</p>' +
           snapshotHint +
           '<div class="row">' +
-            field('학습 진도', '<textarea id="bulk-progress"></textarea>') +
-            field('과제 안내', '<textarea id="bulk-homework"></textarea>') +
+            field('학습 진도', '<textarea id="bulk-progress"></textarea>', { wide: true }) +
+            field('과제 안내', '<textarea id="bulk-homework"></textarea>', { wide: true }) +
           '</div>' +
+          field('공지사항', '<textarea id="bulk-notice" placeholder="반 전체 학부모 공지 (일일 보고서 5번 항목)"></textarea>', { wide: true }) +
           '<div class="row">' +
             field('난이도', chipGroup('bulk_difficulty', ['상', '중', '하'], '중')) +
             field('과제 이행률', chipGroup('bulk_assign', ['A', 'B', 'C'], 'A')) +
@@ -1020,6 +1022,8 @@
       bindChips(body);
       var bulkProgress = document.getElementById('bulk-progress');
       var bulkHomework = document.getElementById('bulk-homework');
+      var bulkNotice = document.getElementById('bulk-notice');
+      if (bulkNotice) bulkNotice.value = session.class_notice || '';
       applyLessonSnapshot(body, snapshot);
       var loadSnapshotBtn = document.getElementById('load-snapshot');
       if (loadSnapshotBtn) {
@@ -1070,8 +1074,10 @@
           });
         });
         if (!items.length) return toast('저장할 학생이 없습니다.', true);
+        var noticeEl = document.getElementById('bulk-notice');
+        var classNotice = noticeEl ? noticeEl.value : '';
         withBusy(btn, function () {
-          return api('saveLessonsBatch', [items]).then(function () {
+          return api('saveLessonsBatch', [{ items: items, class_notice: classNotice }]).then(function () {
             state.cache.dashboard = null;
             persistBoot();
             body.querySelectorAll('.student-card .badge').forEach(function (badge) {
@@ -1176,7 +1182,7 @@
       field('등록일', input('enrollment_date', s.enrollment_date, 'date')) +
       field('상태', select('status', ['재원', '휴원', '퇴원'], s.status)) +
       field('현재 반', select('class_id', classOptions(s.class_id, true), (s.current_classes && s.current_classes[0] || {}).class_id)) +
-      field('메모', '<textarea name="memo">' + esc(s.memo) + '</textarea>') +
+      field('메모', '<textarea name="memo">' + esc(s.memo) + '</textarea>', { wide: true }) +
       '</div><button class="btn" id="save-stu">저장</button></div>';
     if (document.getElementById('student-form')) document.getElementById('student-form').innerHTML = html;
     else document.getElementById('main').insertAdjacentHTML('afterbegin', html);
@@ -1389,9 +1395,10 @@
     host.innerHTML = '<div class="row" style="margin-top:12px">' +
       field('상담일', input('counsel_date', note.counsel_date || state.today, 'date')) +
       field('제목', input('title', note.title || '')) +
+      '</div>' +
       counselIssueChips(signals) +
-      field('내용', '<textarea name="content">' + esc(note.content) + '</textarea>') +
-      '</div><div class="row"><button class="btn save-note">저장</button>' +
+      field('내용', '<textarea class="textarea-lg" name="content">' + esc(note.content) + '</textarea>', { wide: true }) +
+      '<div class="row"><button class="btn save-note">저장</button>' +
       '<button class="btn secondary close-note">닫기</button></div>';
     host.querySelectorAll('.issue-chip').forEach(function (btn) {
       btn.onclick = function () {
@@ -1446,7 +1453,7 @@
   function lessonTable(rows) {
     if (!rows.length) return '<div class="empty">수업 기록이 없습니다.</div>';
     return '<div class="table-scroll"><table><thead><tr>' +
-      '<th>날짜</th><th>반</th><th>출석</th><th>테스트</th><th>난이도</th><th>과제 이행률</th><th>집중도</th><th>진도</th><th>과제 안내</th><th>특이사항</th>' +
+      '<th>날짜</th><th>반</th><th>출석</th><th>테스트</th><th>난이도</th><th>과제 이행률</th><th>집중도</th><th>진도</th><th>과제 안내</th><th>학생 피드백</th>' +
       '</tr></thead><tbody>' +
       rows.map(function (l) {
         var diff = l.test_status === '실시' ? (l.test_difficulty || '-') : '-';
@@ -1498,10 +1505,10 @@
       field('시작', input('start_time', c.start_time, 'time')) +
       field('종료', input('end_time', c.end_time, 'time')) +
       field('교재', input('textbook', c.textbook, 'text', 'placeholder="현재 교재"')) +
-      field('진도', '<textarea name="current_progress" placeholder="현재 진도">' + esc(c.current_progress) + '</textarea>') +
-      field('숙제', '<textarea name="class_homework" placeholder="반 공통 숙제">' + esc(c.class_homework) + '</textarea>') +
+      field('진도', '<textarea name="current_progress" placeholder="현재 진도">' + esc(c.current_progress) + '</textarea>', { wide: true }) +
+      field('숙제', '<textarea name="class_homework" placeholder="반 공통 숙제">' + esc(c.class_homework) + '</textarea>', { wide: true }) +
       field('상태', select('status', ['운영', '종료'], c.status)) +
-      field('메모', '<textarea name="memo">' + esc(c.memo) + '</textarea>') +
+      field('메모', '<textarea name="memo">' + esc(c.memo) + '</textarea>', { wide: true }) +
       '</div><button class="btn" id="save-class">저장</button></div>';
     document.getElementById('save-class').onclick = function () {
       var form = this.closest('.card');
@@ -1801,7 +1808,7 @@
     ];
     root.innerHTML = '<div class="card">' + keys.map(function (k) {
       var area = k[0] === 'report_closing' || k[0] === 'allowed_emails';
-      return field(k[1], area ? '<textarea name="' + k[0] + '">' + esc(s[k[0]]) + '</textarea>' : input(k[0], s[k[0]]));
+      return field(k[1], area ? '<textarea name="' + k[0] + '">' + esc(s[k[0]]) + '</textarea>' : input(k[0], s[k[0]]), area ? { wide: true } : null);
     }).join('') + '<button class="btn" id="save-set">설정 저장</button></div>';
     document.getElementById('save-set').onclick = function () {
       var map = {};

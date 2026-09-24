@@ -444,9 +444,83 @@ LMS.createService = function (store) {
     return row;
   }
 
-  function saveLessonsBatch(items) {
+  function findClassSessionNoticeRow_(date, classId) {
+    var key = LMS.sessionKey(date, classId);
+    var rows = table('ClassSessionNotices');
+    for (var i = 0; i < rows.length; i++) {
+      if (LMS.sessionKey(rows[i].lesson_date, rows[i].class_id) === key) {
+        return rows[i];
+      }
+    }
+    return null;
+  }
+
+  function getClassSessionNotice(date, classId) {
+    var row = findClassSessionNoticeRow_(date, classId);
+    return row ? LMS.toStr(row.class_notice) : '';
+  }
+
+  function saveClassSessionNotice(date, classId, text) {
     return withLock(function () {
-      var list = Array.isArray(items) ? items : [items];
+      requireClass(classId);
+      if (!LMS.isIsoDate(LMS.toStr(date))) {
+        throw new Error('수업 날짜가 올바르지 않습니다.');
+      }
+      var rows = table('ClassSessionNotices');
+      var key = LMS.sessionKey(date, classId);
+      var idx = -1;
+      for (var i = 0; i < rows.length; i++) {
+        if (LMS.sessionKey(rows[i].lesson_date, rows[i].class_id) === key) {
+          idx = i;
+          break;
+        }
+      }
+      var notice = LMS.toStr(text);
+      var ts = now();
+      if (!notice) {
+        if (idx >= 0) {
+          rows.splice(idx, 1);
+          saveTable('ClassSessionNotices', rows);
+        }
+        return null;
+      }
+      if (idx >= 0) {
+        var updated = Object.assign({}, rows[idx], {
+          class_notice: notice,
+          updated_at: ts
+        });
+        rows[idx] = updated;
+        saveTable('ClassSessionNotices', rows);
+        return updated;
+      }
+      var created = {
+        id: nextIds('CSN', 1)[0],
+        lesson_date: LMS.toStr(date),
+        class_id: LMS.toStr(classId),
+        class_notice: notice,
+        created_at: ts,
+        updated_at: ts
+      };
+      rows.push(created);
+      saveTable('ClassSessionNotices', rows);
+      return created;
+    });
+  }
+
+  function saveLessonsBatch(payload) {
+    var list;
+    var classNotice;
+    if (payload && !Array.isArray(payload) && Array.isArray(payload.items)) {
+      list = payload.items;
+      if (payload.class_notice !== undefined && payload.class_notice !== null) {
+        classNotice = payload.class_notice;
+      }
+    } else if (Array.isArray(payload)) {
+      list = payload;
+    } else {
+      list = [payload];
+    }
+    return withLock(function () {
       var validated = list.map(LMS.validateLessonInput);
       var students = table('Students');
       var classes = table('Classes');
@@ -496,6 +570,9 @@ LMS.createService = function (store) {
         }
       });
       saveTable('Lessons', lessons);
+      if (classNotice !== undefined && saved.length) {
+        saveClassSessionNotice(saved[0].lesson_date, saved[0].class_id, classNotice);
+      }
       return saved;
     });
   }
@@ -532,6 +609,7 @@ LMS.createService = function (store) {
     return {
       class: cls,
       date: date,
+      class_notice: getClassSessionNotice(date, classId),
       students: students.map(function (s) {
         return Object.assign({}, s, { lesson: byStudent[s.student_id] || null });
       }),
@@ -544,7 +622,8 @@ LMS.createService = function (store) {
     var lesson = getLesson(lessonId);
     var student = requireStudent(lesson.student_id);
     var classAvg = LMS.computeDailyClassTestAverage(getLessons(lesson.lesson_date, lesson.class_id));
-    var text = LMS.buildDailyReport(lesson, student, settings(), classAvg);
+    var notice = getClassSessionNotice(lesson.lesson_date, lesson.class_id);
+    var text = LMS.buildDailyReport(lesson, student, settings(), classAvg, notice);
     return { lesson: lesson, student: student, text: text, class_test_average: classAvg };
   }
 
@@ -553,13 +632,14 @@ LMS.createService = function (store) {
     var set = settings();
     var students = table('Students');
     var classAvg = LMS.computeDailyClassTestAverage(lessons);
+    var notice = getClassSessionNotice(date, classId);
     var reports = lessons.map(function (lesson) {
       var student = LMS.findById(students, 'student_id', lesson.student_id) || { name: '학생' };
       return {
         lesson_id: lesson.lesson_id,
         student_id: lesson.student_id,
         student_name: student.name,
-        text: LMS.buildDailyReport(lesson, student, set, classAvg)
+        text: LMS.buildDailyReport(lesson, student, set, classAvg, notice)
       };
     }).sort(function (a, b) {
       return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
@@ -1177,6 +1257,8 @@ LMS.createService = function (store) {
     saveLesson: saveLesson,
     saveLessonsBatch: saveLessonsBatch,
     updateLesson: updateLesson,
+    getClassSessionNotice: getClassSessionNotice,
+    saveClassSessionNotice: saveClassSessionNotice,
     getTodayClassSession: getTodayClassSession,
     generateDailyReport: generateDailyReport,
     generateDailyReports: generateDailyReports,

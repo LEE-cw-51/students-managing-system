@@ -13,7 +13,8 @@ LMS.PREFIX = {
   lesson: 'LES',
   monthly: 'MTH',
   note: 'NTS',
-  makeup: 'MKP'
+  makeup: 'MKP',
+  classSession: 'CSN'
 };
 
 LMS.TABLES = {
@@ -35,6 +36,9 @@ LMS.TABLES = {
     'test_status', 'test_score', 'test_max_score', 'test_difficulty',
     'assignment_completion', 'concentration', 'progress', 'homework',
     'special_note', 'created_at', 'updated_at'
+  ],
+  ClassSessionNotices: [
+    'id', 'lesson_date', 'class_id', 'class_notice', 'created_at', 'updated_at'
   ],
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
@@ -85,7 +89,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -439,6 +443,10 @@ LMS.lessonKey = function (date, studentId, classId) {
   return LMS.toStr(date) + '|' + LMS.toStr(studentId) + '|' + LMS.toStr(classId);
 };
 
+LMS.sessionKey = function (date, classId) {
+  return LMS.toStr(date) + '|' + LMS.toStr(classId);
+};
+
 LMS.uniqProgress = function (lessons) {
   var ordered = (lessons || []).slice().sort(function (a, b) {
     return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
@@ -565,10 +573,11 @@ LMS.formatClassTestStatsLine = function (classStats) {
     ' · 최저 ' + classStats.test_low_display + ')';
 };
 
-LMS.buildDailyReport = function (lesson, student, settings, classStats) {
+LMS.buildDailyReport = function (lesson, student, settings, classStats, classNotice) {
   settings = settings || {};
   student = student || {};
   lesson = lesson || {};
+  classNotice = LMS.toStr(classNotice);
   var greeting = settings.report_greeting || LMS.DEFAULT_SETTINGS.report_greeting;
   var closing = settings.report_closing || LMS.DEFAULT_SETTINGS.report_closing;
   var teacher = settings.teacher_name || LMS.DEFAULT_SETTINGS.teacher_name;
@@ -601,9 +610,14 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats) {
   lines.push('4. 과제 안내:');
   lines.push(hwLines);
 
-  var note = LMS.toStr(lesson.special_note);
-  if (note) {
-    lines.push('5. 특이사항: ' + note);
+  var section = 5;
+  var feedback = LMS.toStr(lesson.special_note);
+  if (classNotice) {
+    lines.push(section + '. 공지사항: ' + classNotice);
+    section += 1;
+  }
+  if (feedback) {
+    lines.push(section + '. 학생 피드백: ' + feedback);
   }
 
   lines.push('');
@@ -900,6 +914,7 @@ LMS.TABLE_PK = {
   Classes: 'class_id',
   StudentClasses: 'id',
   Lessons: 'lesson_id',
+  ClassSessionNotices: 'id',
   MonthlyReports: 'monthly_report_id',
   CounselingNotes: 'note_id',
   MakeupSessions: 'makeup_id',

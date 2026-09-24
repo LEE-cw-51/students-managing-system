@@ -183,7 +183,33 @@ describe('reports and stats', () => {
     assert.match(t2, /난이도: 중/);
     assert.match(t2, /\(반 평균 95\.0 · 중간값 95\.0 · 최고 100\.0 · 최저 90\.0\)/);
     assert.doesNotMatch(t2, /집중도:/);
-    assert.match(t2, /5\. 특이사항: 계산 실수가 잦음/);
+    assert.match(t2, /5\. 학생 피드백: 계산 실수가 잦음/);
+  });
+
+  it('separates class notice and student feedback in daily reports', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    const date = '2026-09-14';
+    const classId = seeded.class.class_id;
+    api.saveLessonsBatch({
+      items: [{
+        lesson_date: date,
+        class_id: classId,
+        student_id: seeded.students.find((s) => s.name === '홍길동').student_id,
+        attendance: '출석',
+        test_status: '실시',
+        test_score: 18,
+        test_max_score: 20,
+        special_note: '계산 실수가 잦음'
+      }],
+      class_notice: '다음 주 금요일은 휴강입니다.'
+    });
+    const hong = api.getTodayClassSession(date, classId)
+      .students.find((s) => s.name === '홍길동');
+    const text = api.generateDailyReport(hong.lesson.lesson_id).text;
+    assert.match(text, /5\. 공지사항: 다음 주 금요일은 휴강입니다\./);
+    assert.match(text, /6\. 학생 피드백: 계산 실수가 잦음/);
+    assert.equal(api.getClassSessionNotice(date, classId), '다음 주 금요일은 휴강입니다.');
   });
 
   it('omits class average from daily reports when no tests were taken', () => {
