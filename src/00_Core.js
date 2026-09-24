@@ -657,7 +657,7 @@ LMS.buildMonthlyReport = function (stats, student, settings) {
 
   if (stats.special_notes && stats.special_notes.length) {
     lines.push('');
-    lines.push('특이사항:');
+    lines.push('학생 피드백:');
     stats.special_notes.forEach(function (n) {
       lines.push('- ' + n.label + ' ' + n.text);
     });

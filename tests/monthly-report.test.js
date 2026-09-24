@@ -100,7 +100,9 @@ describe('getMonthlyReportContext', () => {
     assert.equal(ctx.lessons.length, 1);
     assert.equal(ctx.counseling_notes.length, 1);
     assert.match(ctx.base_text, /홍길동/);
+    assert.match(ctx.base_text, /학생 피드백:/);
     assert.match(ctx.base_text, /숙제 지각/);
+    assert.doesNotMatch(ctx.base_text, /특이사항/);
   });
 });
 
