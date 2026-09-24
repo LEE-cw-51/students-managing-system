@@ -116,6 +116,8 @@
   }
   input, select { min-height: 42px; }
   textarea { min-height: 84px; resize: vertical; }
+  .field.field-wide textarea { min-height: 180px; line-height: 1.6; }
+  .field.field-wide textarea.textarea-lg { min-height: 260px; line-height: 1.6; }
   .split { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-top: 14px; }
   .btn {
     border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
@@ -143,9 +145,9 @@
   .seg { display: flex; gap: 6px; flex-wrap: wrap; }
   .toolbar { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
   .preview {
-    display: block; width: 100%; max-width: 100%; min-height: 280px;
+    display: block; width: 100%; max-width: 100%; min-height: 420px;
     white-space: pre-wrap; background: #fff; border-radius: 12px;
-    padding: 16px; line-height: 1.55; border: 1px dashed var(--line);
+    padding: 16px; line-height: 1.6; border: 1px dashed var(--line);
     margin-top: 12px;
   }
   .report-card { display: flex; flex-direction: column; }
@@ -242,7 +244,7 @@
 .chart-bar.grade-D { fill: var(--red); }
 .chart-bar.absent { fill: #9aa3ad; }
 .table-scroll { overflow: auto; }
-.cell-pre { white-space: pre-wrap; max-width: 220px; }
+.cell-pre { white-space: pre-wrap; min-width: 160px; }
 #lesson-hist, #daily-list { display: flex; flex-direction: column; gap: 14px; }
 
 .login-wrap {
