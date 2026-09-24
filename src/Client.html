@@ -316,7 +316,7 @@
           '</div>' +
           field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>') +
           field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>') +
-          field('특이사항', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>') +
+          field('학생 피드백', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>') +
         '</article>';
       }).join('');
 
@@ -326,6 +326,7 @@
             field('학습 진도', '<textarea id="bulk-progress"></textarea>') +
             field('과제 안내', '<textarea id="bulk-homework"></textarea>') +
           '</div>' +
+          field('공지사항', '<textarea id="bulk-notice" placeholder="반 전체 학부모 공지"></textarea>') +
           '<div class="row">' +
             field('난이도', chipGroup('bulk_difficulty', ['상', '중', '하'], '중')) +
             field('과제 이행률', chipGroup('bulk_assign', ['A', 'B', 'C'], 'A')) +
@@ -336,6 +337,8 @@
         '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
 
       bindChips(body);
+      var bulkNotice = document.getElementById('bulk-notice');
+      if (bulkNotice) bulkNotice.value = session.class_notice || '';
       var apply = document.getElementById('apply-bulk');
       if (apply) apply.onclick = function () {
         var p = document.getElementById('bulk-progress').value;
@@ -370,8 +373,10 @@
           });
         });
         if (!items.length) return toast('저장할 학생이 없습니다.', true);
+        var noticeEl = document.getElementById('bulk-notice');
+        var classNotice = noticeEl ? noticeEl.value : '';
         withBusy(btn, function () {
-          return api('saveLessonsBatch', [items]).then(function () {
+          return api('saveLessonsBatch', [{ items: items, class_notice: classNotice }]).then(function () {
             state.cache.dashboard = null;
             persistBoot();
             body.querySelectorAll('.student-card .badge').forEach(function (badge) {
@@ -536,7 +541,7 @@
 
   function lessonTable(rows) {
     if (!rows.length) return '<div class="empty">수업 기록이 없습니다.</div>';
-    return '<table><thead><tr><th>날짜</th><th>출석</th><th>테스트</th><th>과제</th><th>집중도</th><th>진도</th><th>특이사항</th></tr></thead><tbody>' +
+    return '<table><thead><tr><th>날짜</th><th>출석</th><th>테스트</th><th>과제</th><th>집중도</th><th>진도</th><th>학생 피드백</th></tr></thead><tbody>' +
       rows.map(function (l) {
         var test = l.test_status === '실시' ? (l.test_score + ' / ' + l.test_max_score) : '미실시';
         return '<tr><td>' + esc(l.lesson_date) + '</td><td>' + esc(l.attendance) + '</td><td>' + esc(test) + '</td><td>' +
