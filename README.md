@@ -41,7 +41,7 @@ npm run dev
 1. 이 저장소를 Vercel 프로젝트에 연결합니다.
 2. 환경 변수 `DATABASE_URL`, `AUTH_SECRET`, `LMS_PASSWORD`를 넣습니다.
    `DATABASE_URL`은 Supabase **Session pooler**(6543) 주소를 씁니다.
-   월간 보고서 **AI 분석**을 쓰려면 `AI_API_KEY`(또는 `OPENAI_API_KEY`)와 필요 시 `AI_MODEL`, `AI_BASE_URL`을 추가합니다.
+   월간 보고서 **AI 분석**은 OpenRouter를 사용합니다. [openrouter.ai/keys](https://openrouter.ai/keys)에서 발급한 키를 `AI_API_KEY`에 넣습니다. 모델을 지정하지 않으면 `openrouter/free`가 그 요청에 쓸 수 있는 무료 모델 중 하나를 고릅니다. 특정 모델로 고정하려면 `AI_MODEL`을 추가합니다.
 3. 함수는 `icn1`(서울)에서 실행되어 서울 Postgres와 가깝습니다.
 
 빈 데이터베이스에서 반과 학생을 바로 등록하면 됩니다. 로컬에서 샘플 화면만 보려면 `npm run seed` 로 데모 3명을 넣을 수 있습니다.
@@ -50,7 +50,7 @@ npm run dev
 
 - 웹앱은 비밀번호 세션으로 막습니다. 비밀번호는 서버 환경 변수에만 둡니다.
 - 브라우저에 데이터베이스 키를 넣지 않습니다. 모든 읽기/쓰기는 서버 API를 통과합니다.
-- AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 LLM 제공업체로 전송됩니다.
+- AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 OpenRouter로 전송됩니다.
 
 ## 월간 보고서 (AI · PDF)
 
