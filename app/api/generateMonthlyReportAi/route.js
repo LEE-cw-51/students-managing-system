@@ -30,10 +30,10 @@ export async function POST(req) {
 
   try {
     const pack = await withService((api) => api.getMonthlyReportContext(studentId, year, month));
-    const aiSections = await buildMonthlyAiSections(pack);
+    const ai = await buildMonthlyAiSections(pack);
     return NextResponse.json({
       ok: true,
-      data: buildGenerateMonthlyReportAiData(pack, aiSections)
+      data: buildGenerateMonthlyReportAiData(pack, ai.text, ai.model)
     });
   } catch (e) {
     return NextResponse.json({
