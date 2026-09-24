@@ -7,7 +7,9 @@ const { createMemoryStore } = require('./memory-store.js');
 const {
   mergeMonthlyReportText,
   isMonthlyAiConfigured,
-  buildGenerateMonthlyReportAiData
+  buildGenerateMonthlyReportAiData,
+  getMonthlyAiConfig,
+  monthlyAiRequestHeaders
 } = require('../lib/monthly-ai.js');
 const { renderMonthlyReportPdf } = require('../lib/monthly-pdf.js');
 
@@ -50,6 +52,24 @@ describe('monthly report AI helpers', () => {
     assert.equal(isMonthlyAiConfigured(), true);
     if (prev === undefined) delete process.env.AI_API_KEY;
     else process.env.AI_API_KEY = prev;
+  });
+
+  it('defaults to OpenRouter and sends attribution headers', () => {
+    const prevBase = process.env.AI_BASE_URL;
+    const prevModel = process.env.AI_MODEL;
+    delete process.env.AI_BASE_URL;
+    delete process.env.AI_MODEL;
+    const cfg = getMonthlyAiConfig();
+    assert.equal(cfg.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(cfg.model, 'openai/gpt-4o-mini');
+    const headers = monthlyAiRequestHeaders({ ...cfg, key: 'test-key' });
+    assert.equal(headers.Authorization, 'Bearer test-key');
+    assert.equal(headers['HTTP-Referer'], 'https://math-power-lms.vercel.app');
+    assert.equal(headers['X-Title'], '학생 관리 시스템');
+    if (prevBase === undefined) delete process.env.AI_BASE_URL;
+    else process.env.AI_BASE_URL = prevBase;
+    if (prevModel === undefined) delete process.env.AI_MODEL;
+    else process.env.AI_MODEL = prevModel;
   });
 });
 

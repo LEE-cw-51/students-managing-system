@@ -16,7 +16,7 @@ export async function POST(req) {
   if (!isMonthlyAiConfigured()) {
     return NextResponse.json({
       ok: false,
-      error: 'AI API 키가 설정되지 않았습니다. AI_API_KEY(또는 OPENAI_API_KEY) 환경 변수를 설정해 주세요.'
+      error: 'AI API 키가 설정되지 않았습니다. AI_API_KEY에 OpenRouter 키를 넣어 주세요.'
     }, { status: 503 });
   }
 
