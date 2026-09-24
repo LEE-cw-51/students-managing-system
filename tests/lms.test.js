@@ -230,6 +230,25 @@ describe('reports and stats', () => {
     assert.equal(LMS.median([]), null);
   });
 
+  it('builds monthly report context for AI and PDF', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반' });
+    const s = api.createStudent({ name: '김학생', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-02',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      progress: '1단원'
+    });
+    const ctx = api.getMonthlyReportContext(s.student_id, 2026, 9);
+    assert.equal(ctx.year, 2026);
+    assert.equal(ctx.month, 9);
+    assert.equal(ctx.lessons.length, 1);
+    assert.match(ctx.base_text, /김학생/);
+  });
+
   it('collapses repeated progress in monthly reports', () => {
     const api = svc();
     const c = api.createClass({ class_name: 'A반' });

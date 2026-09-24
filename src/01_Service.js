@@ -575,6 +575,76 @@ LMS.createService = function (store) {
     return LMS.computeMonthlyStats(table('Lessons'), studentId, year, month);
   }
 
+  function slimLessonForReport_(row) {
+    return {
+      lesson_date: row.lesson_date,
+      attendance: row.attendance,
+      test_status: row.test_status,
+      test_score: row.test_score,
+      test_max_score: row.test_max_score,
+      test_difficulty: row.test_difficulty,
+      assignment_completion: row.assignment_completion,
+      concentration: row.concentration,
+      progress: row.progress,
+      homework: row.homework,
+      special_note: row.special_note
+    };
+  }
+
+  function getMonthlyReportContext(studentId, year, month) {
+    var student = requireStudent(studentId);
+    var y = Number(year);
+    var m = Number(month);
+    if (!y || !m || m < 1 || m > 12) {
+      throw new Error('연도와 월을 올바르게 입력해 주세요.');
+    }
+    var range = LMS.monthRange(y, m);
+    var lessons = getStudentLessons(studentId, range.start, range.end).map(slimLessonForReport_);
+    var stats = LMS.computeMonthlyStats(table('Lessons'), studentId, y, m);
+    var set = settings();
+    var baseText = LMS.buildMonthlyReport(stats, student, set);
+    var counseling = getCounselingNotes(studentId).filter(function (note) {
+      return LMS.inRange(note.counsel_date, range.start, range.end);
+    }).map(function (note) {
+      return {
+        counsel_date: note.counsel_date,
+        kind: note.kind,
+        content: note.content
+      };
+    });
+    var existing = table('MonthlyReports').filter(function (r) {
+      return LMS.toStr(r.student_id) === LMS.toStr(studentId) &&
+        Number(r.year) === y &&
+        Number(r.month) === m;
+    })[0] || null;
+    return {
+      student: {
+        student_id: student.student_id,
+        name: student.name,
+        grade: student.grade,
+        school: student.school,
+        status: student.status,
+        memo: student.memo
+      },
+      year: y,
+      month: m,
+      period: range,
+      stats: stats,
+      settings: {
+        academy_name: set.academy_name,
+        teacher_name: set.teacher_name,
+        contact: set.contact,
+        report_greeting: set.report_greeting,
+        report_closing: set.report_closing
+      },
+      lessons: lessons,
+      counseling_notes: counseling,
+      learning_signals: LMS.detectLearningSignals(lessons),
+      base_text: baseText,
+      existing_report: existing
+    };
+  }
+
   function generateMonthlyReport(studentId, year, month) {
     var student = requireStudent(studentId);
     var stats = LMS.computeMonthlyStats(table('Lessons'), studentId, year, month);
@@ -1111,6 +1181,7 @@ LMS.createService = function (store) {
     generateDailyReport: generateDailyReport,
     generateDailyReports: generateDailyReports,
     getMonthlyStats: getMonthlyStats,
+    getMonthlyReportContext: getMonthlyReportContext,
     generateMonthlyReport: generateMonthlyReport,
     saveMonthlyReport: saveMonthlyReport,
     getCounselingNotes: getCounselingNotes,

@@ -1632,6 +1632,66 @@
     }
   }
 
+  function paintMonthlyReport(sid, y, m, res, opts) {
+    opts = opts || {};
+    var s = res.stats;
+    var aiNote = opts.ai
+      ? '<p class="muted" style="margin:0 0 8px">AI 분석 구간이 포함된 초안입니다. 저장 전 내용을 확인·수정해 주세요.</p>'
+      : '';
+    document.getElementById('monthly-body').innerHTML =
+      '<div class="grid stats">' +
+        stat('수업', s.total_lessons) + stat('출석', s.present_count) +
+        stat('결석', s.absent_count) + stat('테스트 평균', s.test_average_display) +
+        stat('중간값', s.test_median_display) +
+        stat('최고', s.test_high_display) +
+        stat('최저', s.test_low_display) +
+      '</div>' +
+      '<div class="card" style="margin-top:14px">' + aiNote +
+      '<p>과제 A ' + s.assignment_A + ' · B ' + s.assignment_B + ' · C ' + s.assignment_C +
+      ' / 집중도 A ' + s.concentration_A + ' B ' + s.concentration_B + ' C ' + s.concentration_C + ' D ' + s.concentration_D + '</p>' +
+      '<p>진도: ' + esc(s.progress_summary || '-') + '</p>' +
+      '<textarea id="monthly-text" class="preview">' + esc(res.text) + '</textarea>' +
+      '<div class="row" style="margin-top:10px">' +
+      '<button class="btn secondary" id="copy-m">복사</button>' +
+      '<button class="btn secondary" id="pdf-m">PDF 저장</button>' +
+      '<button class="btn" id="save-draft">임시 저장</button><button class="btn ok" id="save-final">확정</button></div></div>';
+    document.getElementById('copy-m').onclick = function () { copyText(document.getElementById('monthly-text')); };
+    document.getElementById('pdf-m').onclick = function () {
+      var text = document.getElementById('monthly-text').value;
+      if (!text.trim()) return toast('보고서 내용이 없습니다.', true);
+      var btn = document.getElementById('pdf-m');
+      btn.disabled = true;
+      fetch('/api/monthly-report/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_id: sid, year: Number(y), month: Number(m), report_text: text })
+      }).then(function (r) {
+        if (!r.ok) {
+          return r.json().then(function (j) { throw new Error(j.error || 'PDF 생성 실패'); });
+        }
+        var dispo = r.headers.get('Content-Disposition') || '';
+        var match = /filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i.exec(dispo);
+        var fname = match ? decodeURIComponent(match[1] || match[2]) : 'monthly-report.pdf';
+        return r.blob().then(function (blob) { return { blob: blob, fname: fname }; });
+      }).then(function (pair) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(pair.blob);
+        a.download = pair.fname;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast('PDF를 저장했습니다.');
+      }).catch(function (e) { toast(e.message, true); })
+        .finally(function () { btn.disabled = false; });
+    };
+    function save(status) {
+      api('saveMonthlyReport', [{ student_id: sid, year: Number(y), month: Number(m), report_text: document.getElementById('monthly-text').value, status: status }])
+        .then(function () { toast(status === '확정' ? '확정했습니다.' : '임시 저장했습니다.'); })
+        .catch(function (e) { toast(e.message, true); });
+    }
+    document.getElementById('save-draft').onclick = function () { save('임시'); };
+    document.getElementById('save-final').onclick = function () { save('확정'); };
+  }
+
   function renderMonthly(root) {
     spinner(root);
     loadLookups().then(function () {
@@ -1640,37 +1700,42 @@
         field('학생', select('student_id', studentOptions(''), '')) +
         field('연도', input('year', now[0], 'number')) +
         field('월', input('month', String(Number(now[1])), 'number', 'min="1" max="12"')) +
-        '<button class="btn" id="gen-m">통계·보고서 생성</button></div></div><div id="monthly-body"></div>';
+        '<button class="btn secondary" id="gen-m">기본 보고서</button>' +
+        '<button class="btn" id="gen-m-ai">AI 분석 포함</button></div>' +
+        '<p class="muted" style="margin:10px 0 0">AI 분석은 서버에 설정된 API 키(OpenAI 호환)로 생성됩니다. PDF는 아래 미리보기에서 저장할 수 있습니다.</p></div>' +
+        '<div id="monthly-body"></div>';
+      function params() {
+        return {
+          sid: root.querySelector('[name=student_id]').value,
+          y: root.querySelector('[name=year]').value,
+          m: root.querySelector('[name=month]').value
+        };
+      }
       document.getElementById('gen-m').onclick = function () {
-        var sid = root.querySelector('[name=student_id]').value;
-        var y = root.querySelector('[name=year]').value;
-        var m = root.querySelector('[name=month]').value;
-        if (!sid) return toast('학생을 선택해 주세요.', true);
-        api('generateMonthlyReport', [sid, Number(y), Number(m)]).then(function (res) {
-          var s = res.stats;
-          document.getElementById('monthly-body').innerHTML =
-            '<div class="grid stats">' +
-              stat('수업', s.total_lessons) + stat('출석', s.present_count) +
-              stat('결석', s.absent_count) + stat('테스트 평균', s.test_average_display) +
-              stat('중간값', s.test_median_display) +
-              stat('최고', s.test_high_display) +
-              stat('최저', s.test_low_display) +
-            '</div>' +
-            '<div class="card" style="margin-top:14px"><p>과제 A ' + s.assignment_A + ' · B ' + s.assignment_B + ' · C ' + s.assignment_C +
-            ' / 집중도 A ' + s.concentration_A + ' B ' + s.concentration_B + ' C ' + s.concentration_C + ' D ' + s.concentration_D + '</p>' +
-            '<p>진도: ' + esc(s.progress_summary || '-') + '</p>' +
-            '<textarea id="monthly-text" class="preview">' + esc(res.text) + '</textarea>' +
-            '<div class="row" style="margin-top:10px"><button class="btn secondary" id="copy-m">복사</button>' +
-            '<button class="btn" id="save-draft">임시 저장</button><button class="btn ok" id="save-final">확정</button></div></div>';
-          document.getElementById('copy-m').onclick = function () { copyText(document.getElementById('monthly-text')); };
-          function save(status) {
-            api('saveMonthlyReport', [{ student_id: sid, year: Number(y), month: Number(m), report_text: document.getElementById('monthly-text').value, status: status }])
-              .then(function () { toast(status === '확정' ? '확정했습니다.' : '임시 저장했습니다.'); })
-              .catch(function (e) { toast(e.message, true); });
-          }
-          document.getElementById('save-draft').onclick = function () { save('임시'); };
-          document.getElementById('save-final').onclick = function () { save('확정'); };
-        }).catch(function (e) { toast(e.message, true); });
+        var p = params();
+        if (!p.sid) return toast('학생을 선택해 주세요.', true);
+        var btn = document.getElementById('gen-m');
+        btn.disabled = true;
+        api('generateMonthlyReport', [p.sid, Number(p.y), Number(p.m)]).then(function (res) {
+          paintMonthlyReport(p.sid, p.y, p.m, res, { ai: false });
+        }).catch(function (e) { toast(e.message, true); })
+          .finally(function () { btn.disabled = false; });
+      };
+      document.getElementById('gen-m-ai').onclick = function () {
+        var p = params();
+        if (!p.sid) return toast('학생을 선택해 주세요.', true);
+        var btn = document.getElementById('gen-m-ai');
+        btn.disabled = true;
+        toast('AI 분석을 생성하는 중입니다…');
+        fetch('/api/generateMonthlyReportAi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id: p.sid, year: Number(p.y), month: Number(p.m) })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (!j.ok) throw new Error(j.error || 'AI 보고서 생성 실패');
+          paintMonthlyReport(p.sid, p.y, p.m, j.data, { ai: true });
+        }).catch(function (e) { toast(e.message, true); })
+          .finally(function () { btn.disabled = false; });
       };
     }).catch(fail(root));
   }
