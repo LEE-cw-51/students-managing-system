@@ -3,8 +3,8 @@ import { isAuthed } from '../../../lib/auth.js';
 import { withService } from '../../../lib/store.js';
 import {
   buildMonthlyAiSections,
-  isMonthlyAiConfigured,
-  mergeMonthlyReportText
+  buildGenerateMonthlyReportAiData,
+  isMonthlyAiConfigured
 } from '../../../lib/monthly-ai.js';
 
 export const runtime = 'nodejs';
@@ -31,20 +31,9 @@ export async function POST(req) {
   try {
     const pack = await withService((api) => api.getMonthlyReportContext(studentId, year, month));
     const aiSections = await buildMonthlyAiSections(pack);
-    const merged = mergeMonthlyReportText(pack.base_text, aiSections);
-    const existing = pack.existing_report;
     return NextResponse.json({
       ok: true,
-      data: {
-        student: pack.student,
-        stats: pack.stats,
-        text: existing && existing.report_text ? existing.report_text : merged,
-        generated_text: merged,
-        ai_sections: aiSections,
-        base_text: pack.base_text,
-        existing: existing,
-        ai: true
-      }
+      data: buildGenerateMonthlyReportAiData(pack, aiSections)
     });
   } catch (e) {
     return NextResponse.json({

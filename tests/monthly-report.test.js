@@ -4,7 +4,11 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore } = require('./memory-store.js');
-const { mergeMonthlyReportText, isMonthlyAiConfigured } = require('../lib/monthly-ai.js');
+const {
+  mergeMonthlyReportText,
+  isMonthlyAiConfigured,
+  buildGenerateMonthlyReportAiData
+} = require('../lib/monthly-ai.js');
 const { renderMonthlyReportPdf } = require('../lib/monthly-pdf.js');
 
 function svc() {
@@ -12,6 +16,25 @@ function svc() {
 }
 
 describe('monthly report AI helpers', () => {
+  it('returns new AI draft in text when a saved MonthlyReport exists', () => {
+    const pack = {
+      student: { student_id: 'STU_1', name: '홍길동' },
+      stats: { month: 9, total_lessons: 2 },
+      base_text: '기본 월간 본문',
+      existing_report: {
+        monthly_report_id: 'MTH_1',
+        report_text: '이전에 저장한 확정본',
+        status: '확정'
+      }
+    };
+    const aiSections = '【학습 분석】\n- 새 AI 초안';
+    const data = buildGenerateMonthlyReportAiData(pack, aiSections);
+    assert.equal(data.text, mergeMonthlyReportText(pack.base_text, aiSections));
+    assert.notEqual(data.text, pack.existing_report.report_text);
+    assert.equal(data.generated_text, data.text);
+    assert.equal(data.existing.report_text, '이전에 저장한 확정본');
+  });
+
   it('merges base text and AI sections', () => {
     const merged = mergeMonthlyReportText('기본 본문', '【학습 분석】\n- 테스트');
     assert.match(merged, /기본 본문/);
