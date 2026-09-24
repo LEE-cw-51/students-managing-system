@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['postgres'],
+  serverExternalPackages: ['postgres', 'pdfkit'],
   agentRules: false,
   // Dev-only: allow the loopback/LAN hosts used to reach `next dev` so the
   // HMR websocket and afterInteractive scripts are not blocked as cross-origin.
