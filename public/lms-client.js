@@ -213,7 +213,7 @@
     var parts = raw.split('/').filter(Boolean);
     var route = parts[0] || 'dashboard';
     var params = { id: parts[1] || '' };
-    if (route === 'today') {
+    if (route === 'today' || route === 'daily') {
       if (/^\d{4}-\d{2}-\d{2}$/.test(parts[1] || '')) {
         params.date = parts[1];
         params.classId = parts[2] || '';
@@ -233,6 +233,64 @@
     if (date) path += '/' + date;
     if (classId) path += '/' + classId;
     go(path);
+  }
+
+  function goToDaily(date, classId) {
+    var path = 'daily';
+    if (date) path += '/' + date;
+    if (classId) path += '/' + classId;
+    go(path);
+  }
+
+  /** Prefer incomplete today class, else first today meeting class — not cache.classes[0]. */
+  function pickClassFromDashboard(d) {
+    if (!d) return '';
+    var tasks = d.teaching_tasks || {};
+    var regular = tasks.regular_classes || [];
+    var incomplete = regular.filter(function (c) {
+      return c.student_count > 0 && !c.complete;
+    });
+    if (incomplete.length) return incomplete[0].class_id || '';
+    if (regular.length) return regular[0].class_id || '';
+    var todayClasses = d.classes || [];
+    if (todayClasses.length) return todayClasses[0].class_id || '';
+    return '';
+  }
+
+  function loadDashboardForDate(date) {
+    var cached = state.cache.dashboard;
+    if (cached && cached.date === date) return Promise.resolve(cached);
+    return api('getDashboard', [date]).then(function (d) {
+      if (date === state.today) {
+        state.cache.dashboard = d;
+        persistBoot();
+      }
+      return d;
+    });
+  }
+
+  function resolveTodayClassId(date, preferredClassId) {
+    if (preferredClassId) return Promise.resolve(preferredClassId);
+    return loadDashboardForDate(date).then(pickClassFromDashboard);
+  }
+
+  function makeupStripHtml(tasks, date) {
+    var makeups = ((tasks && tasks.makeup_sessions) || []).filter(function (m) {
+      return m.status !== '취소';
+    });
+    if (!makeups.length) return '';
+    return '<div class="card" id="today-makeup-strip"><div class="toolbar"><h3 style="margin:0">오늘 보강</h3>' +
+      '<span class="muted">' + makeups.length + '건</span></div><ul class="task-list">' +
+      makeups.map(function (m) {
+        var label = m.title || (m.kind === '반' ? m.class_name + ' 보강' : (m.student_name || '') + ' 보강');
+        var meta = '보강 ' + esc(m.status) + (m.start_time ? ' · ' + esc(m.start_time) : '');
+        var open = m.class_id
+          ? '<button type="button" class="btn ghost makeup-open" data-date="' + esc(date) +
+            '" data-class="' + esc(m.class_id) + '">수업 기록</button>'
+          : '';
+        return '<li class="task-item makeup"><span class="task-title">' + esc(label) +
+          '</span><span class="muted">' + meta + '</span>' + open + '</li>';
+      }).join('') + '</ul></div>';
   }
 
   function renderNav() {
@@ -1085,20 +1143,30 @@
     spinner(root);
     loadLookups().then(function () {
       var date = state.params.date || state.today;
-      var classId = state.params.classId || ((state.cache.classes[0] || {}).class_id || '');
-      root.innerHTML =
-        '<div class="card"><div class="row">' +
-          field('날짜', input('lesson_date', date, 'date')) +
-          field('반', select('class_id', classOptions(classId), classId)) +
-        '</div></div>' +
-        '<div id="today-body"></div>';
-      root.querySelector('[name=lesson_date]').onchange = reload;
-      root.querySelector('[name=class_id]').onchange = reload;
-      function reload() {
-        loadSession(root.querySelector('[name=lesson_date]').value, root.querySelector('[name=class_id]').value);
-      }
-      if (classId) loadSession(date, classId);
-      else document.getElementById('today-body').innerHTML = '<div class="card empty">먼저 반을 등록해 주세요.</div>';
+      var preferred = state.params.classId || '';
+      return loadDashboardForDate(date).then(function (dash) {
+        var classId = preferred || pickClassFromDashboard(dash);
+        var resolvedTasks = (dash && dash.teaching_tasks) || null;
+        root.innerHTML =
+          makeupStripHtml(resolvedTasks, date) +
+          '<div class="card"><div class="row">' +
+            field('날짜', input('lesson_date', date, 'date')) +
+            field('반', select('class_id', classOptions(classId), classId)) +
+          '</div></div>' +
+          '<div id="today-body"></div>';
+        root.querySelectorAll('.makeup-open').forEach(function (btn) {
+          btn.onclick = function () {
+            goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
+          };
+        });
+        root.querySelector('[name=lesson_date]').onchange = reload;
+        root.querySelector('[name=class_id]').onchange = reload;
+        function reload() {
+          loadSession(root.querySelector('[name=lesson_date]').value, root.querySelector('[name=class_id]').value);
+        }
+        if (classId) loadSession(date, classId);
+        else document.getElementById('today-body').innerHTML = '<div class="card empty">오늘 배정된 운영 반이 없습니다. 반관리에서 먼저 등록해 주세요.</div>';
+      });
     }).catch(fail(root));
   }
 
@@ -1152,12 +1220,17 @@
     ]).then(function (pair) {
       var session = pair[0];
       var snapshot = pair[1];
+      var incompleteCount = 0;
       var cards = session.students.map(function (s) {
         var l = s.lesson || {};
         var tested = (l.test_status || '미실시') === '실시';
-        return '<article class="card student-card" data-student="' + esc(s.student_id) + '">' +
+        var recorded = !!l.lesson_id;
+        if (!recorded) incompleteCount += 1;
+        var hasPerStudentText = !!(trimStr(l.progress) || trimStr(l.homework));
+        return '<article class="card student-card" data-student="' + esc(s.student_id) +
+          '" data-recorded="' + (recorded ? '1' : '0') + '">' +
           '<div class="toolbar"><h3>' + esc(s.name) + ' <span class="muted">' + esc(s.grade) + '</span></h3>' +
-          (l.lesson_id ? '<span class="badge ok">기록됨</span>' : '<span class="badge warn">미기록</span>') + '</div>' +
+          (recorded ? '<span class="badge ok">기록됨</span>' : '<span class="badge warn">미기록</span>') + '</div>' +
           '<div class="row">' + field('출석', chipGroup('attendance', ['출석', '결석'], l.attendance || '출석')) +
             field('테스트', chipGroup('test_status', ['미실시', '실시'], l.test_status || '미실시')) + '</div>' +
           '<div class="row score-row" style="' + (tested ? '' : 'display:none') + '">' +
@@ -1169,17 +1242,27 @@
             field('과제 이행률', chipGroup('assignment_completion', ['A', 'B', 'C'], l.assignment_completion || 'A')) +
             field('집중도', chipGroup('concentration', ['A', 'B', 'C', 'D', 'ABSENT'], l.concentration || 'A', ['A', 'B', 'C', 'D', '결석'])) +
           '</div>' +
-          field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>', { wide: true }) +
-          field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>', { wide: true }) +
           field('학생 피드백', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>', { wide: true }) +
+          '<details class="per-student-edit"' + (hasPerStudentText ? ' open' : '') + '>' +
+            '<summary style="cursor:pointer;font-weight:600;color:var(--navy);padding:6px 0">개별 수정 (진도·과제)</summary>' +
+            '<div style="display:grid;gap:10px;margin-top:8px">' +
+              field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>', { wide: true }) +
+              field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>', { wide: true }) +
+            '</div></details>' +
         '</article>';
       }).join('');
 
       var snapshotHint = snapshot && snapshot.lesson_date
         ? '<p class="muted">직전 수업: ' + esc(snapshot.lesson_date) + '</p>'
         : '<p class="muted">이전 수업 기록이 없습니다. 반 설정의 진도·숙제를 참고합니다.</p>';
+      var filterBar = session.students.length
+        ? '<div class="card" id="incomplete-filter-bar"><div class="toolbar">' +
+          '<label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-weight:600;color:var(--ink)">' +
+          '<input type="checkbox" id="filter-incomplete" style="width:auto;min-height:0"> 미기록만 보기</label>' +
+          '<span class="muted">미기록 ' + incompleteCount + '명 / 전체 ' + session.students.length + '명</span></div></div>'
+        : '';
       body.innerHTML =
-        '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 내용을 한 번에 넣은 뒤 학생별로 수정하세요.</p>' +
+        '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 진도·과제를 여기에 넣고 저장하세요. 학생별 내용은 「개별 수정」에서 바꿀 수 있습니다.</p>' +
           snapshotHint +
           '<div class="row">' +
             field('학습 진도', '<textarea id="bulk-progress"></textarea>', { wide: true }) +
@@ -1195,7 +1278,9 @@
             '<button class="btn secondary" id="copy-assignments" type="button">지난 수업 과제 이행률 복사</button>' +
             '<button class="btn secondary" id="apply-bulk" type="button">전체 학생에게 적용</button>' +
           '</div></div>' +
-        (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') +
+        filterBar +
+        '<div id="student-cards">' + (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') + '</div>' +
+        '<div id="post-save-actions" class="hidden" style="margin-top:12px"></div>' +
         '<div class="bottom-bar"><button class="btn" id="save-today" style="width:100%">수업 기록 저장</button></div>' +
         '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
 
@@ -1205,6 +1290,16 @@
       var bulkNotice = document.getElementById('bulk-notice');
       if (bulkNotice) bulkNotice.value = session.class_notice || '';
       applyLessonSnapshot(body, snapshot);
+      var filterIncomplete = document.getElementById('filter-incomplete');
+      if (filterIncomplete) {
+        filterIncomplete.onchange = function () {
+          var onlyIncomplete = filterIncomplete.checked;
+          body.querySelectorAll('.student-card').forEach(function (card) {
+            var hide = onlyIncomplete && card.getAttribute('data-recorded') === '1';
+            card.classList.toggle('hidden', hide);
+          });
+        };
+      }
       var loadSnapshotBtn = document.getElementById('load-snapshot');
       if (loadSnapshotBtn) {
         loadSnapshotBtn.onclick = function () {
@@ -1234,9 +1329,29 @@
         });
         toast('공통 내용을 적용했습니다.');
       };
+      function showPostSaveHandoff() {
+        var box = document.getElementById('post-save-actions');
+        if (!box) return;
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="card"><div class="toolbar"><div><h3 style="margin:0">다음 단계</h3>' +
+          '<p class="muted" style="margin:6px 0 0">수업 기록을 저장했습니다. 같은 날짜·반으로 일일 보고서를 작성할 수 있습니다.</p></div>' +
+          '<button type="button" class="btn ok" id="go-daily-after-save">일일 보고서 작성</button></div></div>';
+        var goBtn = document.getElementById('go-daily-after-save');
+        if (goBtn) goBtn.onclick = function () { goToDaily(date, classId); };
+      }
       function save(btn) {
+        var bulkP = bulkProgress ? bulkProgress.value : '';
+        var bulkH = bulkHomework ? bulkHomework.value : '';
         var items = [];
         body.querySelectorAll('.student-card').forEach(function (card) {
+          var progressEl = card.querySelector('[name=progress]');
+          var homeworkEl = card.querySelector('[name=homework]');
+          var progress = progressEl ? progressEl.value : '';
+          var homework = homeworkEl ? homeworkEl.value : '';
+          if (!trimStr(progress) && trimStr(bulkP)) progress = bulkP;
+          if (!trimStr(homework) && trimStr(bulkH)) homework = bulkH;
+          if (progressEl) progressEl.value = progress;
+          if (homeworkEl) homeworkEl.value = homework;
           items.push({
             lesson_date: date,
             class_id: classId,
@@ -1248,8 +1363,8 @@
             test_difficulty: selectedChip(card, 'test_difficulty'),
             assignment_completion: selectedChip(card, 'assignment_completion'),
             concentration: selectedChip(card, 'concentration'),
-            progress: card.querySelector('[name=progress]').value,
-            homework: card.querySelector('[name=homework]').value,
+            progress: progress,
+            homework: homework,
             special_note: card.querySelector('[name=special_note]').value
           });
         });
@@ -1260,11 +1375,19 @@
           return api('saveLessonsBatch', [{ items: items, class_notice: classNotice }]).then(function () {
             state.cache.dashboard = null;
             persistBoot();
-            body.querySelectorAll('.student-card .badge').forEach(function (badge) {
-              badge.className = 'badge ok';
-              badge.textContent = '기록됨';
+            body.querySelectorAll('.student-card').forEach(function (card) {
+              card.setAttribute('data-recorded', '1');
+              var badge = card.querySelector('.badge');
+              if (badge) {
+                badge.className = 'badge ok';
+                badge.textContent = '기록됨';
+              }
             });
+            if (filterIncomplete && filterIncomplete.checked) {
+              filterIncomplete.dispatchEvent(new Event('change'));
+            }
             toast('수업 기록을 저장했습니다.');
+            showPostSaveHandoff();
           });
         }).catch(function (e) { toast(e.message, true); });
       }
@@ -1273,6 +1396,10 @@
       if (s1) s1.onclick = function () { save(s1); };
       if (s2) s2.onclick = function () { save(s2); };
     }).catch(fail(body));
+  }
+
+  function trimStr(v) {
+    return String(v == null ? '' : v).replace(/^\s+|\s+$/g, '');
   }
 
   function learningContextHtml(ctx) {
@@ -1763,20 +1890,36 @@
   function renderDaily(root) {
     spinner(root);
     loadLookups().then(function () {
-      var classId = (state.cache.classes[0] || {}).class_id || '';
-      root.innerHTML = '<div class="card"><div class="row">' +
-        field('날짜', input('date', state.today, 'date')) +
-        field('반', select('class_id', classOptions(classId), classId)) +
-        '<button class="btn" id="load-daily">보고서 생성</button></div></div>' +
-        '<div id="daily-list"></div>';
-      document.getElementById('load-daily').onclick = function () {
-        var date = root.querySelector('[name=date]').value;
-        var cid = root.querySelector('[name=class_id]').value;
-        api('generateDailyReports', [date, cid]).then(function (res) {
+      var date = state.params.date || state.today;
+      var classId = state.params.classId || '';
+      var classPromise = classId
+        ? Promise.resolve(classId)
+        : resolveTodayClassId(date, '').then(function (picked) {
+          return picked || ((state.cache.classes[0] || {}).class_id || '');
+        });
+      return classPromise.then(function (resolvedClassId) {
+        classId = resolvedClassId;
+        root.innerHTML = '<div class="card"><div class="row">' +
+          field('날짜', input('date', date, 'date')) +
+          field('반', select('class_id', classOptions(classId), classId)) +
+          '<button class="btn" id="load-daily">보고서 생성</button></div></div>' +
+          '<div id="daily-list"></div>';
+
+        function paintEmpty(listDate, listClassId) {
+          document.getElementById('daily-list').innerHTML =
+            '<div class="card empty"><p style="margin:0 0 12px">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</p>' +
+            '<button type="button" class="btn" id="daily-go-today">오늘의 수업으로 이동</button></div>';
+          var jump = document.getElementById('daily-go-today');
+          if (jump) jump.onclick = function () { goToToday(listDate, listClassId); };
+        }
+
+        function paintReports(res) {
           var rows = (res && res.reports) || [];
           var avg = res && res.class_test_average;
+          var listDate = root.querySelector('[name=date]').value;
+          var listClassId = root.querySelector('[name=class_id]').value;
           if (!rows.length) {
-            document.getElementById('daily-list').innerHTML = '<div class="card empty">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</div>';
+            paintEmpty(listDate, listClassId);
             return;
           }
           var summary = avg && avg.test_count
@@ -1802,8 +1945,30 @@
               toast('텍스트를 선택했습니다. 복사하세요.');
             };
           });
-        }).catch(function (e) { toast(e.message, true); });
-      };
+        }
+
+        function runGenerate(btn) {
+          var listDate = root.querySelector('[name=date]').value;
+          var cid = root.querySelector('[name=class_id]').value;
+          if (!cid) return toast('반을 선택해 주세요.', true);
+          var work = function () {
+            return api('generateDailyReports', [listDate, cid]).then(paintReports);
+          };
+          if (btn) {
+            withBusy(btn, work).catch(function (e) { toast(e.message, true); });
+          } else {
+            work().catch(function (e) { toast(e.message, true); });
+          }
+        }
+
+        document.getElementById('load-daily').onclick = function () {
+          runGenerate(document.getElementById('load-daily'));
+        };
+
+        if (state.params.date && state.params.classId) {
+          runGenerate(null);
+        }
+      });
     }).catch(fail(root));
   }
 
