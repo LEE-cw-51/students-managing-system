@@ -14,7 +14,8 @@ LMS.PREFIX = {
   monthly: 'MTH',
   note: 'NTS',
   makeup: 'MKP',
-  classSession: 'CSN'
+  classSession: 'CSN',
+  task: 'TSK'
 };
 
 LMS.TABLES = {
@@ -52,6 +53,10 @@ LMS.TABLES = {
     'makeup_id', 'makeup_date', 'start_time', 'end_time', 'kind',
     'class_id', 'student_id', 'title', 'memo', 'status', 'created_at', 'updated_at'
   ],
+  Tasks: [
+    'task_id', 'due_date', 'kind', 'title', 'memo', 'student_id', 'class_id',
+    'status', 'source', 'created_at', 'updated_at'
+  ],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -75,6 +80,9 @@ LMS.REPORT_STATUS = ['임시', '확정'];
 LMS.COUNSEL_KIND = ['학생', '학부모'];
 LMS.MAKEUP_KIND = ['반', '학생'];
 LMS.MAKEUP_STATUS = ['예정', '완료', '취소'];
+LMS.TASK_KIND = ['counsel_parent', 'counsel_student', 'homework_check', 'admin', 'other'];
+LMS.TASK_STATUS = ['예정', '완료', '취소'];
+LMS.TASK_SOURCE = ['manual'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
@@ -89,7 +97,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -780,6 +788,33 @@ LMS.makeupStudentIds = function (data) {
   return LMS.uniqueIds(ids);
 };
 
+LMS.validateTaskInput = function (data, isUpdate) {
+  data = data || {};
+  if (isUpdate && LMS.isBlank(data.task_id)) {
+    throw new Error('할 일을 찾을 수 없습니다.');
+  }
+  var dueDate = LMS.toStr(data.due_date);
+  if (!LMS.isIsoDate(dueDate)) {
+    throw new Error('예정일 형식이 올바르지 않습니다. YYYY-MM-DD로 입력해 주세요.');
+  }
+  var kind = LMS.assertEnum(data.kind, LMS.TASK_KIND, '할 일 종류');
+  var title = LMS.toStr(data.title);
+  if (!title) throw new Error('할 일 제목을 입력해 주세요.');
+  var status = LMS.toStr(data.status) || '예정';
+  LMS.assertEnum(status, LMS.TASK_STATUS, '할 일 상태');
+  return {
+    task_id: LMS.toStr(data.task_id),
+    due_date: dueDate,
+    kind: kind,
+    title: title,
+    memo: LMS.toStr(data.memo),
+    student_id: LMS.toStr(data.student_id),
+    class_id: LMS.toStr(data.class_id),
+    status: status,
+    source: 'manual'
+  };
+};
+
 LMS.validateMakeupSessionInput = function (data, isUpdate) {
   data = data || {};
   if (isUpdate && LMS.isBlank(data.makeup_id)) {
@@ -918,6 +953,7 @@ LMS.TABLE_PK = {
   MonthlyReports: 'monthly_report_id',
   CounselingNotes: 'note_id',
   MakeupSessions: 'makeup_id',
+  Tasks: 'task_id',
   Settings: 'key',
   _Meta: 'prefix'
 };

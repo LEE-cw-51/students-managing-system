@@ -330,6 +330,14 @@
 .task-link { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .task-title { font-weight: 600; }
 .task-item.makeup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agenda-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.agenda-main { flex: 1; min-width: 180px; }
+.agenda-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.agenda-meta { margin-top: 4px; font-size: 13px; }
+.agenda-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.agenda-item.is-done { opacity: 0.72; }
+.agenda-add { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.agenda-add summary { cursor: pointer; font-weight: 600; color: var(--navy); }
 .alert-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .issue-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .issue-chip.on { background: var(--navy); color: white; }

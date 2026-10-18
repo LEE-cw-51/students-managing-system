@@ -10,12 +10,14 @@
   };
 
   var BOOT_CACHE_KEY = 'lms_boot_v1';
+  var dashboardLoadSeq = 0;
 
   var MENUS = [
     { id: 'dashboard', label: '대시보드' },
     { id: 'today', label: '오늘의 수업' },
     { id: 'students', label: '학생관리' },
     { id: 'classes', label: '반관리' },
+    { id: 'counseling', label: '상담' },
     { id: 'daily', label: '일일보고서' },
     { id: 'monthly', label: '월간보고서' },
     { id: 'stats', label: '통계' },
@@ -24,10 +26,29 @@
 
   var MENU_GROUPS = [
     { label: '오늘', items: ['dashboard', 'today'] },
-    { label: '관리', items: ['students', 'classes'] },
+    { label: '관리', items: ['students', 'classes', 'counseling'] },
     { label: '보고서', items: ['daily', 'monthly', 'stats'] },
     { label: '설정', items: ['settings'] }
   ];
+
+  var TASK_KIND_LABELS = {
+    counsel_parent: '학부모 상담',
+    counsel_student: '학생 상담',
+    homework_check: '과제 확인',
+    admin: '행정',
+    other: '기타',
+    incomplete_class: '수업 기록',
+    makeup: '보강',
+    learning_alert: '학습 점검'
+  };
+
+  var AGENDA_ACTION_LABELS = {
+    open_today_session: '수업 열기',
+    open_makeup: '보강 열기',
+    open_student: '학생 보기',
+    check_homework: '과제 확인',
+    edit_task: '수정'
+  };
 
   function api(name, args) {
     args = args || [];
@@ -192,7 +213,7 @@
     var parts = raw.split('/').filter(Boolean);
     var route = parts[0] || 'dashboard';
     var params = { id: parts[1] || '' };
-    if (route === 'today') {
+    if (route === 'today' || route === 'daily') {
       if (/^\d{4}-\d{2}-\d{2}$/.test(parts[1] || '')) {
         params.date = parts[1];
         params.classId = parts[2] || '';
@@ -212,6 +233,101 @@
     if (date) path += '/' + date;
     if (classId) path += '/' + classId;
     go(path);
+  }
+
+  function goToDaily(date, classId) {
+    var path = 'daily';
+    if (date) path += '/' + date;
+    if (classId) path += '/' + classId;
+    go(path);
+  }
+
+  /** Prefer incomplete today class, else first today meeting class — not cache.classes[0]. */
+  function pickClassFromDashboard(d) {
+    if (!d) return '';
+    var tasks = d.teaching_tasks || {};
+    var regular = tasks.regular_classes || [];
+    var incomplete = regular.filter(function (c) {
+      return c.student_count > 0 && !c.complete;
+    });
+    if (incomplete.length) return incomplete[0].class_id || '';
+    if (regular.length) return regular[0].class_id || '';
+    var todayClasses = d.classes || [];
+    if (todayClasses.length) return todayClasses[0].class_id || '';
+    return '';
+  }
+
+  function loadDashboardForDate(date) {
+    var cached = state.cache.dashboard;
+    if (cached && cached.date === date) return Promise.resolve(cached);
+    return api('getDashboard', [date]).then(function (d) {
+      if (date === state.today) {
+        state.cache.dashboard = d;
+        persistBoot();
+      }
+      return d;
+    });
+  }
+
+  function resolveTodayClassId(date, preferredClassId) {
+    if (preferredClassId) return Promise.resolve(preferredClassId);
+    return loadDashboardForDate(date).then(pickClassFromDashboard);
+  }
+
+  function makeupStripHtml(tasks, date) {
+    var makeups = ((tasks && tasks.makeup_sessions) || []).filter(function (m) {
+      return m.status !== '취소';
+    });
+    if (!makeups.length) return '';
+    return '<div class="card" id="today-makeup-strip"><div class="toolbar"><h3 style="margin:0">보강</h3>' +
+      '<span class="muted">' + esc(date) + ' · ' + makeups.length + '건</span></div><ul class="task-list">' +
+      makeups.map(function (m) {
+        var label = m.title || (m.kind === '반' ? m.class_name + ' 보강' : (m.student_name || '') + ' 보강');
+        var meta = '보강 ' + esc(m.status) + (m.start_time ? ' · ' + esc(m.start_time) : '');
+        var open = m.class_id
+          ? '<button type="button" class="btn ghost makeup-open" data-date="' + esc(date) +
+            '" data-class="' + esc(m.class_id) + '">수업 기록</button>'
+          : (m.makeup_id
+            ? '<button type="button" class="btn ghost makeup-edit" data-makeup="' + esc(m.makeup_id) + '">보강 보기</button>'
+            : (m.student_id
+              ? '<button type="button" class="btn ghost makeup-student" data-student="' + esc(m.student_id) + '">학생</button>'
+              : ''));
+        return '<li class="task-item makeup"><span class="task-title">' + esc(label) +
+          '</span><span class="muted">' + meta + '</span>' + open + '</li>';
+      }).join('') + '</ul></div>';
+  }
+
+  function bindMakeupStrip(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('.makeup-open').forEach(function (btn) {
+      btn.onclick = function () {
+        goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
+      };
+    });
+    scope.querySelectorAll('.makeup-edit').forEach(function (btn) {
+      btn.onclick = function () {
+        api('getMakeupSession', [btn.getAttribute('data-makeup')])
+          .then(showMakeupForm)
+          .catch(function (err) { toast(err.message, true); });
+      };
+    });
+    scope.querySelectorAll('.makeup-student').forEach(function (btn) {
+      btn.onclick = function () {
+        go('students/' + btn.getAttribute('data-student'));
+      };
+    });
+  }
+
+  function refreshMakeupStrip(root, date) {
+    var host = root.querySelector('#today-makeup-host');
+    if (!host) return Promise.resolve();
+    return loadDashboardForDate(date).then(function (dash) {
+      host.innerHTML = makeupStripHtml((dash && dash.teaching_tasks) || null, date);
+      bindMakeupStrip(host);
+    }).catch(function (e) {
+      host.innerHTML = '';
+      toast(e.message || String(e), true);
+    });
   }
 
   function renderNav() {
@@ -267,72 +383,244 @@
     return opts;
   }
 
-  function teachingTasksHtml(tasks) {
-    tasks = tasks || { regular_classes: [], makeup_sessions: [] };
-    var incomplete = (tasks.regular_classes || []).filter(function (c) {
-      return c.student_count > 0 && !c.complete;
-    });
-    var makeups = (tasks.makeup_sessions || []).filter(function (m) {
-      return m.status === '예정';
-    });
-    if (!incomplete.length && !makeups.length) {
-      return '<div class="empty">오늘 처리할 미기록 수업이 없습니다.</div>';
-    }
-    var html = '<ul class="task-list">';
-    incomplete.forEach(function (c) {
-      html += '<li class="task-item"><button type="button" class="task-link" data-date="' + esc(tasks.date) +
-        '" data-class="' + esc(c.class_id) + '"><span class="task-title">' + esc(c.class_name) + '</span>' +
-        '<span class="muted">미기록 ' + c.incomplete_count + '명 / ' + c.student_count + '명</span></button></li>';
-    });
-    makeups.forEach(function (m) {
-      var label = m.title || (m.kind === '반' ? m.class_name + ' 보강' : m.student_name + ' 보강');
-      html += '<li class="task-item makeup"><span class="task-title">' + esc(label) + '</span>' +
-        '<span class="muted">보강 ' + esc(m.status) + (m.start_time ? ' · ' + esc(m.start_time) : '') + '</span>';
-      if (m.class_id) {
-        html += '<button type="button" class="btn ghost task-open" data-date="' + esc(tasks.date) +
-          '" data-class="' + esc(m.class_id) + '">수업 기록</button>';
-      }
-      html += '</li>';
-    });
-    html += '</ul>';
-    return html;
+  function taskKindLabel(kind) {
+    return TASK_KIND_LABELS[kind] || kind || '할 일';
   }
 
-  function learningAlertsHtml(alerts) {
-    if (!alerts || !alerts.length) {
-      return '<div class="empty">학습 주의 신호가 없습니다.</div>';
+  function agendaActionLabel(action) {
+    return AGENDA_ACTION_LABELS[action] || '열기';
+  }
+
+  function agendaMetaLine(item) {
+    var bits = [];
+    if (item.student_name) bits.push(item.student_name);
+    if (item.class_name) bits.push(item.class_name);
+    if (item.start_time) bits.push(item.start_time);
+    if (item.incomplete_count != null && item.student_count != null && item.kind === 'incomplete_class') {
+      bits.push('미기록 ' + item.incomplete_count + '/' + item.student_count);
     }
-    return '<ul class="alert-list">' + alerts.map(function (item) {
-      return '<li class="alert-item"><a class="link" href="#/students/' + esc(item.student_id) + '">' +
-        esc(item.student_name) + ' <span class="muted">' + esc(item.grade) + '</span></a>' +
-        '<div class="alert-tags">' + item.signals.map(function (sig) {
-          return '<span class="badge warn">' + esc(sig.label) + '</span>';
-        }).join('') + '</div></li>';
+    if (item.homework_preview) bits.push(item.homework_preview);
+    if (item.memo && item.kind === 'learning_alert') bits.push(item.memo);
+    return bits.join(' · ');
+  }
+
+  function agendaItemsHtml(agenda) {
+    var items = (agenda && agenda.items) || [];
+    if (!items.length) {
+      return '<div class="empty">이 날짜에 표시할 할 일이 없습니다.</div>';
+    }
+    var date = agenda.date || state.today;
+    return '<ul class="task-list agenda-list">' + items.map(function (item) {
+      var done = item.status === '완료';
+      var meta = agendaMetaLine(item);
+      var actions = '';
+      if (item.source === 'manual') {
+        if (!done) {
+          actions += '<button type="button" class="btn ok agenda-complete" data-id="' + esc(item.id) + '">완료</button>';
+        }
+        actions += '<button type="button" class="btn ghost agenda-cancel" data-id="' + esc(item.id) + '">취소</button>';
+      } else {
+        actions += '<button type="button" class="btn agenda-action" data-action="' + esc(item.action || '') +
+          '" data-date="' + esc(date) +
+          '" data-class="' + esc(item.class_id || '') +
+          '" data-student="' + esc(item.student_id || '') +
+          '" data-makeup="' + esc(item.makeup_id || '') + '">' +
+          esc(agendaActionLabel(item.action)) + '</button>';
+      }
+      return '<li class="task-item agenda-item' + (done ? ' is-done' : '') + '">' +
+        '<div class="agenda-main">' +
+          '<div class="agenda-title-row">' +
+            '<span class="badge">' + esc(taskKindLabel(item.kind)) + '</span>' +
+            (item.source === 'manual' ? '<span class="badge ok">수동</span>' : '') +
+            (done ? '<span class="badge ok">완료</span>' : '') +
+            '<span class="task-title">' + esc(item.title) + '</span>' +
+          '</div>' +
+          (meta ? '<div class="muted agenda-meta">' + esc(meta) + '</div>' : '') +
+        '</div>' +
+        '<div class="agenda-actions">' + actions + '</div></li>';
     }).join('') + '</ul>';
   }
 
+  function learningAlertsSummaryHtml(alerts, agenda, viewDate) {
+    var day = viewDate || (agenda && agenda.date) || state.today;
+    if (day !== state.today) {
+      return '<p class="muted" style="margin:0">학습 주의 신호는 오늘(' + esc(state.today) +
+        ') 기준으로만 표시합니다. 선택한 날짜의 할 일에는 포함되지 않습니다.</p>';
+    }
+    alerts = alerts || [];
+    var agendaAlerts = ((agenda && agenda.items) || []).filter(function (i) {
+      return i.kind === 'learning_alert';
+    }).length;
+    if (!alerts.length) {
+      return '<p class="muted" style="margin:0">학습 주의 신호가 없습니다. 관련 항목은 위 할 일에서 확인하세요.</p>';
+    }
+    var top = alerts.slice(0, 3).map(function (item) {
+      return '<a class="link" href="#/students/' + esc(item.student_id) + '">' + esc(item.student_name) + '</a>';
+    }).join(', ');
+    return '<p style="margin:0 0 6px"><b>' + alerts.length + '</b>명의 학습 주의 신호' +
+      (agendaAlerts ? ' · 할 일에 ' + agendaAlerts + '건 포함' : '') + '</p>' +
+      '<p class="muted" style="margin:0">대표: ' + top +
+      (alerts.length > 3 ? ' 외 ' + (alerts.length - 3) + '명' : '') +
+      ' · 상세는 할 일의 「학습 점검」에서 열 수 있습니다.</p>';
+  }
+
+  function taskKindOptions(selected) {
+    return [
+      { value: 'counsel_parent', label: '학부모 상담' },
+      { value: 'counsel_student', label: '학생 상담' },
+      { value: 'homework_check', label: '과제 확인' },
+      { value: 'admin', label: '행정' },
+      { value: 'other', label: '기타' }
+    ].map(function (o) {
+      return { value: o.value, label: o.label };
+    });
+  }
+
+  function agendaAddFormHtml(date) {
+    return '<details class="agenda-add"><summary>할 일 추가</summary>' +
+      '<div class="row" style="margin-top:10px">' +
+        field('종류', select('task_kind', taskKindOptions(), 'other')) +
+        field('기한', input('task_due', date || state.today, 'date')) +
+        field('제목', input('task_title', '')) +
+        field('학생', select('task_student', studentOptions(''), '')) +
+        field('반', select('task_class', classOptions('', false), '')) +
+        field('메모', '<textarea name="task_memo" rows="2"></textarea>', { wide: true }) +
+        '<button type="button" class="btn" id="save-task">추가</button>' +
+      '</div></details>';
+  }
+
+  function runAgendaAction(action, date, classId, studentId, makeupId) {
+    if (action === 'open_today_session' || action === 'check_homework') {
+      goToToday(date, classId || '');
+      return;
+    }
+    if (action === 'open_makeup') {
+      if (classId) {
+        goToToday(date, classId);
+        return;
+      }
+      if (makeupId) {
+        api('getMakeupSession', [makeupId])
+          .then(showMakeupForm)
+          .catch(function (err) { toast(err.message, true); });
+        return;
+      }
+      if (studentId) {
+        go('students/' + studentId);
+        return;
+      }
+      toast('보강에 연결된 반·학생이 없습니다.', true);
+      return;
+    }
+    if (action === 'open_student' && studentId) {
+      go('students/' + studentId);
+      return;
+    }
+    if (action === 'edit_task') return;
+    toast('처리할 수 없는 동작입니다.', true);
+  }
+
+  function bindAgendaCard(root, d) {
+    var agendaDate = (d.agenda && d.agenda.date) || d.date || state.today;
+    var goToday = document.getElementById('go-today');
+    if (goToday) goToday.onclick = function () { goToToday(agendaDate); };
+    var prev = document.getElementById('agenda-prev');
+    var next = document.getElementById('agenda-next');
+    var todayBtn = document.getElementById('agenda-today');
+    if (prev) prev.onclick = function () { loadDashboardDate(addDaysIso(agendaDate, -1)); };
+    if (next) next.onclick = function () { loadDashboardDate(addDaysIso(agendaDate, 1)); };
+    if (todayBtn) todayBtn.onclick = function () { loadDashboardDate(state.today); };
+    root.querySelectorAll('.agenda-action').forEach(function (btn) {
+      btn.onclick = function () {
+        runAgendaAction(
+          btn.getAttribute('data-action'),
+          btn.getAttribute('data-date'),
+          btn.getAttribute('data-class'),
+          btn.getAttribute('data-student'),
+          btn.getAttribute('data-makeup')
+        );
+      };
+    });
+    root.querySelectorAll('.agenda-complete').forEach(function (btn) {
+      btn.onclick = function () {
+        api('updateTaskStatus', [btn.getAttribute('data-id'), '완료']).then(function () {
+          toast('완료 처리했습니다.');
+          state.cache.dashboard = null;
+          loadDashboardDate(agendaDate);
+        }).catch(function (e) { toast(e.message, true); });
+      };
+    });
+    root.querySelectorAll('.agenda-cancel').forEach(function (btn) {
+      btn.onclick = function () {
+        if (!confirm('이 할 일을 취소할까요?')) return;
+        api('updateTaskStatus', [btn.getAttribute('data-id'), '취소']).then(function () {
+          toast('취소했습니다.');
+          state.cache.dashboard = null;
+          loadDashboardDate(agendaDate);
+        }).catch(function (e) { toast(e.message, true); });
+      };
+    });
+    var saveTaskBtn = document.getElementById('save-task');
+    if (saveTaskBtn) {
+      saveTaskBtn.onclick = function () {
+        var card = saveTaskBtn.closest('.card');
+        var title = card.querySelector('[name=task_title]').value;
+        if (!String(title || '').trim()) return toast('제목을 입력해 주세요.', true);
+        var payload = {
+          kind: card.querySelector('[name=task_kind]').value,
+          due_date: card.querySelector('[name=task_due]').value || agendaDate,
+          title: title,
+          student_id: card.querySelector('[name=task_student]').value || '',
+          class_id: card.querySelector('[name=task_class]').value || '',
+          memo: card.querySelector('[name=task_memo]').value || '',
+          status: '예정'
+        };
+        withBusy(saveTaskBtn, function () {
+          return api('saveTask', [payload]).then(function () {
+            toast('할 일을 추가했습니다.');
+            state.cache.dashboard = null;
+            loadDashboardDate(payload.due_date || agendaDate);
+          });
+        }).catch(function (e) { toast(e.message, true); });
+      };
+    }
+  }
+
   function paintDashboard(root, d) {
-    var tasks = d.teaching_tasks || { date: d.date, regular_classes: [], makeup_sessions: [] };
+    var agenda = d.agenda || { date: d.date, items: [] };
+    var agendaDate = agenda.date || d.date || state.today;
+    var dateLabel = d.date_label || agendaDate;
     root.innerHTML =
       '<div class="grid stats">' +
-        stat('오늘 수업 반', d.today_class_count) +
-        stat('오늘 수업 학생', d.today_student_count) +
+        stat('수업 반', d.today_class_count) +
+        stat('수업 학생', d.today_student_count) +
         stat('기록 완료', d.recorded_count) +
         stat('기록 미완료', d.incomplete_count) +
       '</div>' +
-      '<div class="split">' +
-        '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 할 일</h3><button class="btn" id="go-today">오늘의 수업 열기</button></div>' +
-          teachingTasksHtml(tasks) +
+      '<div class="card" style="margin-top:14px">' +
+        '<div class="toolbar">' +
+          '<div><h3 style="margin:0">오늘 할 일</h3>' +
+            '<p class="muted" style="margin:4px 0 0">' + esc(dateLabel) + '</p></div>' +
+          '<div class="row" style="margin:0;gap:6px;flex-wrap:wrap">' +
+            '<button type="button" class="btn secondary" id="agenda-prev">이전</button>' +
+            '<button type="button" class="btn secondary" id="agenda-today">오늘</button>' +
+            '<button type="button" class="btn secondary" id="agenda-next">다음</button>' +
+            '<button type="button" class="btn" id="go-today">오늘의 수업 열기</button>' +
+          '</div>' +
         '</div>' +
-        '<div class="card"><h3>학습 주의 신호</h3>' + learningAlertsHtml(d.learning_alerts) + '</div>' +
+        agendaItemsHtml(agenda) +
+        agendaAddFormHtml(agendaDate) +
+      '</div>' +
+      '<div class="card" style="margin-top:14px"><h3 style="margin-top:0">학습 주의 신호</h3>' +
+        learningAlertsSummaryHtml(d.learning_alerts, agenda, agendaDate) +
       '</div>' +
       '<div class="split" style="margin-top:14px">' +
         '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3></div>' +
-          (d.classes.length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
+          ((d.classes || []).length ? '<table><thead><tr><th>반</th><th>요일</th><th>시간</th><th>담당</th></tr></thead><tbody>' +
             d.classes.map(function (c) {
               return '<tr><td>' + esc(c.class_name) + '</td><td>' + esc(c.weekday) + '</td><td>' +
                 esc(c.start_time) + (c.end_time ? '–' + esc(c.end_time) : '') + '</td><td>' + esc(c.teacher) + '</td></tr>';
-            }).join('') + '</tbody></table>' : '<div class="empty">오늘 배정된 운영 반이 없습니다.</div>') +
+            }).join('') + '</tbody></table>' : '<div class="empty">배정된 운영 반이 없습니다.</div>') +
         '</div>' +
         '<div class="card"><h3>학생 현황</h3><p>재원 <b>' + d.enrolled_count + '</b></p><p>휴원 <b>' + d.paused_count + '</b></p><p>퇴원 <b>' + d.archived_count + '</b></p><p class="muted">보고서 생성 가능 ' + d.report_ready_count + '건</p></div>' +
       '</div>' +
@@ -355,13 +643,33 @@
         '<p class="muted" id="cal-label"></p>' +
         '<div id="cal-body"><div class="empty">달력을 불러오는 중...</div></div>' +
       '</div>';
-    document.getElementById('go-today').onclick = function () { goToToday(d.date); };
-    root.querySelectorAll('.task-link, .task-open').forEach(function (btn) {
-      btn.onclick = function () {
-        goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
-      };
-    });
+    bindAgendaCard(root, d);
     bindCalendar();
+  }
+
+  function loadDashboardDate(date) {
+    state.agendaDate = date || state.today;
+    var seq = ++dashboardLoadSeq;
+    var root = document.getElementById('main');
+    if (state.route !== 'dashboard' || !root) return;
+    var cached = state.cache.dashboard;
+    if (cached && cached.date === state.agendaDate) {
+      paintDashboard(root, cached);
+      return;
+    }
+    spinner(root);
+    api('getDashboard', [state.agendaDate]).then(function (d) {
+      if (seq !== dashboardLoadSeq) return;
+      if (d.date !== state.agendaDate) return;
+      if (d.date === state.today) {
+        state.cache.dashboard = d;
+        persistBoot();
+      }
+      paintDashboard(root, d);
+    }).catch(function (e) {
+      if (seq !== dashboardLoadSeq) return;
+      fail(root)(e);
+    });
   }
 
   function pad2(n) {
@@ -682,16 +990,8 @@
   }
 
   function renderDashboard(root) {
-    var cached = state.cache.dashboard;
-    if (cached && cached.date === state.today) {
-      paintDashboard(root, cached);
-      return;
-    }
-    spinner(root);
-    api('getDashboard', [state.today]).then(function (d) {
-      state.cache.dashboard = d;
-      persistBoot();
-      paintDashboard(root, d);
+    loadLookups().then(function () {
+      loadDashboardDate(state.agendaDate || state.today);
     }).catch(fail(root));
   }
 
@@ -905,20 +1205,29 @@
     spinner(root);
     loadLookups().then(function () {
       var date = state.params.date || state.today;
-      var classId = state.params.classId || ((state.cache.classes[0] || {}).class_id || '');
-      root.innerHTML =
-        '<div class="card"><div class="row">' +
-          field('날짜', input('lesson_date', date, 'date')) +
-          field('반', select('class_id', classOptions(classId), classId)) +
-        '</div></div>' +
-        '<div id="today-body"></div>';
-      root.querySelector('[name=lesson_date]').onchange = reload;
-      root.querySelector('[name=class_id]').onchange = reload;
-      function reload() {
-        loadSession(root.querySelector('[name=lesson_date]').value, root.querySelector('[name=class_id]').value);
-      }
-      if (classId) loadSession(date, classId);
-      else document.getElementById('today-body').innerHTML = '<div class="card empty">먼저 반을 등록해 주세요.</div>';
+      var preferred = state.params.classId || '';
+      return loadDashboardForDate(date).then(function (dash) {
+        var classId = preferred || pickClassFromDashboard(dash);
+        var resolvedTasks = (dash && dash.teaching_tasks) || null;
+        root.innerHTML =
+          '<div id="today-makeup-host">' + makeupStripHtml(resolvedTasks, date) + '</div>' +
+          '<div class="card"><div class="row">' +
+            field('날짜', input('lesson_date', date, 'date')) +
+            field('반', select('class_id', classOptions(classId), classId)) +
+          '</div></div>' +
+          '<div id="today-body"></div>';
+        bindMakeupStrip(document.getElementById('today-makeup-host'));
+        root.querySelector('[name=lesson_date]').onchange = reload;
+        root.querySelector('[name=class_id]').onchange = reload;
+        function reload() {
+          var nextDate = root.querySelector('[name=lesson_date]').value;
+          var nextClass = root.querySelector('[name=class_id]').value;
+          refreshMakeupStrip(root, nextDate);
+          loadSession(nextDate, nextClass);
+        }
+        if (classId) loadSession(date, classId);
+        else document.getElementById('today-body').innerHTML = '<div class="card empty">오늘 배정된 운영 반이 없습니다. 반관리에서 먼저 등록해 주세요.</div>';
+      });
     }).catch(fail(root));
   }
 
@@ -972,12 +1281,17 @@
     ]).then(function (pair) {
       var session = pair[0];
       var snapshot = pair[1];
+      var incompleteCount = 0;
       var cards = session.students.map(function (s) {
         var l = s.lesson || {};
         var tested = (l.test_status || '미실시') === '실시';
-        return '<article class="card student-card" data-student="' + esc(s.student_id) + '">' +
+        var recorded = !!l.lesson_id;
+        if (!recorded) incompleteCount += 1;
+        var hasPerStudentText = !!(trimStr(l.progress) || trimStr(l.homework));
+        return '<article class="card student-card" data-student="' + esc(s.student_id) +
+          '" data-recorded="' + (recorded ? '1' : '0') + '">' +
           '<div class="toolbar"><h3>' + esc(s.name) + ' <span class="muted">' + esc(s.grade) + '</span></h3>' +
-          (l.lesson_id ? '<span class="badge ok">기록됨</span>' : '<span class="badge warn">미기록</span>') + '</div>' +
+          (recorded ? '<span class="badge ok">기록됨</span>' : '<span class="badge warn">미기록</span>') + '</div>' +
           '<div class="row">' + field('출석', chipGroup('attendance', ['출석', '결석'], l.attendance || '출석')) +
             field('테스트', chipGroup('test_status', ['미실시', '실시'], l.test_status || '미실시')) + '</div>' +
           '<div class="row score-row" style="' + (tested ? '' : 'display:none') + '">' +
@@ -989,17 +1303,27 @@
             field('과제 이행률', chipGroup('assignment_completion', ['A', 'B', 'C'], l.assignment_completion || 'A')) +
             field('집중도', chipGroup('concentration', ['A', 'B', 'C', 'D', 'ABSENT'], l.concentration || 'A', ['A', 'B', 'C', 'D', '결석'])) +
           '</div>' +
-          field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>', { wide: true }) +
-          field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>', { wide: true }) +
           field('학생 피드백', '<textarea name="special_note">' + esc(l.special_note) + '</textarea>', { wide: true }) +
+          '<details class="per-student-edit"' + (hasPerStudentText ? ' open' : '') + '>' +
+            '<summary style="cursor:pointer;font-weight:600;color:var(--navy);padding:6px 0">개별 수정 (진도·과제)</summary>' +
+            '<div style="display:grid;gap:10px;margin-top:8px">' +
+              field('학습 진도', '<textarea name="progress">' + esc(l.progress) + '</textarea>', { wide: true }) +
+              field('과제 안내', '<textarea name="homework">' + esc(l.homework) + '</textarea>', { wide: true }) +
+            '</div></details>' +
         '</article>';
       }).join('');
 
       var snapshotHint = snapshot && snapshot.lesson_date
         ? '<p class="muted">직전 수업: ' + esc(snapshot.lesson_date) + '</p>'
         : '<p class="muted">이전 수업 기록이 없습니다. 반 설정의 진도·숙제를 참고합니다.</p>';
+      var filterBar = session.students.length
+        ? '<div class="card" id="incomplete-filter-bar"><div class="toolbar">' +
+          '<label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-weight:600;color:var(--ink)">' +
+          '<input type="checkbox" id="filter-incomplete" style="width:auto;min-height:0"> 미기록만 보기</label>' +
+          '<span class="muted">미기록 ' + incompleteCount + '명 / 전체 ' + session.students.length + '명</span></div></div>'
+        : '';
       body.innerHTML =
-        '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 내용을 한 번에 넣은 뒤 학생별로 수정하세요.</p>' +
+        '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 진도·과제를 여기에 넣고 저장하세요. 학생별 내용은 「개별 수정」에서 바꿀 수 있습니다.</p>' +
           snapshotHint +
           '<div class="row">' +
             field('학습 진도', '<textarea id="bulk-progress"></textarea>', { wide: true }) +
@@ -1015,7 +1339,9 @@
             '<button class="btn secondary" id="copy-assignments" type="button">지난 수업 과제 이행률 복사</button>' +
             '<button class="btn secondary" id="apply-bulk" type="button">전체 학생에게 적용</button>' +
           '</div></div>' +
-        (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') +
+        filterBar +
+        '<div id="student-cards">' + (cards || '<div class="card empty">이 반에 재원 학생이 없습니다.</div>') + '</div>' +
+        '<div id="post-save-actions" class="hidden" style="margin-top:12px"></div>' +
         '<div class="bottom-bar"><button class="btn" id="save-today" style="width:100%">수업 기록 저장</button></div>' +
         '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
 
@@ -1025,6 +1351,16 @@
       var bulkNotice = document.getElementById('bulk-notice');
       if (bulkNotice) bulkNotice.value = session.class_notice || '';
       applyLessonSnapshot(body, snapshot);
+      var filterIncomplete = document.getElementById('filter-incomplete');
+      if (filterIncomplete) {
+        filterIncomplete.onchange = function () {
+          var onlyIncomplete = filterIncomplete.checked;
+          body.querySelectorAll('.student-card').forEach(function (card) {
+            var hide = onlyIncomplete && card.getAttribute('data-recorded') === '1';
+            card.classList.toggle('hidden', hide);
+          });
+        };
+      }
       var loadSnapshotBtn = document.getElementById('load-snapshot');
       if (loadSnapshotBtn) {
         loadSnapshotBtn.onclick = function () {
@@ -1054,9 +1390,29 @@
         });
         toast('공통 내용을 적용했습니다.');
       };
+      function showPostSaveHandoff() {
+        var box = document.getElementById('post-save-actions');
+        if (!box) return;
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="card"><div class="toolbar"><div><h3 style="margin:0">다음 단계</h3>' +
+          '<p class="muted" style="margin:6px 0 0">수업 기록을 저장했습니다. 같은 날짜·반으로 일일 보고서를 작성할 수 있습니다.</p></div>' +
+          '<button type="button" class="btn ok" id="go-daily-after-save">일일 보고서 작성</button></div></div>';
+        var goBtn = document.getElementById('go-daily-after-save');
+        if (goBtn) goBtn.onclick = function () { goToDaily(date, classId); };
+      }
       function save(btn) {
+        var bulkP = bulkProgress ? bulkProgress.value : '';
+        var bulkH = bulkHomework ? bulkHomework.value : '';
         var items = [];
         body.querySelectorAll('.student-card').forEach(function (card) {
+          var progressEl = card.querySelector('[name=progress]');
+          var homeworkEl = card.querySelector('[name=homework]');
+          var progress = progressEl ? progressEl.value : '';
+          var homework = homeworkEl ? homeworkEl.value : '';
+          if (!trimStr(progress) && trimStr(bulkP)) progress = bulkP;
+          if (!trimStr(homework) && trimStr(bulkH)) homework = bulkH;
+          if (progressEl) progressEl.value = progress;
+          if (homeworkEl) homeworkEl.value = homework;
           items.push({
             lesson_date: date,
             class_id: classId,
@@ -1068,8 +1424,8 @@
             test_difficulty: selectedChip(card, 'test_difficulty'),
             assignment_completion: selectedChip(card, 'assignment_completion'),
             concentration: selectedChip(card, 'concentration'),
-            progress: card.querySelector('[name=progress]').value,
-            homework: card.querySelector('[name=homework]').value,
+            progress: progress,
+            homework: homework,
             special_note: card.querySelector('[name=special_note]').value
           });
         });
@@ -1080,11 +1436,19 @@
           return api('saveLessonsBatch', [{ items: items, class_notice: classNotice }]).then(function () {
             state.cache.dashboard = null;
             persistBoot();
-            body.querySelectorAll('.student-card .badge').forEach(function (badge) {
-              badge.className = 'badge ok';
-              badge.textContent = '기록됨';
+            body.querySelectorAll('.student-card').forEach(function (card) {
+              card.setAttribute('data-recorded', '1');
+              var badge = card.querySelector('.badge');
+              if (badge) {
+                badge.className = 'badge ok';
+                badge.textContent = '기록됨';
+              }
             });
+            if (filterIncomplete && filterIncomplete.checked) {
+              filterIncomplete.dispatchEvent(new Event('change'));
+            }
             toast('수업 기록을 저장했습니다.');
+            showPostSaveHandoff();
           });
         }).catch(function (e) { toast(e.message, true); });
       }
@@ -1093,6 +1457,10 @@
       if (s1) s1.onclick = function () { save(s1); };
       if (s2) s2.onclick = function () { save(s2); };
     }).catch(fail(body));
+  }
+
+  function trimStr(v) {
+    return String(v == null ? '' : v).replace(/^\s+|\s+$/g, '');
   }
 
   function learningContextHtml(ctx) {
@@ -1583,20 +1951,36 @@
   function renderDaily(root) {
     spinner(root);
     loadLookups().then(function () {
-      var classId = (state.cache.classes[0] || {}).class_id || '';
-      root.innerHTML = '<div class="card"><div class="row">' +
-        field('날짜', input('date', state.today, 'date')) +
-        field('반', select('class_id', classOptions(classId), classId)) +
-        '<button class="btn" id="load-daily">보고서 생성</button></div></div>' +
-        '<div id="daily-list"></div>';
-      document.getElementById('load-daily').onclick = function () {
-        var date = root.querySelector('[name=date]').value;
-        var cid = root.querySelector('[name=class_id]').value;
-        api('generateDailyReports', [date, cid]).then(function (res) {
+      var date = state.params.date || state.today;
+      var classId = state.params.classId || '';
+      var classPromise = classId
+        ? Promise.resolve(classId)
+        : resolveTodayClassId(date, '').then(function (picked) {
+          return picked || ((state.cache.classes[0] || {}).class_id || '');
+        });
+      return classPromise.then(function (resolvedClassId) {
+        classId = resolvedClassId;
+        root.innerHTML = '<div class="card"><div class="row">' +
+          field('날짜', input('date', date, 'date')) +
+          field('반', select('class_id', classOptions(classId), classId)) +
+          '<button class="btn" id="load-daily">보고서 생성</button></div></div>' +
+          '<div id="daily-list"></div>';
+
+        function paintEmpty(listDate, listClassId) {
+          document.getElementById('daily-list').innerHTML =
+            '<div class="card empty"><p style="margin:0 0 12px">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</p>' +
+            '<button type="button" class="btn" id="daily-go-today">오늘의 수업으로 이동</button></div>';
+          var jump = document.getElementById('daily-go-today');
+          if (jump) jump.onclick = function () { goToToday(listDate, listClassId); };
+        }
+
+        function paintReports(res) {
           var rows = (res && res.reports) || [];
           var avg = res && res.class_test_average;
+          var listDate = root.querySelector('[name=date]').value;
+          var listClassId = root.querySelector('[name=class_id]').value;
           if (!rows.length) {
-            document.getElementById('daily-list').innerHTML = '<div class="card empty">해당 날짜의 수업 기록이 없습니다. 오늘의 수업에서 먼저 저장하세요.</div>';
+            paintEmpty(listDate, listClassId);
             return;
           }
           var summary = avg && avg.test_count
@@ -1622,8 +2006,30 @@
               toast('텍스트를 선택했습니다. 복사하세요.');
             };
           });
-        }).catch(function (e) { toast(e.message, true); });
-      };
+        }
+
+        function runGenerate(btn) {
+          var listDate = root.querySelector('[name=date]').value;
+          var cid = root.querySelector('[name=class_id]').value;
+          if (!cid) return toast('반을 선택해 주세요.', true);
+          var work = function () {
+            return api('generateDailyReports', [listDate, cid]).then(paintReports);
+          };
+          if (btn) {
+            withBusy(btn, work).catch(function (e) { toast(e.message, true); });
+          } else {
+            work().catch(function (e) { toast(e.message, true); });
+          }
+        }
+
+        document.getElementById('load-daily').onclick = function () {
+          runGenerate(document.getElementById('load-daily'));
+        };
+
+        if (state.params.date && state.params.classId) {
+          runGenerate(null);
+        }
+      });
     }).catch(fail(root));
   }
 
@@ -1692,11 +2098,70 @@
     };
     function save(status) {
       api('saveMonthlyReport', [{ student_id: sid, year: Number(y), month: Number(m), report_text: document.getElementById('monthly-text').value, status: status }])
-        .then(function () { toast(status === '확정' ? '확정했습니다.' : '임시 저장했습니다.'); })
+        .then(function () {
+          toast(status === '확정' ? '확정했습니다.' : '임시 저장했습니다.');
+          var queue = document.getElementById('monthly-queue');
+          if (queue) {
+            var yearEl = document.querySelector('#main [name=year]');
+            var monthEl = document.querySelector('#main [name=month]');
+            if (yearEl && monthEl) {
+              paintMonthlyQueue(document.getElementById('main'), yearEl.value, monthEl.value);
+            }
+          }
+        })
         .catch(function (e) { toast(e.message, true); });
     }
     document.getElementById('save-draft').onclick = function () { save('임시'); };
     document.getElementById('save-final').onclick = function () { save('확정'); };
+  }
+
+  function monthlyStatusLabel(status) {
+    if (status === '임시') return '임시';
+    if (status === '확정') return '확정';
+    return '없음';
+  }
+
+  function monthlyStatusBadge(status) {
+    if (status === '확정') return '<span class="badge ok">확정</span>';
+    if (status === '임시') return '<span class="badge warn">임시</span>';
+    return '<span class="badge">없음</span>';
+  }
+
+  function paintMonthlyQueue(root, year, month) {
+    var box = document.getElementById('monthly-queue');
+    if (!box) return;
+    box.innerHTML = '<div class="empty">현황을 불러오는 중...</div>';
+    api('listMonthlyReportStatuses', [Number(year), Number(month)]).then(function (res) {
+      var items = (res && res.items) || [];
+      if (!items.length) {
+        box.innerHTML = '<div class="empty">재원 학생이 없습니다.</div>';
+        return;
+      }
+      box.innerHTML = '<table><thead><tr><th>학생</th><th>학년</th><th>상태</th><th></th></tr></thead><tbody>' +
+        items.map(function (row) {
+          var label = row.status === '없음' || row.status === 'none' || !row.status
+            ? '없음'
+            : monthlyStatusLabel(row.status);
+          var badgeStatus = label === '없음' ? 'none' : row.status;
+          var actionLabel = label === '없음' ? '생성' : '수정';
+          return '<tr>' +
+            '<td>' + esc(row.student_name) + '</td>' +
+            '<td>' + esc(row.grade) + '</td>' +
+            '<td>' + monthlyStatusBadge(badgeStatus === 'none' ? '' : badgeStatus) + '</td>' +
+            '<td><button type="button" class="btn secondary monthly-queue-open" data-student="' +
+              esc(row.student_id) + '">' + actionLabel + '</button></td></tr>';
+        }).join('') + '</tbody></table>';
+      box.querySelectorAll('.monthly-queue-open').forEach(function (btn) {
+        btn.onclick = function () {
+          var sid = btn.getAttribute('data-student');
+          var sel = root.querySelector('[name=student_id]');
+          if (sel) sel.value = sid;
+          document.getElementById('gen-m').click();
+        };
+      });
+    }).catch(function (e) {
+      box.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+    });
   }
 
   function renderMonthly(root) {
@@ -1708,8 +2173,12 @@
         field('연도', input('year', now[0], 'number')) +
         field('월', input('month', String(Number(now[1])), 'number', 'min="1" max="12"')) +
         '<button class="btn secondary" id="gen-m">기본 보고서</button>' +
-        '<button class="btn" id="gen-m-ai">AI 분석 포함</button></div>' +
+        '<button class="btn" id="gen-m-ai">AI 분석 포함</button>' +
+        '<button class="btn ghost" id="refresh-monthly-queue">현황 새로고침</button></div>' +
         '<p class="muted" style="margin:10px 0 0">AI 분석은 서버에 설정된 API 키(OpenAI 호환)로 생성됩니다. PDF는 아래 미리보기에서 저장할 수 있습니다.</p></div>' +
+        '<div class="card" style="margin-top:14px"><div class="toolbar"><h3 style="margin:0">월간 보고서 현황</h3>' +
+          '<span class="muted" id="monthly-queue-label"></span></div>' +
+          '<div id="monthly-queue"></div></div>' +
         '<div id="monthly-body"></div>';
       function params() {
         return {
@@ -1718,6 +2187,12 @@
           m: root.querySelector('[name=month]').value
         };
       }
+      function refreshQueue() {
+        var p = params();
+        var label = document.getElementById('monthly-queue-label');
+        if (label) label.textContent = p.y + '년 ' + p.m + '월';
+        paintMonthlyQueue(root, p.y, p.m);
+      }
       document.getElementById('gen-m').onclick = function () {
         var p = params();
         if (!p.sid) return toast('학생을 선택해 주세요.', true);
@@ -1725,6 +2200,7 @@
         btn.disabled = true;
         api('generateMonthlyReport', [p.sid, Number(p.y), Number(p.m)]).then(function (res) {
           paintMonthlyReport(p.sid, p.y, p.m, res, { ai: false });
+          refreshQueue();
         }).catch(function (e) { toast(e.message, true); })
           .finally(function () { btn.disabled = false; });
       };
@@ -1741,9 +2217,83 @@
         }).then(function (r) { return r.json(); }).then(function (j) {
           if (!j.ok) throw new Error(j.error || 'AI 보고서 생성 실패');
           paintMonthlyReport(p.sid, p.y, p.m, j.data, { ai: true });
+          refreshQueue();
         }).catch(function (e) { toast(e.message, true); })
           .finally(function () { btn.disabled = false; });
       };
+      document.getElementById('refresh-monthly-queue').onclick = refreshQueue;
+      root.querySelector('[name=year]').onchange = refreshQueue;
+      root.querySelector('[name=month]').onchange = refreshQueue;
+      refreshQueue();
+    }).catch(fail(root));
+  }
+
+  function monthBounds(iso) {
+    var parts = String(iso || state.today).split('-');
+    var y = Number(parts[0]);
+    var m = Number(parts[1]);
+    var last = new Date(y, m, 0).getDate();
+    return {
+      start: y + '-' + pad2(m) + '-01',
+      end: y + '-' + pad2(m) + '-' + pad2(last)
+    };
+  }
+
+  function renderCounseling(root) {
+    spinner(root);
+    loadLookups().then(function () {
+      var bounds = monthBounds(state.today);
+      root.innerHTML =
+        '<div class="card"><div class="row">' +
+          field('시작', input('start', bounds.start, 'date')) +
+          field('끝', input('end', bounds.end, 'date')) +
+          field('종류', select('kind', [
+            { value: '', label: '전체' },
+            { value: '학생', label: '학생' },
+            { value: '학부모', label: '학부모' }
+          ], '')) +
+          field('검색', input('query', '')) +
+          '<button type="button" class="btn" id="load-counseling">조회</button>' +
+        '</div></div>' +
+        '<div id="counseling-list"></div>';
+      function load() {
+        var filter = {
+          start: root.querySelector('[name=start]').value,
+          end: root.querySelector('[name=end]').value,
+          kind: root.querySelector('[name=kind]').value,
+          query: root.querySelector('[name=query]').value
+        };
+        var list = document.getElementById('counseling-list');
+        list.innerHTML = '<div class="card empty">불러오는 중...</div>';
+        api('listCounselingNotes', [filter]).then(function (rows) {
+          rows = rows || [];
+          if (!rows.length) {
+            list.innerHTML = '<div class="card empty">조건에 맞는 상담일지가 없습니다.</div>';
+            return;
+          }
+          list.innerHTML = '<div class="card"><table><thead><tr><th>날짜</th><th>종류</th><th>학생</th><th>제목</th><th></th></tr></thead><tbody>' +
+            rows.map(function (n) {
+              return '<tr class="counsel-row" data-student="' + esc(n.student_id) + '" style="cursor:pointer">' +
+                '<td>' + esc(n.counsel_date) + '</td>' +
+                '<td>' + esc(n.kind) + '</td>' +
+                '<td>' + esc(n.student_name) + ' <span class="muted">' + esc(n.grade) + '</span></td>' +
+                '<td>' + esc(n.title || '상담') + '</td>' +
+                '<td><button type="button" class="btn ghost counsel-open" data-student="' +
+                  esc(n.student_id) + '">학생 상세</button></td></tr>';
+            }).join('') + '</tbody></table></div>';
+          list.querySelectorAll('.counsel-row, .counsel-open').forEach(function (el) {
+            el.onclick = function (e) {
+              e.preventDefault();
+              var sid = el.getAttribute('data-student');
+              if (sid) go('students/' + sid);
+            };
+          });
+        }).catch(function (e) {
+          list.innerHTML = '<div class="card empty">' + esc(e.message) + '</div>';
+        });
+      }
+      document.getElementById('load-counseling').onclick = load;
+      load();
     }).catch(fail(root));
   }
 
@@ -1843,6 +2393,7 @@
       today: renderToday,
       students: renderStudents,
       classes: renderClasses,
+      counseling: renderCounseling,
       daily: renderDaily,
       monthly: renderMonthly,
       stats: renderStats,
