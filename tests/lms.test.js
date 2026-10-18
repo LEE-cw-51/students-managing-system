@@ -645,9 +645,151 @@ describe('teacher features', () => {
     assert.equal(tasks.regular_classes[0].complete, true);
     const dash = api.getDashboard('2026-09-14');
     assert.ok(dash.teaching_tasks);
+    assert.ok(dash.agenda);
     assert.ok(Array.isArray(dash.learning_alerts));
     const ctx = api.getStudentLearningContext(api.getStudents({})[0].student_id);
     assert.ok(ctx.summary);
     assert.ok(Array.isArray(ctx.signals));
+  });
+});
+
+describe('agenda and tasks', () => {
+  it('saves manual tasks and lists them on the day agenda', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
+    const s = api.createStudent({ name: '홍길동', class_id: c.class_id });
+    const task = api.saveTask({
+      due_date: '2026-09-14',
+      kind: 'counsel_parent',
+      title: '학부모 상담',
+      memo: '중간고사 후',
+      student_id: s.student_id,
+      class_id: c.class_id
+    });
+    assert.match(task.task_id, /^TSK_/);
+    assert.equal(task.source, 'manual');
+    assert.equal(task.status, '예정');
+    const agenda = api.getDayAgenda('2026-09-14');
+    const manual = agenda.items.filter((item) => item.source === 'manual');
+    assert.equal(manual.length, 1);
+    assert.equal(manual[0].id, task.task_id);
+    assert.equal(manual[0].kind, 'counsel_parent');
+    assert.equal(manual[0].student_name, '홍길동');
+  });
+
+  it('includes incomplete class on agenda and removes it after lessons are recorded', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
+    const a = api.createStudent({ name: '김철수', class_id: c.class_id });
+    const b = api.createStudent({ name: '이영희', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-10',
+      student_id: a.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      homework: 'p.20 복습'
+    });
+
+    let agenda = api.getDayAgenda('2026-09-14');
+    const incomplete = agenda.items.filter((item) => item.kind === 'incomplete_class');
+    assert.equal(incomplete.length, 1);
+    assert.equal(incomplete[0].class_id, c.class_id);
+    assert.equal(incomplete[0].incomplete_count, 2);
+    assert.ok(agenda.items.some((item) => item.kind === 'homework_check' && item.class_id === c.class_id));
+
+    api.saveLesson({
+      lesson_date: '2026-09-14',
+      student_id: a.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시'
+    });
+    api.saveLesson({
+      lesson_date: '2026-09-14',
+      student_id: b.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시'
+    });
+
+    agenda = api.getDayAgenda('2026-09-14');
+    assert.equal(agenda.items.filter((item) => item.kind === 'incomplete_class').length, 0);
+    const dash = api.getDashboard('2026-09-14');
+    assert.ok(dash.agenda);
+    assert.equal(dash.teaching_tasks.regular_classes[0].complete, true);
+  });
+
+  it('updates task status and hides cancelled tasks from agenda', () => {
+    const api = svc();
+    const task = api.saveTask({
+      due_date: '2026-09-14',
+      kind: 'admin',
+      title: '교재 주문'
+    });
+    const done = api.updateTaskStatus(task.task_id, '완료');
+    assert.equal(done.status, '완료');
+    let agenda = api.getDayAgenda('2026-09-14');
+    assert.ok(agenda.items.some((item) => item.id === task.task_id && item.status === '완료'));
+    api.updateTaskStatus(task.task_id, '취소');
+    agenda = api.getDayAgenda('2026-09-14');
+    assert.equal(agenda.items.filter((item) => item.id === task.task_id).length, 0);
+  });
+
+  it('lists monthly report statuses for enrolled students', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    api.saveMonthlyReport({
+      student_id: seeded.students[0].student_id,
+      year: 2026,
+      month: 9,
+      report_text: '임시 보고서',
+      status: '임시'
+    });
+    api.saveMonthlyReport({
+      student_id: seeded.students[1].student_id,
+      year: 2026,
+      month: 9,
+      report_text: '확정 보고서',
+      status: '확정'
+    });
+    const listed = api.listMonthlyReportStatuses(2026, 9);
+    assert.equal(listed.year, 2026);
+    assert.equal(listed.month, 9);
+    assert.equal(listed.items.length, 3);
+    const byName = Object.fromEntries(listed.items.map((row) => [row.student_name, row]));
+    assert.equal(byName['홍길동'].status, '임시');
+    assert.equal(byName['김철수'].status, '확정');
+    assert.equal(byName['이영희'].status, 'none');
+  });
+
+  it('lists counseling notes across students with filters', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    api.saveCounselingNote({
+      student_id: seeded.students[0].student_id,
+      kind: '학부모',
+      counsel_date: '2026-09-10',
+      title: '중간고사',
+      content: '성적 상담'
+    });
+    api.saveCounselingNote({
+      student_id: seeded.students[1].student_id,
+      kind: '학생',
+      counsel_date: '2026-09-12',
+      title: '학습태도',
+      content: '집중 독려'
+    });
+    const all = api.listCounselingNotes({ start: '2026-09-01', end: '2026-09-30' });
+    assert.equal(all.length, 2);
+    assert.ok(all.every((row) => row.student_name));
+    const parents = api.listCounselingNotes({ kind: '학부모' });
+    assert.equal(parents.length, 1);
+    assert.equal(parents[0].student_name, '홍길동');
+    const searched = api.listCounselingNotes({ query: '집중' });
+    assert.equal(searched.length, 1);
+    assert.equal(searched[0].student_name, '김철수');
+    const one = api.listCounselingNotes({ student_id: seeded.students[0].student_id });
+    assert.equal(one.length, 1);
   });
 });

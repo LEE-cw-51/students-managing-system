@@ -1126,6 +1126,260 @@ LMS.createService = function (store) {
     return alerts.slice(0, limit);
   }
 
+  function agendaIncompleteRank(status) {
+    return LMS.toStr(status) === '완료' ? 1 : 0;
+  }
+
+  function sortAgendaItems(items) {
+    return (items || []).slice().sort(function (a, b) {
+      var ra = agendaIncompleteRank(a.status);
+      var rb = agendaIncompleteRank(b.status);
+      if (ra !== rb) return ra - rb;
+      var ka = LMS.toStr(a.kind).localeCompare(LMS.toStr(b.kind));
+      if (ka) return ka;
+      return LMS.toStr(a.title).localeCompare(LMS.toStr(b.title), 'ko');
+    });
+  }
+
+  function getDayAgenda(date) {
+    date = date || store.today();
+    if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var items = [];
+    var teaching = getTodayTeachingTasks(date);
+    var students = table('Students');
+    var classes = table('Classes');
+
+    (teaching.regular_classes || []).forEach(function (cls) {
+      if (cls.complete) return;
+      items.push({
+        id: 'auto:class:' + cls.class_id,
+        source: 'auto',
+        kind: 'incomplete_class',
+        title: (cls.class_name || '반') + ' 수업 기록',
+        status: '예정',
+        student_id: '',
+        class_id: cls.class_id,
+        class_name: cls.class_name || '',
+        start_time: cls.start_time || '',
+        incomplete_count: cls.incomplete_count || 0,
+        student_count: cls.student_count || 0,
+        recorded_count: cls.recorded_count || 0,
+        action: 'open_today_session'
+      });
+    });
+
+    (teaching.makeup_sessions || []).forEach(function (row) {
+      items.push({
+        id: 'auto:makeup:' + row.makeup_id,
+        source: 'auto',
+        kind: 'makeup',
+        title: row.title || '보강',
+        status: LMS.toStr(row.status) || '예정',
+        student_id: row.student_id || '',
+        student_name: row.student_name || '',
+        class_id: row.class_id || '',
+        class_name: row.class_name || '',
+        makeup_id: row.makeup_id,
+        start_time: row.start_time || '',
+        action: 'open_makeup'
+      });
+    });
+
+    getLearningAlerts(8).forEach(function (alert) {
+      var labels = (alert.signals || []).map(function (s) { return s.label; }).filter(Boolean);
+      items.push({
+        id: 'auto:alert:' + alert.student_id,
+        source: 'auto',
+        kind: 'learning_alert',
+        title: (alert.student_name || '학생') + ' 학습 점검',
+        status: '예정',
+        student_id: alert.student_id,
+        student_name: alert.student_name || '',
+        class_id: '',
+        memo: labels.join(' · '),
+        signals: alert.signals || [],
+        action: 'open_student'
+      });
+    });
+
+    (teaching.regular_classes || []).forEach(function (cls) {
+      var snap = getLastLessonSnapshot(cls.class_id, date);
+      var homework = LMS.toStr(snap && snap.homework);
+      if (!homework) return;
+      var preview = homework.split(/\n+/)[0].trim();
+      if (preview.length > 40) preview = preview.slice(0, 40) + '…';
+      items.push({
+        id: 'auto:hw:' + cls.class_id,
+        source: 'auto',
+        kind: 'homework_check',
+        title: (cls.class_name || '반') + ' 과제 확인',
+        status: '예정',
+        student_id: '',
+        class_id: cls.class_id,
+        class_name: cls.class_name || '',
+        homework_preview: preview,
+        prior_lesson_date: snap.lesson_date || '',
+        action: 'check_homework'
+      });
+    });
+
+    table('Tasks').forEach(function (row) {
+      if (LMS.toStr(row.due_date) !== date) return;
+      if (LMS.toStr(row.status) === '취소') return;
+      var student = LMS.findById(students, 'student_id', row.student_id);
+      var cls = LMS.findById(classes, 'class_id', row.class_id);
+      items.push({
+        id: row.task_id,
+        source: 'manual',
+        kind: row.kind,
+        title: row.title,
+        status: row.status,
+        student_id: row.student_id || '',
+        student_name: student ? student.name : '',
+        class_id: row.class_id || '',
+        class_name: cls ? cls.class_name : '',
+        memo: row.memo || '',
+        task_id: row.task_id,
+        action: 'edit_task'
+      });
+    });
+
+    return {
+      date: date,
+      items: sortAgendaItems(items)
+    };
+  }
+
+  function saveTask(data) {
+    return withLock(function () {
+      var isUpdate = !LMS.isBlank(data && data.task_id);
+      var input = LMS.validateTaskInput(data, isUpdate);
+      if (input.student_id) requireStudent(input.student_id);
+      if (input.class_id) requireClass(input.class_id);
+      var rows = table('Tasks');
+      var ts = now();
+      if (isUpdate) {
+        var prev = LMS.findById(rows, 'task_id', input.task_id);
+        if (!prev) throw new Error('할 일을 찾을 수 없습니다.');
+        prev.due_date = input.due_date;
+        prev.kind = input.kind;
+        prev.title = input.title;
+        prev.memo = input.memo;
+        prev.student_id = input.student_id;
+        prev.class_id = input.class_id;
+        prev.status = input.status;
+        prev.source = 'manual';
+        prev.updated_at = ts;
+        saveTable('Tasks', rows);
+        return prev;
+      }
+      var row = {
+        task_id: nextIds(LMS.PREFIX.task, 1)[0],
+        due_date: input.due_date,
+        kind: input.kind,
+        title: input.title,
+        memo: input.memo,
+        student_id: input.student_id,
+        class_id: input.class_id,
+        status: input.status,
+        source: 'manual',
+        created_at: ts,
+        updated_at: ts
+      };
+      rows.push(row);
+      saveTable('Tasks', rows);
+      return row;
+    });
+  }
+
+  function updateTaskStatus(taskId, status) {
+    return withLock(function () {
+      var rows = table('Tasks');
+      var prev = LMS.findById(rows, 'task_id', taskId);
+      if (!prev) throw new Error('할 일을 찾을 수 없습니다.');
+      var nextStatus = LMS.assertEnum(status, LMS.TASK_STATUS, '할 일 상태');
+      prev.status = nextStatus;
+      prev.updated_at = now();
+      saveTable('Tasks', rows);
+      return prev;
+    });
+  }
+
+  function listCounselingNotes(filter) {
+    filter = filter || {};
+    var start = LMS.toStr(filter.start);
+    var end = LMS.toStr(filter.end);
+    var kind = LMS.toStr(filter.kind);
+    var query = LMS.toStr(filter.query).toLowerCase();
+    var studentId = LMS.toStr(filter.student_id);
+    if (start && !LMS.isIsoDate(start)) throw new Error('시작일 형식이 올바르지 않습니다.');
+    if (end && !LMS.isIsoDate(end)) throw new Error('종료일 형식이 올바르지 않습니다.');
+    if (kind) LMS.assertEnum(kind, LMS.COUNSEL_KIND, '상담 종류');
+    if (studentId) requireStudent(studentId);
+    var students = table('Students');
+    return table('CounselingNotes').filter(function (row) {
+      if (studentId && LMS.toStr(row.student_id) !== studentId) return false;
+      if (kind && LMS.toStr(row.kind) !== kind) return false;
+      if (!LMS.inRange(row.counsel_date, start || '', end || '')) return false;
+      if (query) {
+        var student = LMS.findById(students, 'student_id', row.student_id);
+        var hay = [
+          row.title, row.content, row.kind,
+          student ? student.name : '', student ? student.grade : ''
+        ].join(' ').toLowerCase();
+        if (hay.indexOf(query) === -1) return false;
+      }
+      return true;
+    }).map(function (row) {
+      var student = LMS.findById(students, 'student_id', row.student_id);
+      return Object.assign({}, row, {
+        student_name: student ? student.name : '',
+        grade: student ? student.grade : ''
+      });
+    }).sort(function (a, b) {
+      var d = LMS.toStr(b.counsel_date).localeCompare(LMS.toStr(a.counsel_date));
+      if (d) return d;
+      return LMS.toStr(b.updated_at).localeCompare(LMS.toStr(a.updated_at));
+    });
+  }
+
+  function listMonthlyReportStatuses(year, month) {
+    var y = Number(year);
+    var m = Number(month);
+    if (!y || !m || m < 1 || m > 12) {
+      throw new Error('연도와 월을 올바르게 입력해 주세요.');
+    }
+    var reports = table('MonthlyReports').filter(function (r) {
+      return Number(r.year) === y && Number(r.month) === m;
+    });
+    var byStudent = {};
+    reports.forEach(function (r) {
+      byStudent[LMS.toStr(r.student_id)] = r;
+    });
+    var items = table('Students').filter(function (s) {
+      return LMS.toStr(s.status) === '재원';
+    }).map(function (s) {
+      var report = byStudent[LMS.toStr(s.student_id)];
+      var status = 'none';
+      if (report && LMS.toStr(report.status)) status = LMS.toStr(report.status);
+      return {
+        student_id: s.student_id,
+        student_name: s.name,
+        grade: s.grade,
+        status: status,
+        monthly_report_id: report ? report.monthly_report_id : '',
+        updated_at: report ? report.updated_at : ''
+      };
+    }).sort(function (a, b) {
+      return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
+    });
+    return {
+      year: y,
+      month: m,
+      items: items
+    };
+  }
+
   function getDashboard(date) {
     date = date || store.today();
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
@@ -1166,7 +1420,8 @@ LMS.createService = function (store) {
       archived_count: allStudents.filter(function (s) { return s.status === '퇴원'; }).length,
       classes: classes,
       teaching_tasks: getTodayTeachingTasks(date),
-      learning_alerts: getLearningAlerts(8)
+      learning_alerts: getLearningAlerts(8),
+      agenda: getDayAgenda(date)
     };
   }
 
@@ -1279,6 +1534,11 @@ LMS.createService = function (store) {
     saveSetting: saveSetting,
     getDashboard: getDashboard,
     getTodayTeachingTasks: getTodayTeachingTasks,
+    getDayAgenda: getDayAgenda,
+    saveTask: saveTask,
+    updateTaskStatus: updateTaskStatus,
+    listCounselingNotes: listCounselingNotes,
+    listMonthlyReportStatuses: listMonthlyReportStatuses,
     getLastLessonSnapshot: getLastLessonSnapshot,
     getStudentLearningContext: getStudentLearningContext,
     getLearningAlerts: getLearningAlerts,

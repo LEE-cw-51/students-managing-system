@@ -40,6 +40,17 @@ function apiBatch(calls) {
 function getBootstrap() { return wrap_(function (api) { return api.getBootstrap(); }); }
 function getLookups() { return wrap_(function (api) { return api.getLookups(); }); }
 function getDashboard(date) { return wrap_(function (api) { return api.getDashboard(date); }); }
+function getDayAgenda(date) { return wrap_(function (api) { return api.getDayAgenda(date); }); }
+function saveTask(data) { return wrap_(function (api) { return api.saveTask(data); }); }
+function updateTaskStatus(taskId, status) {
+  return wrap_(function (api) { return api.updateTaskStatus(taskId, status); });
+}
+function listCounselingNotes(filter) {
+  return wrap_(function (api) { return api.listCounselingNotes(filter || {}); });
+}
+function listMonthlyReportStatuses(year, month) {
+  return wrap_(function (api) { return api.listMonthlyReportStatuses(year, month); });
+}
 
 function getStudents(filter) { return wrap_(function (api) { return api.getStudents(filter || {}); }); }
 function getStudent(studentId) { return wrap_(function (api) { return api.getStudent(studentId); }); }
