@@ -279,18 +279,55 @@
       return m.status !== '취소';
     });
     if (!makeups.length) return '';
-    return '<div class="card" id="today-makeup-strip"><div class="toolbar"><h3 style="margin:0">오늘 보강</h3>' +
-      '<span class="muted">' + makeups.length + '건</span></div><ul class="task-list">' +
+    return '<div class="card" id="today-makeup-strip"><div class="toolbar"><h3 style="margin:0">보강</h3>' +
+      '<span class="muted">' + esc(date) + ' · ' + makeups.length + '건</span></div><ul class="task-list">' +
       makeups.map(function (m) {
         var label = m.title || (m.kind === '반' ? m.class_name + ' 보강' : (m.student_name || '') + ' 보강');
         var meta = '보강 ' + esc(m.status) + (m.start_time ? ' · ' + esc(m.start_time) : '');
         var open = m.class_id
           ? '<button type="button" class="btn ghost makeup-open" data-date="' + esc(date) +
             '" data-class="' + esc(m.class_id) + '">수업 기록</button>'
-          : '';
+          : (m.makeup_id
+            ? '<button type="button" class="btn ghost makeup-edit" data-makeup="' + esc(m.makeup_id) + '">보강 보기</button>'
+            : (m.student_id
+              ? '<button type="button" class="btn ghost makeup-student" data-student="' + esc(m.student_id) + '">학생</button>'
+              : ''));
         return '<li class="task-item makeup"><span class="task-title">' + esc(label) +
           '</span><span class="muted">' + meta + '</span>' + open + '</li>';
       }).join('') + '</ul></div>';
+  }
+
+  function bindMakeupStrip(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('.makeup-open').forEach(function (btn) {
+      btn.onclick = function () {
+        goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
+      };
+    });
+    scope.querySelectorAll('.makeup-edit').forEach(function (btn) {
+      btn.onclick = function () {
+        api('getMakeupSession', [btn.getAttribute('data-makeup')])
+          .then(showMakeupForm)
+          .catch(function (err) { toast(err.message, true); });
+      };
+    });
+    scope.querySelectorAll('.makeup-student').forEach(function (btn) {
+      btn.onclick = function () {
+        go('students/' + btn.getAttribute('data-student'));
+      };
+    });
+  }
+
+  function refreshMakeupStrip(root, date) {
+    var host = root.querySelector('#today-makeup-host');
+    if (!host) return Promise.resolve();
+    return loadDashboardForDate(date).then(function (dash) {
+      host.innerHTML = makeupStripHtml((dash && dash.teaching_tasks) || null, date);
+      bindMakeupStrip(host);
+    }).catch(function (e) {
+      host.innerHTML = '';
+      toast(e.message || String(e), true);
+    });
   }
 
   function renderNav() {
@@ -386,7 +423,8 @@
         actions += '<button type="button" class="btn agenda-action" data-action="' + esc(item.action || '') +
           '" data-date="' + esc(date) +
           '" data-class="' + esc(item.class_id || '') +
-          '" data-student="' + esc(item.student_id || '') + '">' +
+          '" data-student="' + esc(item.student_id || '') +
+          '" data-makeup="' + esc(item.makeup_id || '') + '">' +
           esc(agendaActionLabel(item.action)) + '</button>';
       }
       return '<li class="task-item agenda-item' + (done ? ' is-done' : '') + '">' +
@@ -403,7 +441,12 @@
     }).join('') + '</ul>';
   }
 
-  function learningAlertsSummaryHtml(alerts, agenda) {
+  function learningAlertsSummaryHtml(alerts, agenda, viewDate) {
+    var day = viewDate || (agenda && agenda.date) || state.today;
+    if (day !== state.today) {
+      return '<p class="muted" style="margin:0">학습 주의 신호는 오늘(' + esc(state.today) +
+        ') 기준으로만 표시합니다. 선택한 날짜의 할 일에는 포함되지 않습니다.</p>';
+    }
     alerts = alerts || [];
     var agendaAlerts = ((agenda && agenda.items) || []).filter(function (i) {
       return i.kind === 'learning_alert';
@@ -446,9 +489,27 @@
       '</div></details>';
   }
 
-  function runAgendaAction(action, date, classId, studentId) {
-    if (action === 'open_today_session' || action === 'check_homework' || action === 'open_makeup') {
+  function runAgendaAction(action, date, classId, studentId, makeupId) {
+    if (action === 'open_today_session' || action === 'check_homework') {
       goToToday(date, classId || '');
+      return;
+    }
+    if (action === 'open_makeup') {
+      if (classId) {
+        goToToday(date, classId);
+        return;
+      }
+      if (makeupId) {
+        api('getMakeupSession', [makeupId])
+          .then(showMakeupForm)
+          .catch(function (err) { toast(err.message, true); });
+        return;
+      }
+      if (studentId) {
+        go('students/' + studentId);
+        return;
+      }
+      toast('보강에 연결된 반·학생이 없습니다.', true);
       return;
     }
     if (action === 'open_student' && studentId) {
@@ -475,7 +536,8 @@
           btn.getAttribute('data-action'),
           btn.getAttribute('data-date'),
           btn.getAttribute('data-class'),
-          btn.getAttribute('data-student')
+          btn.getAttribute('data-student'),
+          btn.getAttribute('data-makeup')
         );
       };
     });
@@ -550,7 +612,7 @@
         agendaAddFormHtml(agendaDate) +
       '</div>' +
       '<div class="card" style="margin-top:14px"><h3 style="margin-top:0">학습 주의 신호</h3>' +
-        learningAlertsSummaryHtml(d.learning_alerts, agenda) +
+        learningAlertsSummaryHtml(d.learning_alerts, agenda, agendaDate) +
       '</div>' +
       '<div class="split" style="margin-top:14px">' +
         '<div class="card"><div class="toolbar"><h3 style="margin:0">오늘 수업 반</h3></div>' +
@@ -1148,21 +1210,20 @@
         var classId = preferred || pickClassFromDashboard(dash);
         var resolvedTasks = (dash && dash.teaching_tasks) || null;
         root.innerHTML =
-          makeupStripHtml(resolvedTasks, date) +
+          '<div id="today-makeup-host">' + makeupStripHtml(resolvedTasks, date) + '</div>' +
           '<div class="card"><div class="row">' +
             field('날짜', input('lesson_date', date, 'date')) +
             field('반', select('class_id', classOptions(classId), classId)) +
           '</div></div>' +
           '<div id="today-body"></div>';
-        root.querySelectorAll('.makeup-open').forEach(function (btn) {
-          btn.onclick = function () {
-            goToToday(btn.getAttribute('data-date'), btn.getAttribute('data-class'));
-          };
-        });
+        bindMakeupStrip(document.getElementById('today-makeup-host'));
         root.querySelector('[name=lesson_date]').onchange = reload;
         root.querySelector('[name=class_id]').onchange = reload;
         function reload() {
-          loadSession(root.querySelector('[name=lesson_date]').value, root.querySelector('[name=class_id]').value);
+          var nextDate = root.querySelector('[name=lesson_date]').value;
+          var nextClass = root.querySelector('[name=class_id]').value;
+          refreshMakeupStrip(root, nextDate);
+          loadSession(nextDate, nextClass);
         }
         if (classId) loadSession(date, classId);
         else document.getElementById('today-body').innerHTML = '<div class="card empty">오늘 배정된 운영 반이 없습니다. 반관리에서 먼저 등록해 주세요.</div>';
