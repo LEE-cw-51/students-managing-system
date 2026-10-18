@@ -10,6 +10,7 @@
   };
 
   var BOOT_CACHE_KEY = 'lms_boot_v1';
+  var dashboardLoadSeq = 0;
 
   var MENUS = [
     { id: 'dashboard', label: '대시보드' },
@@ -528,6 +529,7 @@
 
   function loadDashboardDate(date) {
     state.agendaDate = date || state.today;
+    var seq = ++dashboardLoadSeq;
     var root = document.getElementById('main');
     if (state.route !== 'dashboard' || !root) return;
     var cached = state.cache.dashboard;
@@ -537,12 +539,17 @@
     }
     spinner(root);
     api('getDashboard', [state.agendaDate]).then(function (d) {
+      if (seq !== dashboardLoadSeq) return;
+      if (d.date !== state.agendaDate) return;
       if (d.date === state.today) {
         state.cache.dashboard = d;
         persistBoot();
       }
       paintDashboard(root, d);
-    }).catch(fail(root));
+    }).catch(function (e) {
+      if (seq !== dashboardLoadSeq) return;
+      fail(root)(e);
+    });
   }
 
   function pad2(n) {
