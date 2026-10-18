@@ -720,6 +720,53 @@ describe('agenda and tasks', () => {
     assert.equal(dash.teaching_tasks.regular_classes[0].complete, true);
   });
 
+  it('skips empty-roster classes from incomplete_class agenda items', () => {
+    const api = svc();
+    const today = '2026-09-14';
+    assert.equal(LMS.weekdayName(today), '월');
+    const empty = api.createClass({ class_name: '빈 반', weekday: '월' });
+    const agenda = api.getDayAgenda(today);
+    const incompleteForEmpty = agenda.items.filter(
+      (item) => item.kind === 'incomplete_class' && item.class_id === empty.class_id
+    );
+    assert.equal(incompleteForEmpty.length, 0);
+  });
+
+  it('adds learning_alert items only on today agenda', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
+    const s = api.createStudent({ name: '신호학생', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-12',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      assignment_completion: 'C',
+      concentration: 'D'
+    });
+    api.saveLesson({
+      lesson_date: '2026-09-13',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      assignment_completion: 'C',
+      concentration: 'D'
+    });
+    const todayAgenda = api.getDayAgenda('2026-09-14');
+    assert.ok(
+      todayAgenda.items.some(
+        (item) => item.kind === 'learning_alert' && item.student_id === s.student_id
+      )
+    );
+    const yesterdayAgenda = api.getDayAgenda('2026-09-13');
+    assert.equal(
+      yesterdayAgenda.items.filter((item) => item.kind === 'learning_alert').length,
+      0
+    );
+  });
+
   it('updates task status and hides cancelled tasks from agenda', () => {
     const api = svc();
     const task = api.saveTask({

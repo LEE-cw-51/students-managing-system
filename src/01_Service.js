@@ -1151,6 +1151,7 @@ LMS.createService = function (store) {
 
     (teaching.regular_classes || []).forEach(function (cls) {
       if (cls.complete) return;
+      if (!cls.student_count) return;
       items.push({
         id: 'auto:class:' + cls.class_id,
         source: 'auto',
@@ -1185,22 +1186,24 @@ LMS.createService = function (store) {
       });
     });
 
-    getLearningAlerts(8).forEach(function (alert) {
-      var labels = (alert.signals || []).map(function (s) { return s.label; }).filter(Boolean);
-      items.push({
-        id: 'auto:alert:' + alert.student_id,
-        source: 'auto',
-        kind: 'learning_alert',
-        title: (alert.student_name || '학생') + ' 학습 점검',
-        status: '예정',
-        student_id: alert.student_id,
-        student_name: alert.student_name || '',
-        class_id: '',
-        memo: labels.join(' · '),
-        signals: alert.signals || [],
-        action: 'open_student'
+    if (date === store.today()) {
+      getLearningAlerts(8).forEach(function (alert) {
+        var labels = (alert.signals || []).map(function (s) { return s.label; }).filter(Boolean);
+        items.push({
+          id: 'auto:alert:' + alert.student_id,
+          source: 'auto',
+          kind: 'learning_alert',
+          title: (alert.student_name || '학생') + ' 학습 점검',
+          status: '예정',
+          student_id: alert.student_id,
+          student_name: alert.student_name || '',
+          class_id: '',
+          memo: labels.join(' · '),
+          signals: alert.signals || [],
+          action: 'open_student'
+        });
       });
-    });
+    }
 
     (teaching.regular_classes || []).forEach(function (cls) {
       var snap = getLastLessonSnapshot(cls.class_id, date);
