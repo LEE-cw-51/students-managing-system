@@ -17,6 +17,7 @@
     { id: 'today', label: '오늘의 수업' },
     { id: 'students', label: '학생관리' },
     { id: 'classes', label: '반관리' },
+    { id: 'plans', label: '강의계획' },
     { id: 'counseling', label: '상담' },
     { id: 'daily', label: '일일보고서' },
     { id: 'monthly', label: '월간보고서' },
@@ -26,10 +27,12 @@
 
   var MENU_GROUPS = [
     { label: '오늘', items: ['dashboard', 'today'] },
-    { label: '관리', items: ['students', 'classes', 'counseling'] },
+    { label: '관리', items: ['students', 'classes', 'plans', 'counseling'] },
     { label: '보고서', items: ['daily', 'monthly', 'stats'] },
     { label: '설정', items: ['settings'] }
   ];
+
+  var PLAN_PERIODS = ['일간', '주간', '월간'];
 
   var TASK_KIND_LABELS = {
     counsel_parent: '학부모 상담',
@@ -221,7 +224,59 @@
         params.classId = parts[1];
       }
     }
+    if (route === 'plans') {
+      params.classId = parts[1] || '';
+      if (PLAN_PERIODS.indexOf(decodeURIComponent(parts[2] || '')) !== -1) {
+        params.periodType = decodeURIComponent(parts[2]);
+        params.periodKey = decodeURIComponent(parts[3] || '');
+      }
+    }
     return { route: route, params: params };
+  }
+
+  function goToPlans(classId, periodType, periodKey) {
+    var path = 'plans';
+    if (classId) path += '/' + classId;
+    if (classId && periodType) path += '/' + encodeURIComponent(periodType);
+    if (classId && periodType && periodKey) path += '/' + encodeURIComponent(periodKey);
+    go(path);
+  }
+
+  function addDaysLocal(isoDate, delta) {
+    var parts = String(isoDate || '').split('-');
+    if (parts.length !== 3) return isoDate;
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    d.setDate(d.getDate() + Number(delta || 0));
+    var mm = String(d.getMonth() + 1);
+    var dd = String(d.getDate());
+    if (mm.length < 2) mm = '0' + mm;
+    if (dd.length < 2) dd = '0' + dd;
+    return d.getFullYear() + '-' + mm + '-' + dd;
+  }
+
+  function weekStartLocal(isoDate) {
+    var parts = String(isoDate || '').split('-');
+    if (parts.length !== 3) return isoDate;
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    var day = d.getDay();
+    var mondayOffset = day === 0 ? -6 : 1 - day;
+    return addDaysLocal(isoDate, mondayOffset);
+  }
+
+  function shiftMonthLocal(yearMonth, delta) {
+    var parts = String(yearMonth || '').split('-');
+    if (parts.length < 2) return yearMonth;
+    var y = Number(parts[0]);
+    var m = Number(parts[1]) - 1 + Number(delta || 0);
+    var d = new Date(y, m, 1);
+    var mm = String(d.getMonth() + 1);
+    if (mm.length < 2) mm = '0' + mm;
+    return d.getFullYear() + '-' + mm;
+  }
+
+  function planAnchorForType(periodType, today) {
+    if (periodType === '월간') return String(today || '').slice(0, 7);
+    return today;
   }
 
   function go(path) {
@@ -1322,7 +1377,18 @@
           '<input type="checkbox" id="filter-incomplete" style="width:auto;min-height:0"> 미기록만 보기</label>' +
           '<span class="muted">미기록 ' + incompleteCount + '명 / 전체 ' + session.students.length + '명</span></div></div>'
         : '';
+      var dailyPlan = session.daily_plan;
+      var planCard = '<div class="card" id="today-plan-card"><div class="toolbar"><h3 style="margin:0">오늘 강의 계획</h3>' +
+        '<button type="button" class="btn ghost" id="open-daily-plan">' + (dailyPlan ? '계획 수정' : '계획 작성') + '</button></div>' +
+        (dailyPlan
+          ? (dailyPlan.title ? '<p style="margin:0 0 8px"><strong>' + esc(dailyPlan.title) + '</strong></p>' : '') +
+            (dailyPlan.objectives ? '<p class="muted" style="margin:0 0 6px">목표</p><p class="curriculum">' + esc(dailyPlan.objectives) + '</p>' : '') +
+            (dailyPlan.content ? '<p class="muted" style="margin:10px 0 6px">내용</p><p class="curriculum">' + esc(dailyPlan.content) + '</p>' : '') +
+            (dailyPlan.homework ? '<p class="muted" style="margin:10px 0 6px">예정 숙제</p><p class="curriculum">' + esc(dailyPlan.homework) + '</p>' : '')
+          : '<p class="muted" style="margin:0">아직 오늘 일간 계획이 없습니다. 수업 전에 간단히 적어 두면 편합니다.</p>') +
+        '</div>';
       body.innerHTML =
+        planCard +
         '<div class="card"><h3 style="margin-top:0">전체 적용</h3><p class="muted">같은 반 공통 진도·과제를 여기에 넣고 저장하세요. 학생별 내용은 「개별 수정」에서 바꿀 수 있습니다.</p>' +
           snapshotHint +
           '<div class="row">' +
@@ -1344,6 +1410,12 @@
         '<div id="post-save-actions" class="hidden" style="margin-top:12px"></div>' +
         '<div class="bottom-bar"><button class="btn" id="save-today" style="width:100%">수업 기록 저장</button></div>' +
         '<div class="save-desktop" style="margin-top:12px"><button class="btn" id="save-today-desktop">수업 기록 저장</button></div>';
+      var openPlanBtn = document.getElementById('open-daily-plan');
+      if (openPlanBtn) {
+        openPlanBtn.onclick = function () {
+          goToPlans(classId, '일간', date);
+        };
+      }
 
       bindChips(body);
       var bulkProgress = document.getElementById('bulk-progress');
@@ -1908,7 +1980,7 @@
     spinner(root);
     api('getClass', [id]).then(function (c) {
       root.innerHTML = '<div class="card"><div class="toolbar"><h2 style="margin:0">' + esc(c.class_name) + '</h2>' +
-        '<div><button class="btn secondary" id="edit-class">수정</button> <button class="btn danger" id="close-class">반 종료</button></div></div>' +
+        '<div><button class="btn secondary" id="open-plans">강의계획</button> <button class="btn secondary" id="edit-class">수정</button> <button class="btn danger" id="close-class">반 종료</button></div></div>' +
         '<p>' + esc(c.grade) + ' · ' + esc(c.weekday) + ' · ' + esc(c.start_time) + '–' + esc(c.end_time) + ' · ' + esc(c.teacher) + '</p>' +
         '<div class="grid stats-2">' +
           '<div><h3>현재 교재</h3><p class="curriculum">' + esc(c.textbook || '-') + '</p></div>' +
@@ -1919,6 +1991,9 @@
         '<div class="row" style="margin-top:12px">' + field('학생 배정', '<select id="assign-stu"></select>') +
         field('시작일', input('assign_date', state.today, 'date')) +
         '<button class="btn" id="assign-btn">배정</button></div></div><div id="class-form"></div>';
+      document.getElementById('open-plans').onclick = function () {
+        goToPlans(id, '주간', weekStartLocal(state.today));
+      };
       var inClass = {};
       (c.students || []).forEach(function (s) { inClass[s.student_id] = true; });
       var others = (state.cache.students || []).filter(function (s) {
@@ -2343,6 +2418,189 @@
     }).catch(fail(root));
   }
 
+  function planPreviewText(plan) {
+    if (!plan) return '';
+    var bits = [];
+    if (plan.title) bits.push(plan.title);
+    if (plan.objectives) bits.push(plan.objectives);
+    if (plan.content) bits.push(plan.content);
+    return bits.join('\n').trim();
+  }
+
+  function renderPlans(root) {
+    spinner(root);
+    loadLookups().then(function () {
+      var classId = state.params.classId || ((state.cache.classes[0] || {}).class_id || '');
+      var periodType = state.params.periodType || '일간';
+      if (PLAN_PERIODS.indexOf(periodType) === -1) periodType = '일간';
+      var periodKey = state.params.periodKey || planAnchorForType(periodType, state.today);
+      if (periodType === '주간' && /^\d{4}-\d{2}-\d{2}$/.test(periodKey)) {
+        periodKey = weekStartLocal(periodKey);
+      }
+      if (periodType === '월간' && /^\d{4}-\d{2}-\d{2}$/.test(periodKey)) {
+        periodKey = periodKey.slice(0, 7);
+      }
+
+      function paint(plan, list) {
+        plan = plan || {
+          class_id: classId,
+          period_type: periodType,
+          period_key: periodKey,
+          title: '',
+          objectives: '',
+          content: '',
+          materials: '',
+          homework: '',
+          memo: ''
+        };
+        var periodLabel = plan.period_label || periodKey;
+        var dateField = periodType === '월간'
+          ? field('연월', input('period_key', periodKey, 'month'))
+          : field(periodType === '주간' ? '기준일(해당 주)' : '날짜', input('period_key', periodKey, 'date'));
+        root.innerHTML =
+          '<div class="card"><div class="toolbar"><h3 style="margin:0">강의 계획</h3>' +
+            '<span class="muted">반별로 일간·주간·월간 계획을 저장하고 수시로 수정합니다.</span></div>' +
+            '<div class="row">' +
+              field('반', select('class_id', classOptions(classId), classId)) +
+              field('기간', '<div class="seg" id="plan-period-seg">' + PLAN_PERIODS.map(function (p) {
+                return '<button type="button" class="chip' + (p === periodType ? ' on' : '') + '" data-value="' + esc(p) + '">' + esc(p) + '</button>';
+              }).join('') + '</div>') +
+              dateField +
+            '</div>' +
+            '<div class="cal-toolbar" style="margin-top:8px">' +
+              '<button type="button" class="btn secondary" id="plan-prev">이전</button>' +
+              '<button type="button" class="btn secondary" id="plan-today">오늘 기준</button>' +
+              '<button type="button" class="btn secondary" id="plan-next">다음</button>' +
+              '<h3 class="display" style="font-size:18px">' + esc(periodLabel) + '</h3>' +
+            '</div></div>' +
+          '<div class="card" id="plan-editor">' +
+            '<div class="toolbar"><h3 style="margin:0">' + (plan.plan_id ? '계획 수정' : '새 계획') + '</h3>' +
+              (plan.updated_at ? '<span class="muted">최근 수정 ' + esc(plan.updated_at) + '</span>' : '') +
+            '</div>' +
+            '<div class="row">' +
+              field('제목', input('title', plan.title || '', 'text', 'placeholder="예: 이차방정식 도입"'), { wide: true }) +
+              field('학습 목표', '<textarea name="objectives" class="textarea-lg" placeholder="이번 기간에 도달할 목표">' + esc(plan.objectives || '') + '</textarea>', { wide: true }) +
+              field('수업 내용', '<textarea name="content" class="textarea-lg" placeholder="진도 · 활동 · 평가 계획">' + esc(plan.content || '') + '</textarea>', { wide: true }) +
+              field('교재·자료', '<textarea name="materials" placeholder="교재 범위, 유인물, 준비물">' + esc(plan.materials || '') + '</textarea>', { wide: true }) +
+              field('예정 숙제', '<textarea name="homework" placeholder="내줄 숙제">' + esc(plan.homework || '') + '</textarea>', { wide: true }) +
+              field('메모', '<textarea name="memo" placeholder="강사 메모">' + esc(plan.memo || '') + '</textarea>', { wide: true }) +
+            '</div>' +
+            '<div class="toolbar">' +
+              '<button type="button" class="btn" id="save-plan">저장</button>' +
+              (plan.plan_id ? '<button type="button" class="btn danger" id="delete-plan">삭제</button>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="card"><div class="toolbar"><h3 style="margin:0">같은 반 · ' + esc(periodType) + ' 최근 계획</h3></div>' +
+            (list && list.length
+              ? '<ul class="task-list">' + list.map(function (row) {
+                var preview = planPreviewText(row).slice(0, 80);
+                return '<li class="task-item"><div class="agenda-main">' +
+                  '<div class="agenda-title-row"><strong>' + esc(row.period_label || row.period_key) + '</strong>' +
+                  (row.title ? ' · ' + esc(row.title) : '') + '</div>' +
+                  (preview ? '<div class="muted agenda-meta">' + esc(preview) + (planPreviewText(row).length > 80 ? '…' : '') + '</div>' : '') +
+                  '</div><div class="agenda-actions">' +
+                  '<button type="button" class="btn ghost plan-open" data-key="' + esc(row.period_key) + '">열기</button>' +
+                  '</div></li>';
+              }).join('') + '</ul>'
+              : '<div class="empty">아직 저장된 계획이 없습니다.</div>') +
+          '</div>';
+
+        function currentType() {
+          var on = root.querySelector('#plan-period-seg .chip.on');
+          return on ? on.getAttribute('data-value') : periodType;
+        }
+
+        function navigateTo(nextClass, nextType, nextKey) {
+          goToPlans(nextClass, nextType, nextKey);
+        }
+
+        root.querySelector('[name=class_id]').onchange = function () {
+          navigateTo(this.value, currentType(), root.querySelector('[name=period_key]').value);
+        };
+        root.querySelector('#plan-period-seg').onclick = function (e) {
+          var btn = e.target.closest('.chip');
+          if (!btn) return;
+          var nextType = btn.getAttribute('data-value');
+          var anchor = root.querySelector('[name=period_key]').value || state.today;
+          if (nextType === '월간' && /^\d{4}-\d{2}-\d{2}$/.test(anchor)) anchor = anchor.slice(0, 7);
+          if (nextType !== '월간' && /^\d{4}-\d{2}$/.test(anchor)) anchor = anchor + '-01';
+          navigateTo(root.querySelector('[name=class_id]').value, nextType, planAnchorForType(nextType, anchor));
+        };
+        root.querySelector('[name=period_key]').onchange = function () {
+          navigateTo(root.querySelector('[name=class_id]').value, currentType(), this.value);
+        };
+        document.getElementById('plan-prev').onclick = function () {
+          var key = root.querySelector('[name=period_key]').value;
+          var next = periodType === '월간' ? shiftMonthLocal(key, -1)
+            : periodType === '주간' ? addDaysLocal(weekStartLocal(key), -7)
+            : addDaysLocal(key, -1);
+          navigateTo(classId, periodType, next);
+        };
+        document.getElementById('plan-next').onclick = function () {
+          var key = root.querySelector('[name=period_key]').value;
+          var next = periodType === '월간' ? shiftMonthLocal(key, 1)
+            : periodType === '주간' ? addDaysLocal(weekStartLocal(key), 7)
+            : addDaysLocal(key, 1);
+          navigateTo(classId, periodType, next);
+        };
+        document.getElementById('plan-today').onclick = function () {
+          navigateTo(classId, periodType, planAnchorForType(periodType, state.today));
+        };
+        root.querySelectorAll('.plan-open').forEach(function (btn) {
+          btn.onclick = function () {
+            navigateTo(classId, periodType, btn.getAttribute('data-key'));
+          };
+        });
+        document.getElementById('save-plan').onclick = function () {
+          var btn = this;
+          var editor = document.getElementById('plan-editor');
+          var payload = {
+            plan_id: plan.plan_id || '',
+            class_id: root.querySelector('[name=class_id]').value,
+            period_type: currentType(),
+            period_key: root.querySelector('[name=period_key]').value,
+            title: editor.querySelector('[name=title]').value,
+            objectives: editor.querySelector('[name=objectives]').value,
+            content: editor.querySelector('[name=content]').value,
+            materials: editor.querySelector('[name=materials]').value,
+            homework: editor.querySelector('[name=homework]').value,
+            memo: editor.querySelector('[name=memo]').value
+          };
+          if (!payload.class_id) return toast('반을 선택해 주세요.', true);
+          withBusy(btn, function () {
+            return api('saveClassPlan', [payload]).then(function (saved) {
+              toast('강의 계획을 저장했습니다.');
+              navigateTo(saved.class_id, saved.period_type, saved.period_key);
+            });
+          }).catch(function (e) { toast(e.message, true); });
+        };
+        var del = document.getElementById('delete-plan');
+        if (del) {
+          del.onclick = function () {
+            if (!plan.plan_id) return;
+            if (!confirm('이 강의 계획을 삭제할까요?')) return;
+            api('deleteClassPlan', [plan.plan_id]).then(function () {
+              toast('삭제했습니다.');
+              navigateTo(classId, periodType, periodKey);
+            }).catch(function (e) { toast(e.message, true); });
+          };
+        }
+      }
+
+      if (!classId) {
+        root.innerHTML = '<div class="card empty">운영 중인 반이 없습니다. 반관리에서 먼저 등록해 주세요.</div>';
+        return;
+      }
+
+      Promise.all([
+        api('getClassPlan', [classId, periodType, periodKey]),
+        api('getClassPlans', [{ class_id: classId, period_type: periodType }])
+      ]).then(function (pair) {
+        paint(pair[0], pair[1] || []);
+      }).catch(fail(root));
+    }).catch(fail(root));
+  }
+
   function renderSettings(root) {
     var s = state.settings || {};
     var keys = [
@@ -2393,6 +2651,7 @@
       today: renderToday,
       students: renderStudents,
       classes: renderClasses,
+      plans: renderPlans,
       counseling: renderCounseling,
       daily: renderDaily,
       monthly: renderMonthly,

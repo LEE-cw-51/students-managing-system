@@ -840,3 +840,98 @@ describe('agenda and tasks', () => {
     assert.equal(one.length, 1);
   });
 });
+
+describe('class lesson plans', () => {
+  it('normalizes weekly keys to Monday and monthly keys to YYYY-MM', () => {
+    assert.equal(LMS.normalizePlanPeriodKey('주간', '2026-09-16'), '2026-09-14');
+    assert.equal(LMS.normalizePlanPeriodKey('월간', '2026-09-16'), '2026-09');
+    assert.equal(LMS.normalizePlanPeriodKey('월간', '2026-09'), '2026-09');
+    assert.equal(LMS.normalizePlanPeriodKey('일간', '2026-09-16'), '2026-09-16');
+  });
+
+  it('upserts plans by class + period and supports delete', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월/수' });
+    const first = api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '일간',
+      period_key: '2026-09-14',
+      title: '이차방정식 도입',
+      content: '근의 공식 예습'
+    });
+    assert.match(first.plan_id, /^PLN_/);
+    assert.equal(first.period_key, '2026-09-14');
+    assert.match(first.period_label, /2026년 9월 14일/);
+
+    const second = api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '일간',
+      period_key: '2026-09-14',
+      title: '이차방정식 도입(수정)',
+      objectives: '근의 공식 이해',
+      content: '예제 3문항'
+    });
+    assert.equal(second.plan_id, first.plan_id);
+    assert.equal(second.title, '이차방정식 도입(수정)');
+    assert.equal(api.getClassPlans({ class_id: c.class_id, period_type: '일간' }).length, 1);
+
+    const got = api.getClassPlan(c.class_id, '일간', '2026-09-14');
+    assert.equal(got.content, '예제 3문항');
+
+    api.deleteClassPlan(got.plan_id);
+    assert.equal(api.getClassPlan(c.class_id, '일간', '2026-09-14'), null);
+    assert.equal(api.getClassPlans({ class_id: c.class_id }).length, 0);
+  });
+
+  it('saves weekly from mid-week anchor and monthly by year-month', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 B반', weekday: '화/목' });
+    const week = api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '주간',
+      period_key: '2026-09-16',
+      title: '이번 주 복습',
+      materials: '교재 p.40-48'
+    });
+    assert.equal(week.period_key, '2026-09-14');
+    assert.equal(week.period_start, '2026-09-14');
+    assert.equal(week.period_end, '2026-09-20');
+    assert.equal(api.getClassPlan(c.class_id, '주간', '2026-09-18').plan_id, week.plan_id);
+
+    const month = api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '월간',
+      period_key: '2026-09',
+      title: '9월 단원 계획',
+      homework: '주 2회 오답노트'
+    });
+    assert.equal(month.period_key, '2026-09');
+    assert.equal(api.getClassPlan(c.class_id, '월간', '2026-09-01').plan_id, month.plan_id);
+    assert.equal(api.getClassPlans({ class_id: c.class_id }).length, 2);
+  });
+
+  it('rejects empty plans and attaches daily_plan to today session', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
+    assert.throws(() => api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '일간',
+      period_key: '2026-09-14'
+    }), /계획 내용/);
+
+    const emptySession = api.getTodayClassSession('2026-09-14', c.class_id);
+    assert.equal(emptySession.daily_plan, null);
+
+    api.saveClassPlan({
+      class_id: c.class_id,
+      period_type: '일간',
+      period_key: '2026-09-14',
+      title: '오늘 진도',
+      content: '일차방정식 복습'
+    });
+    const session = api.getTodayClassSession('2026-09-14', c.class_id);
+    assert.ok(session.daily_plan);
+    assert.equal(session.daily_plan.title, '오늘 진도');
+    assert.equal(session.daily_plan.content, '일차방정식 복습');
+  });
+});
