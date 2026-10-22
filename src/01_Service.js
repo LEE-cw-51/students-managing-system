@@ -694,51 +694,110 @@ LMS.createService = function (store) {
       var classId = LMS.toStr(data.class_id);
       requireClass(classId);
       if (!LMS.isIsoDate(date)) throw new Error('수업 날짜가 올바르지 않습니다.');
-      var titles = [];
+      var incoming = [];
       if (Array.isArray(data.items)) {
         data.items.forEach(function (it) {
-          var t = LMS.toStr(it && (it.title || it));
-          if (t) titles.push(t);
+          if (typeof it === 'string') {
+            var s = LMS.toStr(it);
+            if (s) incoming.push({ title: s, item_id: '' });
+            return;
+          }
+          var t = LMS.toStr(it && it.title);
+          if (!t) return;
+          incoming.push({ title: t, item_id: LMS.toStr(it && it.item_id) });
         });
       } else if (Array.isArray(data.titles)) {
         data.titles.forEach(function (t) {
           var s = LMS.toStr(t);
-          if (s) titles.push(s);
+          if (s) incoming.push({ title: s, item_id: '' });
         });
       }
+
       var rows = table('HomeworkItems');
-      var keep = rows.filter(function (row) {
+      var others = rows.filter(function (row) {
         return !(LMS.toStr(row.lesson_date) === date && LMS.toStr(row.class_id) === classId);
       });
-      var removedIds = rows.filter(function (row) {
+      var existing = rows.filter(function (row) {
         return LMS.toStr(row.lesson_date) === date && LMS.toStr(row.class_id) === classId;
-      }).map(function (row) { return LMS.toStr(row.item_id); });
+      }).sort(function (a, b) {
+        var so = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+        if (so) return so;
+        return LMS.toStr(a.item_id).localeCompare(LMS.toStr(b.item_id));
+      });
+      var byId = {};
+      existing.forEach(function (row) { byId[LMS.toStr(row.item_id)] = row; });
+      var unused = existing.slice();
+      var planned = [];
+      var createCount = 0;
+
+      function takeUnused(pred) {
+        for (var i = 0; i < unused.length; i++) {
+          if (pred(unused[i], i)) {
+            return unused.splice(i, 1)[0];
+          }
+        }
+        return null;
+      }
+
+      incoming.forEach(function (inc) {
+        var match = null;
+        if (inc.item_id && byId[inc.item_id]) {
+          match = takeUnused(function (row) {
+            return LMS.toStr(row.item_id) === inc.item_id;
+          });
+        }
+        if (!match) {
+          match = takeUnused(function (row) {
+            return LMS.toStr(row.title) === inc.title;
+          });
+        }
+        if (!match && unused.length) {
+          // Rename in place so checks stay attached when slots are edited.
+          match = unused.shift();
+        }
+        if (match) {
+          planned.push({
+            item_id: match.item_id,
+            title: inc.title,
+            created_at: match.created_at,
+            isNew: false
+          });
+        } else {
+          createCount += 1;
+          planned.push({
+            item_id: '',
+            title: inc.title,
+            created_at: '',
+            isNew: true
+          });
+        }
+      });
+
+      var removedIds = unused.map(function (row) { return LMS.toStr(row.item_id); });
       if (removedIds.length) {
         var checks = table('HomeworkChecks').filter(function (c) {
           return removedIds.indexOf(LMS.toStr(c.item_id)) === -1;
         });
         saveTable('HomeworkChecks', checks);
       }
+
       var ts = now();
-      var created = [];
-      if (titles.length) {
-        var ids = nextIds('HWI', titles.length);
-        titles.forEach(function (title, idx) {
-          var row = {
-            item_id: ids[idx],
-            lesson_date: date,
-            class_id: classId,
-            title: title,
-            sort_order: idx,
-            created_at: ts,
-            updated_at: ts
-          };
-          keep.push(row);
-          created.push(row);
-        });
-      }
-      saveTable('HomeworkItems', keep);
-      syncLessonHomeworkText_(date, classId, LMS.joinHomeworkTitles(created));
+      var newIds = createCount ? nextIds('HWI', createCount) : [];
+      var idPos = 0;
+      var saved = planned.map(function (plan, idx) {
+        var itemId = plan.isNew ? newIds[idPos++] : plan.item_id;
+        return {
+          item_id: itemId,
+          lesson_date: date,
+          class_id: classId,
+          title: plan.title,
+          sort_order: idx,
+          created_at: plan.isNew ? ts : (plan.created_at || ts),
+          updated_at: ts
+        };
+      });
+      saveTable('HomeworkItems', others.concat(saved));
+      syncLessonHomeworkText_(date, classId, LMS.joinHomeworkTitles(saved));
       return getSessionHomework(date, classId);
     });
   }

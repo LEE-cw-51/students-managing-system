@@ -1064,4 +1064,53 @@ describe('homework checklist and weekly dashboard', () => {
     assert.match(checked.items[0].item_id, /^HWI_/);
     assert.equal(checked.grades[0].assignment_completion, 'A');
   });
+
+  it('preserves homework item ids and checks when re-saving the same titles', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '보존반', weekday: '화/목/토' });
+    const s = api.createStudent({ name: '체크학생', class_id: c.class_id });
+    const assigned = '2026-09-12';
+    const first = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      titles: ['워크북', '오답노트']
+    });
+    const id0 = first.items[0].item_id;
+    const id1 = first.items[1].item_id;
+    api.saveHomeworkChecks({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      check_date: '2026-09-15',
+      checks: [
+        { student_id: s.student_id, item_id: id0, status: '완료' },
+        { student_id: s.student_id, item_id: id1, status: '미완료' }
+      ]
+    });
+
+    const again = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      titles: ['워크북', '오답노트']
+    });
+    assert.equal(again.items[0].item_id, id0);
+    assert.equal(again.items[1].item_id, id1);
+
+    const renamed = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      items: [
+        { item_id: id0, title: '워크북 개정' },
+        { item_id: id1, title: '오답노트' }
+      ]
+    });
+    assert.equal(renamed.items[0].item_id, id0);
+    assert.equal(renamed.items[0].title, '워크북 개정');
+
+    const session = api.getSessionHomework(assigned, c.class_id);
+    const check = session.checks.find((row) =>
+      row.item_id === id0 && row.student_id === s.student_id
+    );
+    assert.ok(check);
+    assert.equal(check.status, '완료');
+  });
 });

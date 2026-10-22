@@ -1247,6 +1247,20 @@
       return '<div class="empty">' + esc(opts.empty || '표시할 데이터가 없습니다.') + '</div>';
     }
     var hasClass = points.some(function (p) { return p.y2 != null && isFinite(Number(p.y2)); });
+    var yMax = Number(opts.yMax);
+    if (!isFinite(yMax) || yMax <= 0) {
+      var peak = 0;
+      points.forEach(function (p) {
+        if (isFinite(Number(p.y))) peak = Math.max(peak, Number(p.y));
+        if (p.y2 != null && isFinite(Number(p.y2))) peak = Math.max(peak, Number(p.y2));
+      });
+      yMax = peak > 0 ? peak : 100;
+    }
+    var tickCount = 4;
+    var ticks = [];
+    for (var t = 0; t <= tickCount; t++) {
+      ticks.push(Math.round((yMax * t) / tickCount * 10) / 10);
+    }
     var w = Math.max(520, points.length * (hasClass ? 88 : 72));
     var h = hasClass ? 248 : 220;
     var padL = 40;
@@ -1260,9 +1274,9 @@
       return padL + (i / (points.length - 1)) * innerW;
     }
     function yAt(v) {
-      return padT + (1 - (Number(v) / 100)) * innerH;
+      return padT + (1 - (Number(v) / yMax)) * innerH;
     }
-    var grid = [0, 25, 50, 75, 100].map(function (tick) {
+    var grid = ticks.map(function (tick) {
       var y = yAt(tick);
       return '<line class="chart-grid-line" x1="' + padL + '" y1="' + y + '" x2="' + (w - padR) + '" y2="' + y + '" />' +
         '<text class="chart-axis" x="' + (padL - 8) + '" y="' + (y + 4) + '" text-anchor="end">' + tick + '</text>';
@@ -1429,9 +1443,9 @@
   }
 
   function homeworkSlotsHtml(items) {
-    var rows = (items && items.length) ? items : [{ title: '' }];
+    var rows = (items && items.length) ? items : [{ title: '', item_id: '' }];
     return '<div id="hw-slots">' + rows.map(function (it, idx) {
-      return '<div class="row hw-slot" data-idx="' + idx + '" style="align-items:end">' +
+      return '<div class="row hw-slot" data-idx="' + idx + '" data-item-id="' + esc(it.item_id || '') + '" style="align-items:end">' +
         field('숙제 ' + (idx + 1), input('hw_title', it.title || '', 'text', 'placeholder="예: 워크북 12쪽"'), { wide: true }) +
         '<button type="button" class="btn ghost hw-remove" ' + (rows.length === 1 ? 'disabled' : '') + '>삭제</button></div>';
     }).join('') + '</div>' +
@@ -1455,7 +1469,7 @@
     if (addBtn) {
       addBtn.onclick = function () {
         var wrap = document.createElement('div');
-        wrap.innerHTML = '<div class="row hw-slot" style="align-items:end">' +
+        wrap.innerHTML = '<div class="row hw-slot" data-item-id="" style="align-items:end">' +
           field('숙제', input('hw_title', '', 'text', 'placeholder="예: 워크북 12쪽"'), { wide: true }) +
           '<button type="button" class="btn ghost hw-remove">삭제</button></div>';
         host.appendChild(wrap.firstChild);
@@ -1471,10 +1485,20 @@
     };
   }
 
-  function readHomeworkTitles(scope) {
-    return Array.prototype.map.call(scope.querySelectorAll('#hw-slots [name=hw_title]'), function (el) {
-      return trimStr(el.value);
+  function readHomeworkItems(scope) {
+    return Array.prototype.map.call(scope.querySelectorAll('#hw-slots .hw-slot'), function (slot) {
+      var titleEl = slot.querySelector('[name=hw_title]');
+      var title = titleEl ? trimStr(titleEl.value) : '';
+      if (!title) return null;
+      return {
+        title: title,
+        item_id: slot.getAttribute('data-item-id') || ''
+      };
     }).filter(Boolean);
+  }
+
+  function readHomeworkTitles(scope) {
+    return readHomeworkItems(scope).map(function (it) { return it.title; });
   }
 
   function priorHomeworkCardHtml(prior, students) {
@@ -1658,7 +1682,8 @@
       }
       function save(btn) {
         var bulkP = bulkProgress ? bulkProgress.value : '';
-        var hwTitles = readHomeworkTitles(body);
+        var hwItems = readHomeworkItems(body);
+        var hwTitles = hwItems.map(function (it) { return it.title; });
         var lessonItems = [];
         body.querySelectorAll('.student-card').forEach(function (card) {
           var progressEl = card.querySelector('[name=progress]');
@@ -1715,10 +1740,14 @@
               return api('saveSessionHomework', [{
                 lesson_date: date,
                 class_id: classId,
-                titles: hwTitles
+                items: hwItems
               }]);
             })
-            .then(function () {
+            .then(function (savedHw) {
+              var slots = body.querySelectorAll('#hw-slots .hw-slot');
+              (savedHw.items || []).forEach(function (it, idx) {
+                if (slots[idx]) slots[idx].setAttribute('data-item-id', it.item_id || '');
+              });
               return api('saveLessonsBatch', [{ items: lessonItems, class_notice: classNotice }]);
             })
             .then(function () {
@@ -1987,6 +2016,7 @@
         '<p class="muted">원점수 · 만점이 같은 실시 기록만 표시합니다. 주황은 학생 점수, 남색 점선은 그날 반 평균입니다.</p>' +
         svgLineChart(tests, {
           title: '테스트 점수 추이',
+          yMax: chartMax || undefined,
           empty: chartMax === false ? '만점이 다른 테스트가 섞여 추이를 표시하지 않습니다.' : '실시된 테스트가 없습니다.'
         }) +
         (stats.test_count
