@@ -16,7 +16,9 @@ LMS.PREFIX = {
   makeup: 'MKP',
   classSession: 'CSN',
   task: 'TSK',
-  plan: 'PLN'
+  plan: 'PLN',
+  homeworkItem: 'HWI',
+  homeworkCheck: 'HWC'
 };
 
 LMS.TABLES = {
@@ -63,6 +65,14 @@ LMS.TABLES = {
     'objectives', 'content', 'materials', 'homework', 'memo',
     'created_at', 'updated_at'
   ],
+  HomeworkItems: [
+    'item_id', 'lesson_date', 'class_id', 'title', 'sort_order',
+    'created_at', 'updated_at'
+  ],
+  HomeworkChecks: [
+    'check_id', 'item_id', 'student_id', 'status',
+    'created_at', 'updated_at'
+  ],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -90,6 +100,7 @@ LMS.TASK_KIND = ['counsel_parent', 'counsel_student', 'homework_check', 'admin',
 LMS.TASK_STATUS = ['예정', '완료', '취소'];
 LMS.TASK_SOURCE = ['manual'];
 LMS.PLAN_PERIOD = ['일간', '주간', '월간'];
+LMS.HOMEWORK_CHECK_STATUS = ['완료', '미완료'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
@@ -104,7 +115,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -168,6 +179,62 @@ LMS.classMeetsOn = function (weekdayStr, isoDate) {
   if (!w) return true;
   var name = LMS.weekdayName(isoDate);
   return w.indexOf(name) !== -1;
+};
+
+/** Ordered unique weekday names from a class weekday string like "월/수" or "화목토". */
+LMS.parseClassWeekdays = function (weekdayStr) {
+  var raw = LMS.toStr(weekdayStr);
+  var found = [];
+  LMS.WEEKDAYS.forEach(function (day) {
+    if (raw.indexOf(day) !== -1) found.push(day);
+  });
+  return found;
+};
+
+/** Previous class meeting date strictly before isoDate for the given weekday pattern. */
+LMS.previousClassMeetingDate = function (weekdayStr, isoDate) {
+  var raw = LMS.toStr(isoDate);
+  if (!LMS.isIsoDate(raw)) return '';
+  var days = LMS.parseClassWeekdays(weekdayStr);
+  if (!days.length) return '';
+  var cur = LMS.addDays(raw, -1);
+  for (var i = 0; i < 21; i++) {
+    if (LMS.classMeetsOn(weekdayStr, cur)) return cur;
+    cur = LMS.addDays(cur, -1);
+  }
+  return '';
+};
+
+/** Class meeting dates within [start, end] inclusive. */
+LMS.classMeetingDatesInRange = function (weekdayStr, start, end) {
+  return LMS.datesInRange(start, end).filter(function (date) {
+    return LMS.classMeetsOn(weekdayStr, date);
+  });
+};
+
+LMS.splitHomeworkLines = function (text) {
+  return LMS.toStr(text).split(/\n+/).map(function (line) {
+    return line.replace(/^\s*[-*·]\s*/, '').trim();
+  }).filter(Boolean);
+};
+
+LMS.joinHomeworkTitles = function (items) {
+  return (items || []).map(function (item) {
+    return LMS.toStr(item && item.title);
+  }).filter(Boolean).join('\n');
+};
+
+/** Map checklist completion ratio to A/B/C (90%+ A, 70%+ B, else C). */
+LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
+  var total = Number(totalCount) || 0;
+  if (total <= 0) return '';
+  var done = Number(doneCount) || 0;
+  if (done < 0) done = 0;
+  if (done > total) done = total;
+  var pct = (done / total) * 100;
+  if (pct >= 90) return 'A';
+  if (pct >= 70) return 'B';
+  return 'C';
 };
 
 LMS.addDays = function (isoDate, delta) {
@@ -312,6 +379,7 @@ LMS.buildRegularClassEvents = function (classes, start, end) {
 };
 
 LMS.normalizedScore = function (score, maxScore) {
+  // Kept for compatibility; averages no longer use 100-point conversion.
   var max = LMS.toNum(maxScore);
   var s = LMS.toNum(score);
   if (max === null || max <= 0) return null;
@@ -332,14 +400,35 @@ LMS.formatAverageDisplay = function (avg) {
   return (Math.round(Number(avg) * 10) / 10).toFixed(1);
 };
 
-LMS.collectNormalizedScores = function (lessons) {
-  var scores = [];
+/** Raw scores only when every conducted test shares the same max; otherwise not comparable. */
+LMS.collectRawScoresForStats = function (lessons) {
+  var entries = [];
   (lessons || []).forEach(function (row) {
     if (LMS.toStr(row.test_status) !== '실시') return;
-    var n = LMS.normalizedScore(row.test_score, row.test_max_score);
-    if (n !== null) scores.push(n);
+    var s = LMS.toNum(row.test_score);
+    var m = LMS.toNum(row.test_max_score);
+    if (s === null || m === null || m <= 0) return;
+    entries.push({ score: s, max: m });
   });
-  return scores;
+  if (!entries.length) {
+    return { scores: [], max_score: null, comparable: true, test_count: 0 };
+  }
+  var max0 = entries[0].max;
+  for (var i = 1; i < entries.length; i++) {
+    if (entries[i].max !== max0) {
+      return { scores: [], max_score: null, comparable: false, test_count: entries.length };
+    }
+  }
+  return {
+    scores: entries.map(function (e) { return e.score; }),
+    max_score: max0,
+    comparable: true,
+    test_count: entries.length
+  };
+};
+
+LMS.collectNormalizedScores = function (lessons) {
+  return LMS.collectRawScoresForStats(lessons).scores;
 };
 
 LMS.averageOf = function (values) {
@@ -377,13 +466,31 @@ LMS.computeScoreStats = function (scores) {
 };
 
 LMS.computeDailyClassTestAverage = function (lessons) {
-  var stats = LMS.computeScoreStats(LMS.collectNormalizedScores(lessons));
+  var collected = LMS.collectRawScoresForStats(lessons);
+  if (!collected.comparable) {
+    return {
+      test_count: collected.test_count,
+      test_average: null,
+      test_median: null,
+      test_high: null,
+      test_low: null,
+      test_max_score: null,
+      comparable: false,
+      test_average_display: '-',
+      test_median_display: '-',
+      test_high_display: '-',
+      test_low_display: '-'
+    };
+  }
+  var stats = LMS.computeScoreStats(collected.scores);
   return {
-    test_count: stats.count,
+    test_count: collected.test_count || stats.count,
     test_average: stats.average,
     test_median: stats.median,
     test_high: stats.high,
     test_low: stats.low,
+    test_max_score: collected.max_score,
+    comparable: true,
     test_average_display: stats.average_display,
     test_median_display: stats.median_display,
     test_high_display: stats.high_display,
@@ -558,11 +665,6 @@ LMS.summarizeLessonStats = function (lessons) {
     if (LMS.toStr(row.attendance) === '결석') absent += 1;
     else present += 1;
 
-    if (LMS.toStr(row.test_status) === '실시') {
-      var n = LMS.normalizedScore(row.test_score, row.test_max_score);
-      if (n !== null) scores.push(n);
-    }
-
     var ac = LMS.assignmentCode(row.assignment_completion);
     if (ac) assign[ac] += 1;
 
@@ -571,7 +673,22 @@ LMS.summarizeLessonStats = function (lessons) {
     if (conc[cv] !== undefined) conc[cv] += 1;
   });
 
+  var collected = LMS.collectRawScoresForStats(rows);
+  scores = collected.comparable ? collected.scores : [];
   var scoreStats = LMS.computeScoreStats(scores);
+  if (!collected.comparable) {
+    scoreStats = {
+      count: collected.test_count,
+      average: null,
+      median: null,
+      high: null,
+      low: null,
+      average_display: '-',
+      median_display: '-',
+      high_display: '-',
+      low_display: '-'
+    };
+  }
 
   return {
     total_lessons: rows.length,
@@ -1046,6 +1163,8 @@ LMS.TABLE_PK = {
   MakeupSessions: 'makeup_id',
   Tasks: 'task_id',
   ClassPlans: 'plan_id',
+  HomeworkItems: 'item_id',
+  HomeworkChecks: 'check_id',
   Settings: 'key',
   _Meta: 'prefix'
 };

@@ -30,9 +30,10 @@ npm run dev
 
 테이블은 `lms.kv` 한 곳에 JSON으로 저장합니다. 학원 규모에서는 이 구조가 단순하고, Apps Script 시트 읽기보다 훨씬 빠릅니다.
 
-- `Students`, `Classes`, `StudentClasses`, `Lessons`, `ClassPlans`, `MonthlyReports`, `Settings`, `_Meta`
+- `Students`, `Classes`, `StudentClasses`, `Lessons`, `ClassPlans`, `HomeworkItems`, `HomeworkChecks`, `MonthlyReports`, `Settings`, `_Meta`
 - 수업 기록 고유 키는 `lesson_date + student_id + class_id`
 - 강의 계획(`ClassPlans`) 고유 키는 `class_id + period_type(일간|주간|월간) + period_key`
+- 숙제 항목(`HomeworkItems`)은 반·수업일별 칸, 완료(`HomeworkChecks`)는 `item_id + student_id`
 - 학생 퇴원·반 종료는 행을 지우지 않고 상태를 바꿉니다
 
 스키마 SQL은 `supabase/migrations/` 에 있습니다.
@@ -58,6 +59,13 @@ npm run dev
 - **메뉴**: 관리 → `강의계획`에서 반별로 일간·주간·월간 계획을 작성·저장·수정합니다.
 - **기간 키**: 일간은 날짜, 주간은 그 주 월요일, 월간은 `YYYY-MM`입니다. 같은 반·기간은 한 건으로 upsert됩니다.
 - **연결**: 반 상세의 **강의계획**, 오늘의 수업의 **오늘 강의 계획** 카드에서도 바로 열 수 있습니다.
+
+## 숙제 체크리스트
+
+- **오늘의 수업**: 오늘 내줄 숙제를 칸별로 입력하고, 직전 수업 숙제는 학생별 체크리스트로 확인합니다.
+- **과제 이행률**: 체크 비율로 A(90%+) / B(70%+) / C가 자동 계산됩니다.
+- **주간 대시보드**: 대시보드 상단 「이번 주 필수 숙제」에서 각 수업일의 직전 수업 숙제 완료율을 봅니다 (예: 화목토 반 → 전주 토·그주 화·목).
+- 테스트 통계는 **100점 환산 없이** 만점이 같은 원점수만 평균합니다.
 
 ## 월간 보고서 (AI · PDF)
 

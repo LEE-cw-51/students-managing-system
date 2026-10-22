@@ -120,3 +120,15 @@ function getClassPlans(filter) {
 }
 function saveClassPlan(data) { return wrap_(function (api) { return api.saveClassPlan(data); }); }
 function deleteClassPlan(planId) { return wrap_(function (api) { return api.deleteClassPlan(planId); }); }
+function getSessionHomework(date, classId) {
+  return wrap_(function (api) { return api.getSessionHomework(date, classId); });
+}
+function saveSessionHomework(data) {
+  return wrap_(function (api) { return api.saveSessionHomework(data); });
+}
+function saveHomeworkChecks(data) {
+  return wrap_(function (api) { return api.saveHomeworkChecks(data); });
+}
+function getWeeklyHomeworkDashboard(anchorDate) {
+  return wrap_(function (api) { return api.getWeeklyHomeworkDashboard(anchorDate); });
+}
