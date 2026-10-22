@@ -112,3 +112,11 @@ function saveSetting(key, value) { return wrap_(function (api) { return api.save
 function getClassStats(classId, year, month) {
   return wrap_(function (api) { return api.getClassStats(classId, year, month); });
 }
+function getClassPlan(classId, periodType, periodKey) {
+  return wrap_(function (api) { return api.getClassPlan(classId, periodType, periodKey); });
+}
+function getClassPlans(filter) {
+  return wrap_(function (api) { return api.getClassPlans(filter || {}); });
+}
+function saveClassPlan(data) { return wrap_(function (api) { return api.saveClassPlan(data); }); }
+function deleteClassPlan(planId) { return wrap_(function (api) { return api.deleteClassPlan(planId); }); }

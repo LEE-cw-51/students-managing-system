@@ -30,8 +30,9 @@ npm run dev
 
 테이블은 `lms.kv` 한 곳에 JSON으로 저장합니다. 학원 규모에서는 이 구조가 단순하고, Apps Script 시트 읽기보다 훨씬 빠릅니다.
 
-- `Students`, `Classes`, `StudentClasses`, `Lessons`, `MonthlyReports`, `Settings`, `_Meta`
+- `Students`, `Classes`, `StudentClasses`, `Lessons`, `ClassPlans`, `MonthlyReports`, `Settings`, `_Meta`
 - 수업 기록 고유 키는 `lesson_date + student_id + class_id`
+- 강의 계획(`ClassPlans`) 고유 키는 `class_id + period_type(일간|주간|월간) + period_key`
 - 학생 퇴원·반 종료는 행을 지우지 않고 상태를 바꿉니다
 
 스키마 SQL은 `supabase/migrations/` 에 있습니다.
@@ -51,6 +52,12 @@ npm run dev
 - 웹앱은 비밀번호 세션으로 막습니다. 비밀번호는 서버 환경 변수에만 둡니다.
 - 브라우저에 데이터베이스 키를 넣지 않습니다. 모든 읽기/쓰기는 서버 API를 통과합니다.
 - AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 OpenRouter로 전송됩니다.
+
+## 강의 계획
+
+- **메뉴**: 관리 → `강의계획`에서 반별로 일간·주간·월간 계획을 작성·저장·수정합니다.
+- **기간 키**: 일간은 날짜, 주간은 그 주 월요일, 월간은 `YYYY-MM`입니다. 같은 반·기간은 한 건으로 upsert됩니다.
+- **연결**: 반 상세의 **강의계획**, 오늘의 수업의 **오늘 강의 계획** 카드에서도 바로 열 수 있습니다.
 
 ## 월간 보고서 (AI · PDF)
 

@@ -15,7 +15,8 @@ LMS.PREFIX = {
   note: 'NTS',
   makeup: 'MKP',
   classSession: 'CSN',
-  task: 'TSK'
+  task: 'TSK',
+  plan: 'PLN'
 };
 
 LMS.TABLES = {
@@ -57,6 +58,11 @@ LMS.TABLES = {
     'task_id', 'due_date', 'kind', 'title', 'memo', 'student_id', 'class_id',
     'status', 'source', 'created_at', 'updated_at'
   ],
+  ClassPlans: [
+    'plan_id', 'class_id', 'period_type', 'period_key', 'title',
+    'objectives', 'content', 'materials', 'homework', 'memo',
+    'created_at', 'updated_at'
+  ],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -83,6 +89,7 @@ LMS.MAKEUP_STATUS = ['예정', '완료', '취소'];
 LMS.TASK_KIND = ['counsel_parent', 'counsel_student', 'homework_check', 'admin', 'other'];
 LMS.TASK_STATUS = ['예정', '완료', '취소'];
 LMS.TASK_SOURCE = ['manual'];
+LMS.PLAN_PERIOD = ['일간', '주간', '월간'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
@@ -97,7 +104,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -228,6 +235,58 @@ LMS.weekRange = function (isoDate) {
   var mondayOffset = day === 0 ? -6 : 1 - day;
   var start = LMS.addDays(raw, mondayOffset);
   return { start: start, end: LMS.addDays(start, 6) };
+};
+
+LMS.isYearMonth = function (v) {
+  return /^\d{4}-\d{2}$/.test(LMS.toStr(v));
+};
+
+/** Normalize a date/anchor into the storage key for a plan period. */
+LMS.normalizePlanPeriodKey = function (periodType, value) {
+  var type = LMS.toStr(periodType);
+  var raw = LMS.toStr(value);
+  if (type === '일간') {
+    if (!LMS.isIsoDate(raw)) {
+      throw new Error('일간 계획 날짜 형식이 올바르지 않습니다. YYYY-MM-DD로 입력해 주세요.');
+    }
+    return raw;
+  }
+  if (type === '주간') {
+    if (!LMS.isIsoDate(raw)) {
+      throw new Error('주간 계획 기준일 형식이 올바르지 않습니다. YYYY-MM-DD로 입력해 주세요.');
+    }
+    return LMS.weekRange(raw).start;
+  }
+  if (type === '월간') {
+    if (LMS.isYearMonth(raw)) return raw;
+    if (LMS.isIsoDate(raw)) return raw.slice(0, 7);
+    throw new Error('월간 계획 연월 형식이 올바르지 않습니다. YYYY-MM로 입력해 주세요.');
+  }
+  throw new Error('계획 기간 종류가 올바르지 않습니다.');
+};
+
+LMS.planPeriodRange = function (periodType, periodKey) {
+  var type = LMS.toStr(periodType);
+  var key = LMS.normalizePlanPeriodKey(type, periodKey);
+  if (type === '일간') return { start: key, end: key, period_key: key };
+  if (type === '주간') {
+    var week = LMS.weekRange(key);
+    return { start: week.start, end: week.end, period_key: week.start };
+  }
+  var parts = key.split('-');
+  var range = LMS.monthRange(parts[0], parts[1]);
+  return { start: range.start, end: range.end, period_key: key };
+};
+
+LMS.formatPlanPeriodLabel = function (periodType, periodKey) {
+  var type = LMS.toStr(periodType);
+  var meta = LMS.planPeriodRange(type, periodKey);
+  if (type === '일간') return LMS.formatKoreanDate(meta.period_key);
+  if (type === '주간') {
+    return LMS.formatKoreanDate(meta.start) + ' ~ ' + LMS.formatKoreanDate(meta.end);
+  }
+  var ym = meta.period_key.split('-');
+  return Number(ym[0]) + '년 ' + Number(ym[1]) + '월';
 };
 
 LMS.buildRegularClassEvents = function (classes, start, end) {
@@ -815,6 +874,38 @@ LMS.validateTaskInput = function (data, isUpdate) {
   };
 };
 
+LMS.validateClassPlanInput = function (data, isUpdate) {
+  data = data || {};
+  if (isUpdate && LMS.isBlank(data.plan_id)) {
+    throw new Error('강의 계획을 찾을 수 없습니다.');
+  }
+  if (LMS.isBlank(data.class_id)) throw new Error('반을 선택해 주세요.');
+  var periodType = LMS.assertEnum(data.period_type, LMS.PLAN_PERIOD, '계획 기간');
+  var anchor = LMS.toStr(data.period_key) || LMS.toStr(data.date) || LMS.toStr(data.anchor_date);
+  var periodKey = LMS.normalizePlanPeriodKey(periodType, anchor);
+  var title = LMS.toStr(data.title);
+  var objectives = LMS.toStr(data.objectives);
+  var content = LMS.toStr(data.content);
+  var materials = LMS.toStr(data.materials);
+  var homework = LMS.toStr(data.homework);
+  var memo = LMS.toStr(data.memo);
+  if (!title && !objectives && !content && !materials && !homework && !memo) {
+    throw new Error('계획 내용을 한 곳 이상 입력해 주세요.');
+  }
+  return {
+    plan_id: LMS.toStr(data.plan_id),
+    class_id: LMS.toStr(data.class_id),
+    period_type: periodType,
+    period_key: periodKey,
+    title: title,
+    objectives: objectives,
+    content: content,
+    materials: materials,
+    homework: homework,
+    memo: memo
+  };
+};
+
 LMS.validateMakeupSessionInput = function (data, isUpdate) {
   data = data || {};
   if (isUpdate && LMS.isBlank(data.makeup_id)) {
@@ -954,6 +1045,7 @@ LMS.TABLE_PK = {
   CounselingNotes: 'note_id',
   MakeupSessions: 'makeup_id',
   Tasks: 'task_id',
+  ClassPlans: 'plan_id',
   Settings: 'key',
   _Meta: 'prefix'
 };
