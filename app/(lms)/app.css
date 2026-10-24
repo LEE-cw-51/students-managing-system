@@ -422,3 +422,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   .sr-field { justify-content: space-between; }
   .save-bar { bottom: 8px; }
 }
+
+/* ---------- Exam-prep planner ---------- */
+.plan-group.is-off { opacity: 0.6; }
+.plan-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; }
+.plan-students { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.plan-students li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+@media (max-width: 860px) { .plan-grid { grid-template-columns: 1fr; } }

@@ -9,6 +9,8 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import SchoolExamForm from '@/components/domain/exam/SchoolExamForm';
+import PeriodForm from '@/components/domain/exam/PeriodForm';
+import { useRouter } from 'next/navigation';
 import { api, apiBatch, useApi } from '@/lib/client-api';
 import { formatDate } from '@/lib/format';
 import { currentTerm, dDayLabel } from '@/lib/term';
@@ -216,19 +218,57 @@ function ScheduleTab() {
   );
 }
 
+const PERIOD_TONE = { 예정: 'muted', '진행 중': 'ok', 끝남: 'muted', 마감: 'muted' };
+
+function PeriodsTab() {
+  const router = useRouter();
+  const [creating, setCreating] = useState(false);
+  const state = useApi(() => api('getExamPeriods'), []);
+  return (
+    <div className="stack">
+      <div className="split">
+        <span className="muted">시험 기간에 학교·학년별 임시 반을 만들고, 원래 반은 휴강합니다. 학생은 학교 시험이 끝나면 원래 반으로 돌아갑니다.</span>
+        <button type="button" className="btn" onClick={() => setCreating(true)}>새 시험대비 기간</button>
+      </div>
+      <Async state={state}>
+        {(rows) => rows.length ? (
+          <div className="table-wrap">
+            <table className="data-table stack-mobile">
+              <thead><tr><th>기간</th><th>날짜</th><th>상태</th><th className="num">시험대비 반</th><th className="num">학생</th><th className="num">휴강 반</th></tr></thead>
+              <tbody>
+                {rows.map((p) => (
+                  <tr key={p.exam_period_id} className="clickable" onClick={() => router.push(`/exams/periods/${p.exam_period_id}`)}>
+                    <td className="primary"><Link href={`/exams/periods/${p.exam_period_id}`} onClick={(e) => e.stopPropagation()}>{p.title}</Link></td>
+                    <td data-label="날짜">{formatDate(p.start_date)} ~ {formatDate(p.end_date)}</td>
+                    <td data-label="상태"><span className={'tag ' + (PERIOD_TONE[p.state] || '')}>{p.state}</span>{!p.class_count ? <span className="tag warn" style={{ marginLeft: 4 }}>편성 전</span> : null}</td>
+                    <td data-label="시험대비 반" className="num">{p.class_count}</td>
+                    <td data-label="학생" className="num">{p.student_count}</td>
+                    <td data-label="휴강 반" className="num">{p.suspended_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="card">
+            <EmptyState title="시험대비 기간이 없습니다" action={<button type="button" className="btn" onClick={() => setCreating(true)}>새 시험대비 기간</button>}>
+              학교 시험 일정을 먼저 입력해 두면 학생별 복귀일이 자동으로 채워집니다.
+            </EmptyState>
+          </div>
+        )}
+      </Async>
+      {creating ? <PeriodForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/exams/periods/${row.exam_period_id}`)} /> : null}
+    </div>
+  );
+}
+
 function ExamsView() {
   const tab = useTab(TABS);
   return (
     <>
       <PageHeader title="시험" sub="학교별 수학 시험 일정과 범위, 시험대비 기간을 관리합니다." />
       <Tabs tabs={TABS} current={tab} />
-      {tab === 'schedule' ? <ScheduleTab /> : (
-        <div className="card">
-          <EmptyState title="시험대비 기간은 다음 단계에서 열립니다">
-            학교·학년별 임시 반 편성과 원래 반 휴강을 이곳에서 관리하게 됩니다. 등록한 학교 시험일은 임시 반 종료일 기본값으로 쓰입니다.
-          </EmptyState>
-        </div>
-      )}
+      {tab === 'schedule' ? <ScheduleTab /> : <PeriodsTab />}
     </>
   );
 }

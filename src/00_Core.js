@@ -55,7 +55,8 @@ LMS.TABLES = {
   ],
   ExamPeriods: [
     'exam_period_id', 'title', 'start_date', 'end_date', 'suspended_class_ids',
-    'memo', 'status', 'created_at', 'updated_at'
+    'memo', 'status', 'created_at', 'updated_at',
+    'exam_year', 'exam_semester', 'exam_type', 'class_resume_dates'
   ],
   SchoolExams: [
     'school_exam_id', 'school_year', 'semester', 'exam_type', 'title', 'school', 'school_key',
@@ -383,15 +384,63 @@ LMS.suspendedClassIds = function (period) {
 };
 
 /** Exam period that suspends this regular class on the date, if any. */
+/** Last suspended day for a class in a period (its moved students' latest return), or '' for the period end. */
+LMS.classResumeDate = function (period, classId) {
+  var map = period ? period.class_resume_dates : null;
+  if (typeof map === 'string') {
+    try {
+      map = JSON.parse(map);
+    } catch (e) {
+      map = null;
+    }
+  }
+  return map && map[classId] ? LMS.toStr(map[classId]) : '';
+};
+
 LMS.classSuspensionOn = function (cls, isoDate, examPeriods) {
   var id = LMS.toStr(cls && cls.class_id);
   var list = examPeriods || [];
   for (var i = 0; i < list.length; i++) {
-    if (LMS.examPeriodCovers(list[i], isoDate) && LMS.suspendedClassIds(list[i]).indexOf(id) !== -1) {
-      return list[i];
-    }
+    if (!LMS.examPeriodCovers(list[i], isoDate) || LMS.suspendedClassIds(list[i]).indexOf(id) === -1) continue;
+    // The class resumes the day after all of its moved students are back.
+    var last = LMS.classResumeDate(list[i], id);
+    if (last && isoDate > last) continue;
+    return list[i];
   }
   return null;
+};
+
+/** Inclusive date ranges overlap (blank end = open). */
+LMS.rangesOverlap = function (aStart, aEnd, bStart, bEnd) {
+  var as = LMS.toStr(aStart) || '0000-00-00';
+  var ae = LMS.toStr(aEnd) || '9999-12-31';
+  var bs = LMS.toStr(bStart) || '0000-00-00';
+  var be = LMS.toStr(bEnd) || '9999-12-31';
+  return as <= be && bs <= ae;
+};
+
+LMS.validateExamPeriodInput = function (data) {
+  data = data || {};
+  var title = LMS.toStr(data.title);
+  if (!title) throw new Error('시험대비 기간 이름을 입력해 주세요.');
+  var start = LMS.toStr(data.start_date);
+  var end = LMS.toStr(data.end_date);
+  if (!LMS.isIsoDate(start) || !LMS.isIsoDate(end)) throw new Error('시작일과 종료일을 입력해 주세요.');
+  if (end < start) throw new Error('종료일이 시작일보다 빠릅니다.');
+  if (LMS.daysBetween(start, end) > 62) throw new Error('시험대비 기간은 두 달을 넘을 수 없습니다.');
+  var semester = LMS.toStr(data.exam_semester);
+  var type = LMS.toStr(data.exam_type);
+  if (type) LMS.assertEnum(type, LMS.SCHOOL_EXAM_TYPES, '시험 종류');
+  return {
+    exam_period_id: LMS.toStr(data.exam_period_id),
+    title: title,
+    start_date: start,
+    end_date: end,
+    exam_year: LMS.toStr(data.exam_year),
+    exam_semester: semester,
+    exam_type: type,
+    memo: LMS.toStr(data.memo)
+  };
 };
 
 /**

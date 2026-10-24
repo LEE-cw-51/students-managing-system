@@ -17,8 +17,8 @@ function ExamNotice({ exam }) {
   if (!exam || !exam.period) return null;
   const p = exam.period;
   const range = `${shortDate(p.start_date)} ~ ${shortDate(p.end_date)}`;
-  if (exam.kind === 'suspended') return <div className="notice-bar">시험대비 기간({p.title}, {range})이라 이 반은 휴강 중입니다. 학생들은 시험대비 반에서 수업합니다.</div>;
-  if (exam.kind === 'upcoming') return <div className="notice-bar">{p.title} 시험대비 기간({range})에는 휴강합니다.</div>;
+  if (exam.kind === 'suspended') return <div className="notice-bar">시험대비 기간({p.title}, {range})이라 이 반은 휴강 중입니다. 학생들은 시험대비 반에서 수업하고, {exam.resume_date ? `${shortDate(exam.resume_date)}부터` : '기간이 끝나면'} 다시 수업합니다.</div>;
+  if (exam.kind === 'upcoming') return <div className="notice-bar">{p.title} 시험대비 기간({range})에는 휴강하고, {exam.resume_date ? `${shortDate(exam.resume_date)}부터` : '기간이 끝나면'} 다시 수업합니다.</div>;
   if (exam.kind === 'exam_class') return <div className="notice-bar">{p.title} 시험대비 반입니다 ({range}). 기간이 끝나면 학생들은 원래 반으로 돌아갑니다.</div>;
   return null;
 }
