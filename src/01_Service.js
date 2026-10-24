@@ -88,7 +88,8 @@ LMS.createService = function (store) {
         class_name: cls ? cls.class_name : rel.class_id,
         start_date: rel.start_date,
         end_date: rel.end_date,
-        status: rel.status
+        status: rel.status,
+        assignment_type: LMS.toStr(rel.assignment_type) || '정규'
       };
     });
     var current = history.filter(function (h) { return h.status === '현재'; });
@@ -1579,8 +1580,12 @@ LMS.createService = function (store) {
 
   function getCounselingNotes(studentId) {
     requireStudent(studentId);
+    var tasks = table('Tasks');
     return table('CounselingNotes').filter(function (row) {
       return LMS.toStr(row.student_id) === LMS.toStr(studentId);
+    }).map(function (row) {
+      var task = row.follow_up_task_id ? LMS.findById(tasks, 'task_id', row.follow_up_task_id) : null;
+      return Object.assign({}, row, { follow_up_status: task ? LMS.toStr(task.status) : '' });
     }).sort(function (a, b) {
       var d = LMS.toStr(b.counsel_date).localeCompare(LMS.toStr(a.counsel_date));
       if (d) return d;
@@ -1595,31 +1600,73 @@ LMS.createService = function (store) {
       requireStudent(input.student_id);
       var rows = table('CounselingNotes');
       var ts = now();
+      var row;
       if (isUpdate) {
-        var prev = LMS.findById(rows, 'note_id', input.note_id);
-        if (!prev) throw new Error('상담일지를 찾을 수 없습니다.');
-        prev.kind = input.kind;
-        prev.counsel_date = input.counsel_date;
-        prev.title = input.title;
-        prev.content = input.content;
-        prev.updated_at = ts;
-        saveTable('CounselingNotes', rows);
-        return prev;
+        row = LMS.findById(rows, 'note_id', input.note_id);
+        if (!row) throw new Error('상담일지를 찾을 수 없습니다.');
+        row.kind = input.kind;
+        row.counsel_date = input.counsel_date;
+        row.title = input.title;
+        row.content = input.content;
+        row.updated_at = ts;
+      } else {
+        row = {
+          note_id: nextIds('NTS', 1)[0],
+          student_id: input.student_id,
+          kind: input.kind,
+          counsel_date: input.counsel_date,
+          title: input.title,
+          content: input.content,
+          follow_up_task_id: '',
+          created_at: ts,
+          updated_at: ts
+        };
+        rows.push(row);
       }
-      var row = {
-        note_id: nextIds('NTS', 1)[0],
-        student_id: input.student_id,
-        kind: input.kind,
-        counsel_date: input.counsel_date,
-        title: input.title,
-        content: input.content,
-        created_at: ts,
-        updated_at: ts
-      };
-      rows.push(row);
-      saveTable('CounselingNotes', rows);
+      row.follow_up_date = input.follow_up_date;
+      row.follow_up_title = input.follow_up_title;
+      row.follow_up_task_id = syncFollowUpTask_(row);
+      saveTable('CounselingNotes', table('CounselingNotes'));
       return row;
     });
+  }
+
+  /**
+   * Keep the note's follow-up as a 할 일: create or move it while open, cancel it when the
+   * follow-up is cleared. A finished task is left alone. Returns the task id ('' if none).
+   */
+  function syncFollowUpTask_(note) {
+    var tasks = table('Tasks');
+    var task = note.follow_up_task_id ? LMS.findById(tasks, 'task_id', note.follow_up_task_id) : null;
+    var ts = now();
+    if (!note.follow_up_date) {
+      if (task && LMS.toStr(task.status) === '예정') {
+        task.status = '취소';
+        task.updated_at = ts;
+        saveTable('Tasks', tasks);
+      }
+      return '';
+    }
+    var fields = {
+      due_date: note.follow_up_date,
+      kind: note.kind === '학부모' ? 'counsel_parent' : 'counsel_student',
+      title: note.follow_up_title,
+      memo: '상담일지 ' + note.counsel_date + (note.title ? ' · ' + note.title : ''),
+      student_id: note.student_id,
+      class_id: '',
+      source: 'counseling'
+    };
+    if (task && LMS.toStr(task.status) === '완료') return task.task_id;
+    if (task) {
+      Object.keys(fields).forEach(function (k) { task[k] = fields[k]; });
+      task.status = '예정';
+      task.updated_at = ts;
+    } else {
+      task = Object.assign({ task_id: nextIds(LMS.PREFIX.task, 1)[0], status: '예정', created_at: ts, updated_at: ts }, fields);
+      tasks.push(task);
+    }
+    saveTable('Tasks', tasks);
+    return task.task_id;
   }
 
   function deleteCounselingNote(noteId) {
@@ -1630,6 +1677,7 @@ LMS.createService = function (store) {
       var next = rows.filter(function (row) {
         return LMS.toStr(row.note_id) !== LMS.toStr(noteId);
       });
+      syncFollowUpTask_({ follow_up_date: '', follow_up_task_id: prev.follow_up_task_id });
       saveTable('CounselingNotes', next);
       return { note_id: prev.note_id, deleted: true };
     });

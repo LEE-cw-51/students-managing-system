@@ -801,6 +801,47 @@ LMS.detectLearningSignals = function (lessons) {
   return signals;
 };
 
+/**
+ * Warning badges for a student: existing learning signals plus absences, missing homework
+ * and a long gap since the last counseling note.
+ * ctx: { today, homeworkDates: [{ date, incomplete: bool }], lastCounselDate, enrollmentDate }
+ */
+LMS.studentBadges = function (lessons, ctx) {
+  ctx = ctx || {};
+  var rows = (lessons || []).slice().sort(function (a, b) {
+    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
+  });
+  var badges = [];
+  var absentStreak = 0;
+  for (var i = rows.length - 1; i >= 0 && LMS.toStr(rows[i].attendance) === '결석'; i--) absentStreak += 1;
+  if (absentStreak >= 2) badges.push({ code: 'absent_streak', label: '결석 ' + absentStreak + '회 연속', tone: 'danger' });
+
+  LMS.detectLearningSignals(rows).forEach(function (sig) {
+    // A low-concentration streak made of absences is already covered above.
+    if (sig.code === 'concentration_low_streak' && absentStreak >= 2) return;
+    badges.push({ code: sig.code, label: sig.label, tone: sig.code === 'test_score_drop' ? 'warn' : 'danger' });
+  });
+
+  var hw = (ctx.homeworkDates || []).slice().sort(function (a, b) {
+    return LMS.toStr(a.date).localeCompare(LMS.toStr(b.date));
+  }).slice(-3);
+  var missing = hw.filter(function (h) { return h.incomplete; }).length;
+  if (hw.length >= 2 && missing >= 2) {
+    badges.push({ code: 'homework_missing', label: '숙제 미완료 ' + missing + '회 (최근 ' + hw.length + '회 중)', tone: 'warn' });
+  }
+
+  var today = LMS.toStr(ctx.today);
+  var enrolled = LMS.toStr(ctx.enrollmentDate);
+  if (today && enrolled && LMS.daysBetween(enrolled, today) >= 60) {
+    var last = LMS.toStr(ctx.lastCounselDate);
+    var gap = last ? LMS.daysBetween(last, today) : null;
+    if (gap === null || gap >= 60) {
+      badges.push({ code: 'counsel_gap', label: last ? '상담 ' + gap + '일 전' : '상담 기록 없음', tone: 'muted' });
+    }
+  }
+  return badges;
+};
+
 LMS.summarizeRecentLearning = function (lessons) {
   var rows = (lessons || []).slice().sort(function (a, b) {
     return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
@@ -1287,13 +1328,17 @@ LMS.validateCounselingNoteInput = function (data, isUpdate) {
   }
   var content = LMS.toStr(data.content);
   if (!content) throw new Error('상담 내용을 입력해 주세요.');
+  var followDate = LMS.toStr(data.follow_up_date);
+  if (followDate && !LMS.isIsoDate(followDate)) throw new Error('후속 조치 날짜 형식이 올바르지 않습니다.');
   return {
     note_id: LMS.toStr(data.note_id),
     student_id: LMS.toStr(data.student_id),
     kind: kind,
     counsel_date: date,
     title: LMS.toStr(data.title),
-    content: content
+    content: content,
+    follow_up_date: followDate,
+    follow_up_title: followDate ? (LMS.toStr(data.follow_up_title) || (kind === '학부모' ? '학부모 후속 연락' : '학생 후속 상담')) : ''
   };
 };
 
