@@ -2360,6 +2360,48 @@ LMS.createService = function (store) {
     });
   }
 
+  /** Light payload for the app shell: settings, today, and the global search index. */
+  function getShellBootstrap() {
+    var classes = table('Classes');
+    var rels = table('StudentClasses');
+    var today = store.today();
+    return {
+      settings: settings(),
+      grades: LMS.GRADE_OPTIONS,
+      today: today,
+      search: {
+        students: table('Students').map(function (s) {
+          var classNames = rels.filter(function (r) {
+            return LMS.toStr(r.student_id) === LMS.toStr(s.student_id) && LMS.relActiveOn(r, today);
+          }).map(function (r) {
+            var cls = LMS.findById(classes, 'class_id', r.class_id);
+            return cls ? cls.class_name : '';
+          }).filter(Boolean);
+          var digits = function (v) { return LMS.toStr(v).replace(/\D/g, ''); };
+          return {
+            id: s.student_id,
+            name: LMS.toStr(s.name),
+            grade: LMS.toStr(s.grade),
+            school: LMS.toStr(s.school),
+            status: LMS.toStr(s.status),
+            phones: [digits(s.student_phone).slice(-4), digits(s.parent_phone).slice(-4)].filter(Boolean),
+            classes: classNames
+          };
+        }),
+        classes: classes.map(function (c) {
+          return {
+            id: c.class_id,
+            name: LMS.toStr(c.class_name),
+            grade: LMS.toStr(c.grade),
+            status: LMS.toStr(c.status),
+            class_type: LMS.toStr(c.class_type) || '정규',
+            schedule_label: LMS.scheduleLabel(LMS.classSchedule(c))
+          };
+        })
+      }
+    };
+  }
+
   function getLookups() {
     return {
       classes: getClasses({}),
@@ -2447,7 +2489,8 @@ LMS.createService = function (store) {
     getBootstrap: getBootstrap,
     getClassSession: getClassSession,
     saveClassSession: saveClassSession,
-    ensureSchema: ensureSchema
+    ensureSchema: ensureSchema,
+    getShellBootstrap: getShellBootstrap
   };
 };
 
