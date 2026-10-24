@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useDeferredValue, useMemo, useState } from 'react';
+import { Suspense, useDeferredValue, useMemo, useState } from 'react';
+import Tabs, { useTab } from '@/components/ui/Tabs';
+import CounselingLog from '@/components/domain/student/CounselingLog';
 import PageHeader from '@/components/ui/PageHeader';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
@@ -12,7 +14,38 @@ import { api, useApi } from '@/lib/client-api';
 import { relativeDay, shortDate } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
 
+const TABS = [
+  { key: 'list', label: '학생 목록' },
+  { key: 'counseling', label: '상담 기록' }
+];
+
 export default function StudentsPage() {
+  return (
+    <Suspense fallback={null}>
+      <StudentsView />
+    </Suspense>
+  );
+}
+
+function StudentsView() {
+  const tab = useTab(TABS);
+  const [creating, setCreating] = useState(false);
+  const router = useRouter();
+  return (
+    <>
+      <PageHeader
+        title="학생"
+        sub={tab === 'list' ? '학생을 누르면 출결·수업 기록·숙제·성적·상담을 한 곳에서 봅니다.' : '모든 학생의 학부모·학생 상담 기록입니다.'}
+        actions={<button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button>}
+      />
+      <Tabs tabs={TABS} current={tab} />
+      {tab === 'list' ? <StudentList onCreate={() => setCreating(true)} /> : <CounselingLog />}
+      {creating ? <StudentForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/students/${row.student_id}`)} /> : null}
+    </>
+  );
+}
+
+function StudentList({ onCreate }) {
   const router = useRouter();
   const boot = useBoot();
   const [status, setStatus] = useState('재원');
@@ -20,7 +53,7 @@ export default function StudentsPage() {
   const [classId, setClassId] = useState('');
   const [query, setQuery] = useState('');
   const [onlyFlagged, setOnlyFlagged] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const startCreate = onCreate;
   const deferredQuery = useDeferredValue(query);
   const state = useApi(() => api('getStudentList', { status, grade, class_id: classId }), [status, grade, classId]);
   const classes = (boot.search.classes || []).filter((c) => c.status === '운영');
@@ -37,11 +70,6 @@ export default function StudentsPage() {
 
   return (
     <>
-      <PageHeader
-        title="학생"
-        sub="학생을 누르면 출결·수업 기록·숙제·성적·상담을 한 곳에서 봅니다."
-        actions={<button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button>}
-      />
       <div className="split" style={{ marginBottom: 14 }}>
         <div className="cluster">
           <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름 · 학교 · 연락처" aria-label="학생 검색" style={{ width: 200 }} />
@@ -94,12 +122,11 @@ export default function StudentsPage() {
               <EmptyState title="조건에 맞는 학생이 없습니다">검색어나 필터를 바꿔 보세요.</EmptyState>
             ) : (
               <EmptyState title={status === '재원' ? '등록된 재원생이 없습니다' : `${status || ''} 학생이 없습니다`}
-                action={status === '재원' ? <button type="button" className="btn" onClick={() => setCreating(true)}>첫 학생 등록하기</button> : null} />
+                action={status === '재원' ? <button type="button" className="btn" onClick={startCreate}>첫 학생 등록하기</button> : null} />
             )}
           </div>
         )}
       </Async>
-      {creating ? <StudentForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/students/${row.student_id}`)} /> : null}
     </>
   );
 }

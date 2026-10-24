@@ -64,6 +64,7 @@ export default function AppShell({ boot: initialBoot, children }) {
   return (
     <BootContext.Provider value={{ ...boot, refresh }}>
       <ToastProvider>
+        <a className="skip-link" href="#main">본문으로 건너뛰기</a>
         <div className="app">
           {open ? <div className="app-scrim" onClick={() => setOpen(false)} aria-hidden="true" /> : null}
           <aside className="app-sidebar" id="app-sidebar" data-open={open ? 'true' : 'false'}>
@@ -83,7 +84,6 @@ export default function AppShell({ boot: initialBoot, children }) {
               ))}
             </nav>
             <div className="app-sidebar-foot">
-              <a href="/legacy">이전 화면 열기</a>
               <button type="button" onClick={logout}>로그아웃</button>
             </div>
           </aside>
@@ -100,7 +100,7 @@ export default function AppShell({ boot: initialBoot, children }) {
               <GlobalSearch index={boot.search} />
               <span className="today">{formatToday(boot.today)}</span>
             </header>
-            <main className="app-content" id="main">{children}</main>
+            <main className="app-content" id="main" tabIndex={-1}>{children}</main>
           </div>
         </div>
       </ToastProvider>
