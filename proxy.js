@@ -7,7 +7,6 @@ export function proxy(request) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/login') ||
     pathname.startsWith('/_next') ||
-    pathname === '/lms-client.js' ||
     pathname === '/favicon.ico'
   ) {
     return NextResponse.next();

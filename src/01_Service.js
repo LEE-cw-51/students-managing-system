@@ -4,6 +4,7 @@
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
   LMS = require('./00_Core.js');
+  require('./05_Views.js');
 }
 
 LMS.createService = function (store) {
@@ -87,7 +88,8 @@ LMS.createService = function (store) {
         class_name: cls ? cls.class_name : rel.class_id,
         start_date: rel.start_date,
         end_date: rel.end_date,
-        status: rel.status
+        status: rel.status,
+        assignment_type: LMS.toStr(rel.assignment_type) || '정규'
       };
     });
     var current = history.filter(function (h) { return h.status === '현재'; });
@@ -259,6 +261,7 @@ LMS.createService = function (store) {
   function createClass(data) {
     return withLock(function () {
       var input = LMS.validateClassInput(data, false);
+      delete input.schedule_from_legacy;
       var id = nextIds('CLS', 1)[0];
       var ts = now();
       var row = Object.assign({}, input, {
@@ -279,6 +282,17 @@ LMS.createService = function (store) {
       var rows = table('Classes');
       var row = LMS.findById(rows, 'class_id', input.class_id);
       if (!row) throw new Error('반 정보를 찾을 수 없습니다.');
+      if (input.schedule_from_legacy) {
+        // A legacy form re-sent the same weekday/time summary: keep per-day times.
+        var prevSchedule = LMS.classSchedule(row);
+        var prevSummary = LMS.scheduleSummary(prevSchedule);
+        if (prevSummary.weekday === input.weekday &&
+            prevSummary.start_time === input.start_time &&
+            prevSummary.end_time === input.end_time) {
+          input.schedule = prevSchedule;
+        }
+      }
+      delete input.schedule_from_legacy;
       Object.keys(input).forEach(function (k) {
         if (k === 'class_id') return;
         row[k] = input[k];
@@ -299,8 +313,39 @@ LMS.createService = function (store) {
     return enrichStudent(requireStudent(studentId)).class_history;
   }
 
-  function getClassRoster(classId) {
+  function examPeriods_() {
+    return table('ExamPeriods');
+  }
+
+  /** Students whose (regular or temporary) assignment covers the date, excluding 퇴원. */
+  function rosterOn(classId, date) {
+    var seen = {};
+    var students = table('Students');
+    var rels = table('StudentClasses');
+    // Students temporarily moved out of this class that day attend the exam class instead.
+    var away = {};
+    rels.forEach(function (r) {
+      if (LMS.toStr(r.status) === '임시' && LMS.toStr(r.source_class_id) === LMS.toStr(classId) && LMS.relActiveOn(r, date)) {
+        away[LMS.toStr(r.student_id)] = true;
+      }
+    });
+    return rels.filter(function (r) {
+      if (LMS.toStr(r.class_id) !== LMS.toStr(classId) || !LMS.relActiveOn(r, date)) return false;
+      return LMS.toStr(r.status) === '임시' || !away[LMS.toStr(r.student_id)];
+    }).map(function (r) {
+      return LMS.findById(students, 'student_id', r.student_id);
+    }).filter(function (s) {
+      if (!s || LMS.toStr(s.status) === '퇴원' || seen[s.student_id]) return false;
+      seen[s.student_id] = true;
+      return true;
+    }).sort(function (a, b) {
+      return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko');
+    });
+  }
+
+  function getClassRoster(classId, date) {
     requireClass(classId);
+    if (date) return rosterOn(classId, date);
     var rels = table('StudentClasses').filter(function (r) {
       return LMS.toStr(r.class_id) === LMS.toStr(classId) && LMS.toStr(r.status) === '현재';
     });
@@ -456,6 +501,8 @@ LMS.createService = function (store) {
   }
 
   function getClassSessionNotice(date, classId) {
+    var session = findClassSessionRow_(date, classId);
+    if (session && LMS.toStr(session.class_notice)) return LMS.toStr(session.class_notice);
     var row = findClassSessionNoticeRow_(date, classId);
     return row ? LMS.toStr(row.class_notice) : '';
   }
@@ -466,44 +513,141 @@ LMS.createService = function (store) {
       if (!LMS.isIsoDate(LMS.toStr(date))) {
         throw new Error('수업 날짜가 올바르지 않습니다.');
       }
-      var rows = table('ClassSessionNotices');
-      var key = LMS.sessionKey(date, classId);
-      var idx = -1;
-      for (var i = 0; i < rows.length; i++) {
-        if (LMS.sessionKey(rows[i].lesson_date, rows[i].class_id) === key) {
-          idx = i;
-          break;
-        }
-      }
+      upsertClassSession_({ lesson_date: date, class_id: classId, class_notice: LMS.toStr(text) });
+      removeLegacyNotice_(date, classId);
       var notice = LMS.toStr(text);
-      var ts = now();
-      if (!notice) {
-        if (idx >= 0) {
-          rows.splice(idx, 1);
-          saveTable('ClassSessionNotices', rows);
-        }
-        return null;
-      }
-      if (idx >= 0) {
-        var updated = Object.assign({}, rows[idx], {
-          class_notice: notice,
-          updated_at: ts
-        });
-        rows[idx] = updated;
-        saveTable('ClassSessionNotices', rows);
-        return updated;
-      }
-      var created = {
-        id: nextIds('CSN', 1)[0],
-        lesson_date: LMS.toStr(date),
-        class_id: LMS.toStr(classId),
-        class_notice: notice,
+      return notice ? { lesson_date: LMS.toStr(date), class_id: LMS.toStr(classId), class_notice: notice } : null;
+    });
+  }
+
+  function removeLegacyNotice_(date, classId) {
+    var rows = table('ClassSessionNotices');
+    var key = LMS.sessionKey(date, classId);
+    var next = rows.filter(function (r) {
+      return LMS.sessionKey(r.lesson_date, r.class_id) !== key;
+    });
+    if (next.length !== rows.length) saveTable('ClassSessionNotices', next);
+  }
+
+  // ----- Class sessions (one row per class per lesson date) -----
+
+  function findClassSessionRow_(date, classId) {
+    var key = LMS.sessionKey(date, classId);
+    var rows = table('ClassSessions');
+    for (var i = 0; i < rows.length; i++) {
+      if (LMS.sessionKey(rows[i].lesson_date, rows[i].class_id) === key) return rows[i];
+    }
+    return null;
+  }
+
+  /** Merge the given session fields into the (date, class) row, creating it when missing. */
+  function upsertClassSession_(fields) {
+    var date = LMS.toStr(fields.lesson_date);
+    var classId = LMS.toStr(fields.class_id);
+    var rows = table('ClassSessions');
+    var row = findClassSessionRow_(date, classId);
+    var ts = now();
+    if (!row) {
+      row = {
+        session_id: nextIds('SES', 1)[0],
+        lesson_date: date,
+        class_id: classId,
+        progress: '',
+        content: '',
+        test_title: '',
+        test_max_score: '',
+        test_difficulty: '',
+        class_notice: '',
+        memo: '',
         created_at: ts,
         updated_at: ts
       };
-      rows.push(created);
-      saveTable('ClassSessionNotices', rows);
-      return created;
+      rows.push(row);
+    }
+    LMS.CLASS_SESSION_FIELDS.forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(fields, key) && fields[key] !== undefined) {
+        row[key] = fields[key];
+      }
+    });
+    row.updated_at = ts;
+    saveTable('ClassSessions', rows);
+    return row;
+  }
+
+  /** Copy class-level fields onto every student lesson of that date/class (legacy readers use them). */
+  function writeSessionToLessons_(session, prevMax) {
+    var lessons = table('Lessons');
+    var key = LMS.sessionKey(session.lesson_date, session.class_id);
+    var changed = false;
+    lessons.forEach(function (row) {
+      if (LMS.sessionKey(row.lesson_date, row.class_id) !== key) return;
+      var next = {
+        progress: LMS.toStr(session.progress),
+        test_difficulty: LMS.toStr(session.test_difficulty)
+      };
+      // Max score follows the session unless a student row carries its own different value.
+      if (!LMS.isBlank(session.test_max_score) &&
+          (LMS.isBlank(row.test_max_score) ||
+           (prevMax !== undefined && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
+        next.test_max_score = session.test_max_score;
+      }
+      Object.keys(next).forEach(function (k) {
+        if (LMS.toStr(row[k]) !== LMS.toStr(next[k])) {
+          row[k] = next[k];
+          changed = true;
+        }
+      });
+    });
+    if (changed) saveTable('Lessons', lessons);
+  }
+
+  function syncClassProgress_(session) {
+    var progress = LMS.toStr(session.progress);
+    if (!progress) return;
+    var classId = LMS.toStr(session.class_id);
+    var latest = table('ClassSessions').filter(function (r) {
+      return LMS.toStr(r.class_id) === classId && LMS.toStr(r.progress);
+    }).map(function (r) { return LMS.toStr(r.lesson_date); }).sort().pop();
+    if (latest && latest > LMS.toStr(session.lesson_date)) return;
+    var classes = table('Classes');
+    var cls = LMS.findById(classes, 'class_id', classId);
+    if (!cls || LMS.toStr(cls.current_progress) === progress) return;
+    cls.current_progress = progress;
+    cls.updated_at = now();
+    saveTable('Classes', classes);
+  }
+
+  function getClassSession(date, classId) {
+    requireClass(classId);
+    if (!LMS.isIsoDate(LMS.toStr(date))) throw new Error('수업 날짜가 올바르지 않습니다.');
+    var row = findClassSessionRow_(date, classId);
+    var base = row ? Object.assign({}, row) : {
+      session_id: '',
+      lesson_date: LMS.toStr(date),
+      class_id: LMS.toStr(classId),
+      progress: '',
+      content: '',
+      test_title: '',
+      test_max_score: '',
+      test_difficulty: '',
+      class_notice: '',
+      memo: ''
+    };
+    if (!LMS.toStr(base.class_notice)) base.class_notice = getClassSessionNotice(date, classId);
+    return base;
+  }
+
+  function saveClassSession(data) {
+    return withLock(function () {
+      var input = LMS.validateClassSessionInput(data);
+      requireClass(input.class_id);
+      var prev = findClassSessionRow_(input.lesson_date, input.class_id);
+      var prevMax = prev ? prev.test_max_score : undefined;
+      var row = upsertClassSession_(input);
+      removeLegacyNotice_(input.lesson_date, input.class_id);
+      writeSessionToLessons_(row, prevMax);
+      syncClassProgress_(row);
+      return Object.assign({}, row);
     });
   }
 
@@ -521,7 +665,14 @@ LMS.createService = function (store) {
       list = [payload];
     }
     return withLock(function () {
-      var validated = list.map(LMS.validateLessonInput);
+      var validated = list.map(function (item) {
+        var input = Object.assign({}, item);
+        if (LMS.toStr(input.test_status) === '실시' && LMS.isBlank(input.test_max_score)) {
+          var session = findClassSessionRow_(input.lesson_date, input.class_id);
+          if (session && !LMS.isBlank(session.test_max_score)) input.test_max_score = session.test_max_score;
+        }
+        return LMS.validateLessonInput(input);
+      });
       var students = table('Students');
       var classes = table('Classes');
       validated.forEach(function (row) {
@@ -570,10 +721,47 @@ LMS.createService = function (store) {
         }
       });
       saveTable('Lessons', lessons);
+      syncSessionsFromLessons_(list, saved);
       if (classNotice !== undefined && saved.length) {
         saveClassSessionNotice(saved[0].lesson_date, saved[0].class_id, classNotice);
       }
-      return saved;
+      return saved.map(function (row) {
+        return LMS.findById(table('Lessons'), 'lesson_id', row.lesson_id) || row;
+      });
+    });
+  }
+
+  /**
+   * Legacy forms send progress / test meta on each student row. When they do, that
+   * becomes the class session; otherwise the stored session is copied back onto the rows.
+   */
+  function syncSessionsFromLessons_(rawList, saved) {
+    var groups = {};
+    saved.forEach(function (row, i) {
+      var key = LMS.sessionKey(row.lesson_date, row.class_id);
+      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [] };
+      groups[key].raws.push(rawList[i] || {});
+    });
+    Object.keys(groups).forEach(function (key) {
+      var g = groups[key];
+      var fields = {};
+      var progress = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.progress); }));
+      var difficulty = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.test_difficulty); }));
+      var max = LMS.modeValue(g.raws.filter(function (r) {
+        return LMS.toStr(r.test_status) === '실시';
+      }).map(function (r) { return LMS.toStr(r.test_max_score); }));
+      var session = findClassSessionRow_(g.date, g.classId);
+      if (progress) fields.progress = progress;
+      if (difficulty) fields.test_difficulty = difficulty;
+      // A partial batch must not move the class max; it only seeds an empty one.
+      if (max && !(session && !LMS.isBlank(session.test_max_score))) fields.test_max_score = LMS.toNum(max);
+      if (Object.keys(fields).length) {
+        fields.lesson_date = g.date;
+        fields.class_id = g.classId;
+        session = upsertClassSession_(fields);
+        syncClassProgress_(session);
+      }
+      if (session) writeSessionToLessons_(session);
     });
   }
 
@@ -1006,19 +1194,19 @@ LMS.createService = function (store) {
     anchorDate = anchorDate || store.today();
     if (!LMS.isIsoDate(anchorDate)) throw new Error('날짜 형식이 올바르지 않습니다.');
     var week = LMS.weekRange(anchorDate);
+    var periods = examPeriods_();
     var classes = table('Classes').filter(function (c) {
       return LMS.toStr(c.status) === '운영';
     }).sort(function (a, b) {
       return LMS.toStr(a.class_name).localeCompare(LMS.toStr(b.class_name), 'ko');
     });
     var result = classes.map(function (cls) {
-      var roster = getClassRoster(cls.class_id).filter(function (s) {
-        return LMS.toStr(s.status) === '재원';
-      });
-      var rosterIds = roster.map(function (s) { return s.student_id; });
-      var meetingDates = LMS.classMeetingDatesInRange(cls.weekday, week.start, week.end);
+      var meetingDates = LMS.classMeetingDatesFor(cls, week.start, week.end, periods);
       var slots = meetingDates.map(function (checkDate) {
-        var assigned = LMS.previousClassMeetingDate(cls.weekday, checkDate);
+        var rosterIds = rosterOn(cls.class_id, checkDate).filter(function (s) {
+          return LMS.toStr(s.status) === '재원';
+        }).map(function (s) { return s.student_id; });
+        var assigned = LMS.previousMeetingDateFor(cls, checkDate, periods);
         return buildHomeworkSlot_(cls.class_id, cls.class_name, checkDate, assigned, rosterIds);
       });
       var incompleteSlots = slots.filter(function (s) {
@@ -1045,13 +1233,25 @@ LMS.createService = function (store) {
 
   function getTodayClassSession(date, classId) {
     var cls = requireClass(classId);
-    var students = getClassRoster(classId).filter(function (s) {
+    var periods = examPeriods_();
+    var students = rosterOn(classId, date).filter(function (s) {
       return LMS.toStr(s.status) === '재원';
     });
     var lessons = getLessons(date, classId);
     var byStudent = {};
     lessons.forEach(function (l) { byStudent[l.student_id] = l; });
-    var priorDate = LMS.previousClassMeetingDate(cls.weekday, date);
+    // Keep students who already have a record that day even if no longer on the roster.
+    var allStudents = table('Students');
+    lessons.forEach(function (l) {
+      if (students.some(function (s) { return s.student_id === l.student_id; })) return;
+      var extra = LMS.findById(allStudents, 'student_id', l.student_id);
+      if (extra) students.push(Object.assign({}, extra, { off_roster: true }));
+    });
+    var prevMeeting = LMS.previousMeetingDateFor(cls, date, periods);
+    var lastSession = table('ClassSessions').filter(function (r) {
+      return LMS.toStr(r.class_id) === LMS.toStr(classId) && LMS.toStr(r.lesson_date) < date && LMS.toStr(r.progress);
+    }).sort(function (a, b) { return LMS.toStr(b.lesson_date).localeCompare(LMS.toStr(a.lesson_date)); })[0];
+    var priorDate = LMS.previousMeetingDateFor(cls, date, examPeriods_());
     var priorHomework = priorDate ? getSessionHomework(priorDate, classId) : null;
     var todayHomework = getSessionHomework(date, classId);
     var priorChecksByStudent = {};
@@ -1069,15 +1269,24 @@ LMS.createService = function (store) {
         priorChecksByStudent[s.student_id] = map;
       });
     }
+    var suspension = LMS.toStr(cls.class_type) === '시험대비' ? null : LMS.classSuspensionOn(cls, date, periods);
     return {
-      class: cls,
+      class: Object.assign({}, cls, { schedule: LMS.classSchedule(cls), schedule_label: LMS.scheduleLabel(LMS.classSchedule(cls)) }),
       date: date,
+      time: LMS.classTimeOn(cls, date),
+      meets: LMS.classMeetsOnDate(cls, date, periods),
+      suspension: suspension ? { title: suspension.title, start_date: suspension.start_date, end_date: suspension.end_date } : null,
+      prev_meeting: prevMeeting,
+      next_meeting: LMS.nextMeetingDateFor(cls, LMS.addDays(date, 1), periods),
+      last_progress: lastSession ? { date: lastSession.lesson_date, progress: lastSession.progress } : null,
+      session: getClassSession(date, classId),
       class_notice: getClassSessionNotice(date, classId),
       daily_plan: getClassPlan(classId, '일간', date),
       prior_homework: priorHomework ? {
         assigned_date: priorDate,
         items: priorHomework.items,
         from_legacy: priorHomework.from_legacy,
+        has_checks: (priorHomework.checks || []).length > 0,
         checks_by_student: priorChecksByStudent
       } : null,
       today_homework: {
@@ -1086,11 +1295,81 @@ LMS.createService = function (store) {
         from_legacy: todayHomework.from_legacy
       },
       students: students.map(function (s) {
-        return Object.assign({}, s, { lesson: byStudent[s.student_id] || null });
+        return Object.assign({}, s, {
+          lesson: byStudent[s.student_id] || null,
+          badges: views.studentBadges ? views.studentBadges(s) : []
+        });
       }),
       recorded_count: lessons.length,
       total_count: students.length
     };
+  }
+
+  /**
+   * Save one class lesson from the today screen in a single transaction:
+   * prior homework checks → today's homework → class session → every student row.
+   * Everything is validated before the first write.
+   */
+  function saveTodaySession(payload) {
+    return withLock(function () {
+      var p = payload || {};
+      var date = LMS.toStr(p.lesson_date);
+      var classId = LMS.toStr(p.class_id);
+      if (!LMS.isIsoDate(date)) throw new Error('수업 날짜가 올바르지 않습니다.');
+      requireClass(classId);
+      var sessionInput = LMS.validateClassSessionInput(Object.assign({}, p.session || {}, { lesson_date: date, class_id: classId }));
+      var students = Array.isArray(p.students) ? p.students : [];
+      if (!students.length) throw new Error('저장할 학생이 없습니다.');
+      var existingSession = findClassSessionRow_(date, classId);
+      var maxScore = sessionInput.test_max_score !== undefined ? sessionInput.test_max_score
+        : (existingSession ? existingSession.test_max_score : '');
+      var difficulty = sessionInput.test_difficulty !== undefined ? sessionInput.test_difficulty
+        : (existingSession ? existingSession.test_difficulty : '');
+      var hwTitles = (Array.isArray(p.homework_items) ? p.homework_items : []).map(function (it) {
+        return LMS.toStr(typeof it === 'string' ? it : it && it.title);
+      }).filter(Boolean);
+
+      var buildRow = function (s, grade) {
+        var absent = LMS.toStr(s.attendance) === '결석';
+        var tested = !absent && LMS.toStr(s.test_status) === '실시';
+        if (tested && LMS.isBlank(maxScore)) throw new Error('테스트 만점을 입력해 주세요.');
+        return {
+          lesson_date: date,
+          class_id: classId,
+          student_id: LMS.toStr(s.student_id),
+          attendance: absent ? '결석' : '출석',
+          test_status: tested ? '실시' : '미실시',
+          test_score: tested ? s.test_score : '',
+          test_max_score: tested ? maxScore : '',
+          test_difficulty: tested ? difficulty : '',
+          assignment_completion: LMS.toStr(s.assignment_completion) || grade || '',
+          concentration: absent ? 'ABSENT' : LMS.toStr(s.concentration),
+          homework: hwTitles.join('\n'),
+          special_note: LMS.toStr(s.special_note)
+        };
+      };
+      // Validate every row up front so a bad score never leaves a half-saved lesson.
+      students.forEach(function (s) {
+        requireStudent(s.student_id);
+        LMS.validateLessonInput(buildRow(s, ''));
+      });
+
+      var grades = {};
+      var prior = p.prior || {};
+      var checks = Array.isArray(prior.checks) ? prior.checks : [];
+      if (LMS.isIsoDate(LMS.toStr(prior.assigned_date)) && checks.length) {
+        var checked = saveHomeworkChecks({ lesson_date: prior.assigned_date, class_id: classId, check_date: date, checks: checks });
+        (checked.grades || []).forEach(function (g) { grades[g.student_id] = g.assignment_completion; });
+      }
+      if (Array.isArray(p.homework_items)) {
+        saveSessionHomework({ lesson_date: date, class_id: classId, items: p.homework_items });
+      }
+      saveClassSession(sessionInput);
+      var saved = saveLessonsBatch(students.map(function (s) {
+        return buildRow(s, grades[LMS.toStr(s.student_id)]);
+      }));
+      return { saved_count: saved.length, grades: grades, lessons: saved };
+    });
   }
 
   function enrichClassPlan(row) {
@@ -1397,10 +1676,40 @@ LMS.createService = function (store) {
     });
   }
 
+  /**
+   * Basic-template monthly reports for many students. Confirmed (확정) reports are never
+   * touched; existing drafts are replaced only with options.overwrite.
+   */
+  function generateMonthlyReportsBulk(studentIds, year, month, options) {
+    options = options || {};
+    var y = Number(year);
+    var m = Number(month);
+    if (!y || !m || m < 1 || m > 12) throw new Error('연도와 월을 올바르게 입력해 주세요.');
+    return withLock(function () {
+      return (studentIds || []).map(function (sid) {
+        try {
+          var gen = generateMonthlyReport(sid, y, m);
+          var existing = gen.existing;
+          if (existing && LMS.toStr(existing.status) === '확정') return { student_id: sid, result: 'skipped', reason: '확정됨' };
+          if (existing && !options.overwrite) return { student_id: sid, result: 'skipped', reason: '이미 있음' };
+          if (!gen.stats.total_lessons) return { student_id: sid, result: 'skipped', reason: '이 달 수업 기록 없음' };
+          var row = saveMonthlyReport({ student_id: sid, year: y, month: m, report_text: gen.generated_text, status: '임시' });
+          return { student_id: sid, result: 'created', monthly_report_id: row.monthly_report_id };
+        } catch (e) {
+          return { student_id: sid, result: 'failed', reason: e.message };
+        }
+      });
+    });
+  }
+
   function getCounselingNotes(studentId) {
     requireStudent(studentId);
+    var tasks = table('Tasks');
     return table('CounselingNotes').filter(function (row) {
       return LMS.toStr(row.student_id) === LMS.toStr(studentId);
+    }).map(function (row) {
+      var task = row.follow_up_task_id ? LMS.findById(tasks, 'task_id', row.follow_up_task_id) : null;
+      return Object.assign({}, row, { follow_up_status: task ? LMS.toStr(task.status) : '' });
     }).sort(function (a, b) {
       var d = LMS.toStr(b.counsel_date).localeCompare(LMS.toStr(a.counsel_date));
       if (d) return d;
@@ -1415,31 +1724,73 @@ LMS.createService = function (store) {
       requireStudent(input.student_id);
       var rows = table('CounselingNotes');
       var ts = now();
+      var row;
       if (isUpdate) {
-        var prev = LMS.findById(rows, 'note_id', input.note_id);
-        if (!prev) throw new Error('상담일지를 찾을 수 없습니다.');
-        prev.kind = input.kind;
-        prev.counsel_date = input.counsel_date;
-        prev.title = input.title;
-        prev.content = input.content;
-        prev.updated_at = ts;
-        saveTable('CounselingNotes', rows);
-        return prev;
+        row = LMS.findById(rows, 'note_id', input.note_id);
+        if (!row) throw new Error('상담일지를 찾을 수 없습니다.');
+        row.kind = input.kind;
+        row.counsel_date = input.counsel_date;
+        row.title = input.title;
+        row.content = input.content;
+        row.updated_at = ts;
+      } else {
+        row = {
+          note_id: nextIds('NTS', 1)[0],
+          student_id: input.student_id,
+          kind: input.kind,
+          counsel_date: input.counsel_date,
+          title: input.title,
+          content: input.content,
+          follow_up_task_id: '',
+          created_at: ts,
+          updated_at: ts
+        };
+        rows.push(row);
       }
-      var row = {
-        note_id: nextIds('NTS', 1)[0],
-        student_id: input.student_id,
-        kind: input.kind,
-        counsel_date: input.counsel_date,
-        title: input.title,
-        content: input.content,
-        created_at: ts,
-        updated_at: ts
-      };
-      rows.push(row);
-      saveTable('CounselingNotes', rows);
+      row.follow_up_date = input.follow_up_date;
+      row.follow_up_title = input.follow_up_title;
+      row.follow_up_task_id = syncFollowUpTask_(row);
+      saveTable('CounselingNotes', table('CounselingNotes'));
       return row;
     });
+  }
+
+  /**
+   * Keep the note's follow-up as a 할 일: create or move it while open, cancel it when the
+   * follow-up is cleared. A finished task is left alone. Returns the task id ('' if none).
+   */
+  function syncFollowUpTask_(note) {
+    var tasks = table('Tasks');
+    var task = note.follow_up_task_id ? LMS.findById(tasks, 'task_id', note.follow_up_task_id) : null;
+    var ts = now();
+    if (!note.follow_up_date) {
+      if (task && LMS.toStr(task.status) === '예정') {
+        task.status = '취소';
+        task.updated_at = ts;
+        saveTable('Tasks', tasks);
+      }
+      return '';
+    }
+    var fields = {
+      due_date: note.follow_up_date,
+      kind: note.kind === '학부모' ? 'counsel_parent' : 'counsel_student',
+      title: note.follow_up_title,
+      memo: '상담일지 ' + note.counsel_date + (note.title ? ' · ' + note.title : ''),
+      student_id: note.student_id,
+      class_id: '',
+      source: 'counseling'
+    };
+    if (task && LMS.toStr(task.status) === '완료') return task.task_id;
+    if (task) {
+      Object.keys(fields).forEach(function (k) { task[k] = fields[k]; });
+      task.status = '예정';
+      task.updated_at = ts;
+    } else {
+      task = Object.assign({ task_id: nextIds(LMS.PREFIX.task, 1)[0], status: '예정', created_at: ts, updated_at: ts }, fields);
+      tasks.push(task);
+    }
+    saveTable('Tasks', tasks);
+    return task.task_id;
   }
 
   function deleteCounselingNote(noteId) {
@@ -1450,6 +1801,7 @@ LMS.createService = function (store) {
       var next = rows.filter(function (row) {
         return LMS.toStr(row.note_id) !== LMS.toStr(noteId);
       });
+      syncFollowUpTask_({ follow_up_date: '', follow_up_task_id: prev.follow_up_task_id });
       saveTable('CounselingNotes', next);
       return { note_id: prev.note_id, deleted: true };
     });
@@ -1538,7 +1890,7 @@ LMS.createService = function (store) {
     if (start > end) throw new Error('시작일이 종료일보다 뒤입니다.');
     var classes = table('Classes');
     var students = table('Students');
-    var regular = LMS.buildRegularClassEvents(classes, start, end);
+    var regular = LMS.buildRegularClassEvents(classes, start, end, examPeriods_());
     var makeups = table('MakeupSessions').filter(function (row) {
       if (LMS.toStr(row.status) === '취소') return false;
       return LMS.inRange(row.makeup_date, start, end);
@@ -1590,31 +1942,26 @@ LMS.createService = function (store) {
     return saveSettings(obj);
   }
 
-  function rosterStudentIds(classId) {
-    var rels = table('StudentClasses');
-    var students = table('Students');
-    var ids = [];
-    rels.forEach(function (r) {
-      if (LMS.toStr(r.class_id) !== LMS.toStr(classId)) return;
-      if (LMS.toStr(r.status) !== '현재') return;
-      var s = LMS.findById(students, 'student_id', r.student_id);
-      if (s && LMS.toStr(s.status) === '재원') ids.push(s.student_id);
-    });
-    return ids;
+  function rosterStudentIds(classId, date) {
+    return rosterOn(classId, date).filter(function (s) {
+      return LMS.toStr(s.status) === '재원';
+    }).map(function (s) { return s.student_id; });
   }
 
   function getTodayTeachingTasks(date) {
     date = date || store.today();
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var periods = examPeriods_();
     var classes = table('Classes').filter(function (c) {
-      return LMS.toStr(c.status) === '운영' && LMS.classMeetsOn(c.weekday, date);
+      return LMS.classMeetsOnDate(c, date, periods);
     });
     var lessons = table('Lessons').filter(function (l) {
       return LMS.toStr(l.lesson_date) === date;
     });
     var students = table('Students');
     var regularClasses = classes.map(function (cls) {
-      var rosterIds = rosterStudentIds(cls.class_id);
+      var rosterIds = rosterStudentIds(cls.class_id, date);
+      var slot = LMS.classTimeOn(cls, date) || {};
       var recorded = {};
       lessons.forEach(function (l) {
         if (LMS.toStr(l.class_id) !== LMS.toStr(cls.class_id)) return;
@@ -1625,7 +1972,9 @@ LMS.createService = function (store) {
         type: 'regular',
         class_id: cls.class_id,
         class_name: cls.class_name,
-        start_time: cls.start_time,
+        class_type: LMS.toStr(cls.class_type) || '정규',
+        start_time: slot.start || '',
+        end_time: slot.end || '',
         student_count: rosterIds.length,
         recorded_count: recordedCount,
         incomplete_count: Math.max(0, rosterIds.length - recordedCount),
@@ -1818,7 +2167,7 @@ LMS.createService = function (store) {
 
     (teaching.regular_classes || []).forEach(function (cls) {
       var classRow = LMS.findById(classes, 'class_id', cls.class_id) || cls;
-      var assignedDate = LMS.previousClassMeetingDate(classRow.weekday, date);
+      var assignedDate = LMS.previousMeetingDateFor(classRow, date, examPeriods_());
       if (!assignedDate) return;
       var hw = getSessionHomework(assignedDate, cls.class_id);
       if (!(hw.items || []).length) return;
@@ -2000,19 +2349,14 @@ LMS.createService = function (store) {
   function getDashboard(date) {
     date = date || store.today();
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var periods = examPeriods_();
     var classes = table('Classes').filter(function (c) {
-      return LMS.toStr(c.status) === '운영' && LMS.classMeetsOn(c.weekday, date);
+      return LMS.classMeetsOnDate(c, date, periods);
     });
-    var rels = table('StudentClasses');
     var students = table('Students');
     var studentIds = {};
     classes.forEach(function (cls) {
-      rels.forEach(function (r) {
-        if (LMS.toStr(r.class_id) !== LMS.toStr(cls.class_id)) return;
-        if (LMS.toStr(r.status) !== '현재') return;
-        var s = LMS.findById(students, 'student_id', r.student_id);
-        if (s && LMS.toStr(s.status) === '재원') studentIds[s.student_id] = true;
-      });
+      rosterStudentIds(cls.class_id, date).forEach(function (id) { studentIds[id] = true; });
     });
     var expected = Object.keys(studentIds);
     var lessons = table('Lessons').filter(function (l) {
@@ -2046,11 +2390,19 @@ LMS.createService = function (store) {
   function getClassStats(classId, year, month) {
     requireClass(classId);
     var range = LMS.monthRange(year, month);
-    var roster = getClassRoster(classId);
     var lessons = table('Lessons').filter(function (row) {
       return LMS.toStr(row.class_id) === LMS.toStr(classId) &&
         LMS.inRange(row.lesson_date, range.start, range.end);
     });
+    // Everyone recorded in the month plus today's roster (temporary classes have no '현재' rows).
+    var allStudents = table('Students');
+    var roster = rosterOn(classId, store.today());
+    lessons.forEach(function (l) {
+      if (roster.some(function (s) { return s.student_id === l.student_id; })) return;
+      var st = LMS.findById(allStudents, 'student_id', l.student_id);
+      if (st) roster.push(st);
+    });
+    roster.sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); });
     var students = roster.map(function (s) {
       var stats = LMS.computeMonthlyStats(lessons, s.student_id, year, month);
       return {
@@ -2086,6 +2438,503 @@ LMS.createService = function (store) {
     };
   }
 
+  // ----- Exam-prep periods and temporary classes -----
+
+  function requirePeriod_(id) {
+    var row = LMS.findById(table('ExamPeriods'), 'exam_period_id', id);
+    if (!row) throw new Error('시험대비 기간을 찾을 수 없습니다.');
+    return row;
+  }
+
+  function periodClassIds_(periodId) {
+    return table('Classes').filter(function (c) {
+      return LMS.toStr(c.exam_period_id) === LMS.toStr(periodId) && LMS.toStr(c.class_type) === '시험대비';
+    }).map(function (c) { return LMS.toStr(c.class_id); });
+  }
+
+  function periodTempRels_(periodId) {
+    var ids = periodClassIds_(periodId);
+    return table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.status) === '임시' && ids.indexOf(LMS.toStr(r.class_id)) !== -1;
+    });
+  }
+
+  /** Regular class ids a student attends at some point within [start, end]. */
+  function regularClassIdsOf_(studentId, start, end) {
+    var classes = table('Classes');
+    return table('StudentClasses').filter(function (r) {
+      if (LMS.toStr(r.student_id) !== LMS.toStr(studentId) || LMS.toStr(r.status) === '임시') return false;
+      if (LMS.toStr(r.status) === '종료' && !r.end_date) return false;
+      var c = LMS.findById(classes, 'class_id', r.class_id);
+      if (!c || LMS.toStr(c.class_type) === '시험대비') return false;
+      return LMS.rangesOverlap(r.start_date, r.end_date, start, end);
+    }).map(function (r) { return LMS.toStr(r.class_id); });
+  }
+
+  /**
+   * Batch start, individual return: each suspended class stays off until its first moved
+   * student is back, then meets with whoever has returned (students still away are left
+   * off its roster by rosterOn). Last suspended day = earliest end among its moved students'
+   * temporary assignments. No moved students → period end.
+   */
+  function recomputeResumeDates_(periodId) {
+    var periods = table('ExamPeriods');
+    var period = LMS.findById(periods, 'exam_period_id', periodId);
+    if (!period) return;
+    var temp = periodTempRels_(periodId);
+    var map = {};
+    LMS.suspendedClassIds(period).forEach(function (classId) {
+      var last = '';
+      temp.forEach(function (r) {
+        var sources = regularClassIdsOf_(r.student_id, period.start_date, period.end_date);
+        if (sources.indexOf(classId) === -1 && LMS.toStr(r.source_class_id) !== classId) return;
+        var end = LMS.toStr(r.end_date) || period.end_date;
+        if (!last || end < last) last = end;
+      });
+      map[classId] = last && last < period.end_date ? last : period.end_date;
+    });
+    period.class_resume_dates = map;
+    period.updated_at = now();
+    saveTable('ExamPeriods', periods);
+  }
+
+  function assertNoTempOverlap_(studentId, start, end, ignoreRelId) {
+    var students = table('Students');
+    var clash = table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.status) === '임시' && LMS.toStr(r.student_id) === LMS.toStr(studentId) &&
+        LMS.toStr(r.id) !== LMS.toStr(ignoreRelId) && LMS.rangesOverlap(r.start_date, r.end_date, start, end);
+    })[0];
+    if (clash) {
+      var s = LMS.findById(students, 'student_id', studentId);
+      throw new Error((s ? s.name : studentId) + ' 학생은 그 기간에 이미 다른 시험대비 반에 배정되어 있습니다.');
+    }
+  }
+
+  function saveExamPeriod(data) {
+    return withLock(function () {
+      var input = LMS.validateExamPeriodInput(data);
+      var rows = table('ExamPeriods');
+      var ts = now();
+      var row;
+      if (input.exam_period_id) {
+        row = requirePeriod_(input.exam_period_id);
+        Object.keys(input).forEach(function (k) { if (k !== 'exam_period_id') row[k] = input[k]; });
+        row.updated_at = ts;
+        saveTable('ExamPeriods', rows);
+        // Keep temporary assignments inside the new dates.
+        var rels = table('StudentClasses');
+        var ids = periodClassIds_(row.exam_period_id);
+        var changed = false;
+        rels.forEach(function (r) {
+          if (LMS.toStr(r.status) !== '임시' || ids.indexOf(LMS.toStr(r.class_id)) === -1) return;
+          if (!r.start_date || r.start_date < row.start_date) { r.start_date = row.start_date; changed = true; }
+          if (!r.end_date || r.end_date > row.end_date) { r.end_date = row.end_date; changed = true; }
+          if (r.end_date < r.start_date) { r.end_date = r.start_date; changed = true; }
+        });
+        if (changed) saveTable('StudentClasses', rels);
+        recomputeResumeDates_(row.exam_period_id);
+      } else {
+        row = Object.assign({}, input, {
+          exam_period_id: nextIds('EXP', 1)[0],
+          suspended_class_ids: [],
+          class_resume_dates: {},
+          status: '준비',
+          created_at: ts,
+          updated_at: ts
+        });
+        rows.push(row);
+        saveTable('ExamPeriods', rows);
+      }
+      return LMS.findById(table('ExamPeriods'), 'exam_period_id', row.exam_period_id);
+    });
+  }
+
+  /**
+   * Create temporary classes and assignments in one go.
+   * plan: { groups: [{ class_name, schedule, target_school, target_grade, teacher, start_date, end_date,
+   *          students: [{ student_id, source_class_id, start_date?, end_date? }] }], suspended_class_ids: [] }
+   */
+  function applyExamGroups(periodId, plan) {
+    return withLock(function () {
+      var period = requirePeriod_(periodId);
+      plan = plan || {};
+      var groups = (plan.groups || []).filter(function (g) { return (g.students || []).length; });
+      if (!groups.length && !Array.isArray(plan.suspended_class_ids)) throw new Error('편성할 학생이 없습니다.');
+      var seen = {};
+      var prepared = groups.map(function (g) {
+        var name = LMS.toStr(g.class_name);
+        if (!name) throw new Error('시험대비 반 이름을 입력해 주세요.');
+        var schedule = LMS.normalizeSchedule(g.schedule);
+        if (!schedule.length) throw new Error(name + ': 수업 요일과 시간을 입력해 주세요.');
+        schedule.forEach(function (sl) {
+          if (!sl.start || !sl.end) throw new Error(name + ': ' + sl.day + '요일 시간을 입력해 주세요.');
+        });
+        var gStart = LMS.toStr(g.start_date) || period.start_date;
+        var gEnd = LMS.toStr(g.end_date) || period.end_date;
+        var students = g.students.map(function (st) {
+          var sid = LMS.toStr(st.student_id);
+          requireStudent(sid);
+          if (seen[sid]) throw new Error('같은 학생이 두 반에 들어 있습니다.');
+          seen[sid] = true;
+          var start = LMS.toStr(st.start_date) || gStart;
+          var end = LMS.toStr(st.end_date) || gEnd;
+          if (!LMS.isIsoDate(start) || !LMS.isIsoDate(end) || end < start) throw new Error(name + ': 날짜를 확인해 주세요.');
+          if (start < period.start_date || end > period.end_date) throw new Error(name + ': 날짜는 시험대비 기간 안이어야 합니다.');
+          assertNoTempOverlap_(sid, start, end);
+          return { student_id: sid, source_class_id: LMS.toStr(st.source_class_id) || regularClassIdsOf_(sid, start, end)[0] || '', start_date: start, end_date: end };
+        });
+        return { name: name, schedule: schedule, group: g, students: students };
+      });
+
+      var created = prepared.map(function (pg) {
+        var input = LMS.validateClassInput({
+          class_name: pg.name,
+          grade: LMS.toStr(pg.group.target_grade),
+          teacher: LMS.toStr(pg.group.teacher),
+          school_year: LMS.toStr(period.exam_year) || period.start_date.slice(0, 4),
+          semester: LMS.toStr(period.exam_semester),
+          schedule: pg.schedule,
+          class_type: '시험대비',
+          exam_period_id: period.exam_period_id,
+          target_school: LMS.toStr(pg.group.target_school),
+          target_grade: LMS.toStr(pg.group.target_grade),
+          status: '운영'
+        }, false);
+        delete input.schedule_from_legacy;
+        var ts = now();
+        var cls = Object.assign({}, input, { class_id: nextIds('CLS', 1)[0], created_at: ts, updated_at: ts });
+        var classes = table('Classes');
+        classes.push(cls);
+        saveTable('Classes', classes);
+        var rels = table('StudentClasses');
+        var ids = nextIds('REL', pg.students.length);
+        pg.students.forEach(function (st, i) {
+          rels.push({
+            id: ids[i], student_id: st.student_id, class_id: cls.class_id,
+            start_date: st.start_date, end_date: st.end_date, status: '임시',
+            assignment_type: '임시', source_class_id: st.source_class_id, created_at: ts, updated_at: ts
+          });
+        });
+        saveTable('StudentClasses', rels);
+        return cls;
+      });
+
+      var periods = table('ExamPeriods');
+      var row = LMS.findById(periods, 'exam_period_id', periodId);
+      if (Array.isArray(plan.suspended_class_ids)) {
+        row.suspended_class_ids = LMS.uniqueIds(plan.suspended_class_ids.map(LMS.toStr));
+      }
+      if (LMS.toStr(row.status) === '준비') row.status = '진행';
+      saveTable('ExamPeriods', periods);
+      recomputeResumeDates_(periodId);
+      return { classes: created, period: LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId) };
+    });
+  }
+
+  function tempRel_(relId) {
+    var rels = table('StudentClasses');
+    var rel = LMS.findById(rels, 'id', relId);
+    if (!rel || LMS.toStr(rel.status) !== '임시') throw new Error('시험대비 배정을 찾을 수 없습니다.');
+    var cls = requireClass(rel.class_id);
+    return { rels: rels, rel: rel, cls: cls, period: requirePeriod_(cls.exam_period_id) };
+  }
+
+  function addTempAssignment(data) {
+    return withLock(function () {
+      var cls = requireClass(data.class_id);
+      if (LMS.toStr(cls.class_type) !== '시험대비') throw new Error('시험대비 반이 아닙니다.');
+      var period = requirePeriod_(cls.exam_period_id);
+      var sid = LMS.toStr(data.student_id);
+      requireStudent(sid);
+      var start = LMS.toStr(data.start_date) || period.start_date;
+      var end = LMS.toStr(data.end_date) || period.end_date;
+      if (start < period.start_date || end > period.end_date || end < start) throw new Error('날짜는 시험대비 기간 안이어야 합니다.');
+      assertNoTempOverlap_(sid, start, end);
+      var rels = table('StudentClasses');
+      var ts = now();
+      var row = {
+        id: nextIds('REL', 1)[0], student_id: sid, class_id: cls.class_id, start_date: start, end_date: end,
+        status: '임시', assignment_type: '임시',
+        source_class_id: LMS.toStr(data.source_class_id) || regularClassIdsOf_(sid, start, end)[0] || '',
+        created_at: ts, updated_at: ts
+      };
+      rels.push(row);
+      saveTable('StudentClasses', rels);
+      recomputeResumeDates_(period.exam_period_id);
+      return row;
+    });
+  }
+
+  /** Early return: the temporary assignment ends on `date` (last day in the exam class). */
+  function endTempAssignment(relId, date) {
+    return withLock(function () {
+      var t = tempRel_(relId);
+      var d = LMS.toStr(date);
+      if (!LMS.isIsoDate(d)) throw new Error('마지막 수업일을 입력해 주세요.');
+      if (d < LMS.toStr(t.rel.start_date)) throw new Error('마지막 수업일이 시작일보다 빠릅니다. 배정을 빼려면 ‘제외’를 쓰세요.');
+      if (d > t.period.end_date) throw new Error('마지막 수업일은 시험대비 기간 안이어야 합니다.');
+      t.rel.end_date = d;
+      t.rel.updated_at = now();
+      saveTable('StudentClasses', t.rels);
+      recomputeResumeDates_(t.period.exam_period_id);
+      return t.rel;
+    });
+  }
+
+  function removeTempAssignment(relId) {
+    return withLock(function () {
+      var t = tempRel_(relId);
+      var hasLessons = table('Lessons').some(function (l) {
+        return LMS.toStr(l.class_id) === LMS.toStr(t.rel.class_id) && LMS.toStr(l.student_id) === LMS.toStr(t.rel.student_id);
+      });
+      if (hasLessons) throw new Error('이미 이 반 수업 기록이 있어 뺄 수 없습니다. ‘조기 복귀’로 마지막 수업일을 정하세요.');
+      saveTable('StudentClasses', t.rels.filter(function (r) { return r !== t.rel; }));
+      recomputeResumeDates_(t.period.exam_period_id);
+      return true;
+    });
+  }
+
+  function setPeriodSuspendedClasses(periodId, classIds) {
+    return withLock(function () {
+      var periods = table('ExamPeriods');
+      var row = requirePeriod_(periodId);
+      row.suspended_class_ids = LMS.uniqueIds((classIds || []).map(LMS.toStr));
+      saveTable('ExamPeriods', periods);
+      recomputeResumeDates_(periodId);
+      return LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId);
+    });
+  }
+
+  function closeExamPeriod(periodId) {
+    return withLock(function () {
+      var periods = table('ExamPeriods');
+      var row = requirePeriod_(periodId);
+      row.status = '종료';
+      row.updated_at = now();
+      saveTable('ExamPeriods', periods);
+      var ids = periodClassIds_(periodId);
+      var classes = table('Classes');
+      classes.forEach(function (c) { if (ids.indexOf(LMS.toStr(c.class_id)) !== -1) c.status = '종료'; });
+      saveTable('Classes', classes);
+      return row;
+    });
+  }
+
+  /** Delete a period that has no lessons yet, with its temporary classes and assignments. */
+  function deleteExamPeriod(periodId) {
+    return withLock(function () {
+      requirePeriod_(periodId);
+      var ids = periodClassIds_(periodId);
+      var used = table('Lessons').some(function (l) { return ids.indexOf(LMS.toStr(l.class_id)) !== -1; });
+      if (used) throw new Error('수업 기록이 있는 시험대비 기간은 삭제할 수 없습니다. ‘기간 마감’을 쓰세요.');
+      var inIds = function (r) { return ids.indexOf(LMS.toStr(r.class_id)) === -1; };
+      saveTable('StudentClasses', table('StudentClasses').filter(inIds));
+      saveTable('Classes', table('Classes').filter(inIds));
+      saveTable('ClassSessions', table('ClassSessions').filter(inIds));
+      var items = table('HomeworkItems');
+      var dropItems = items.filter(function (r) { return !inIds(r); }).map(function (r) { return LMS.toStr(r.item_id); });
+      saveTable('HomeworkItems', items.filter(inIds));
+      saveTable('HomeworkChecks', table('HomeworkChecks').filter(function (c) { return dropItems.indexOf(LMS.toStr(c.item_id)) === -1; }));
+      saveTable('ClassPlans', table('ClassPlans').filter(inIds));
+      saveTable('ExamPeriods', table('ExamPeriods').filter(function (r) { return LMS.toStr(r.exam_period_id) !== LMS.toStr(periodId); }));
+      return true;
+    });
+  }
+
+  // ----- School exam schedule (math only) -----
+
+  function saveSchoolExam(data) {
+    return withLock(function () {
+      var input = LMS.validateSchoolExamInput(data);
+      var rows = table('SchoolExams');
+      var key = LMS.schoolExamKey(input);
+      var ts = now();
+      var row = input.school_exam_id ? LMS.findById(rows, 'school_exam_id', input.school_exam_id) : null;
+      if (input.school_exam_id && !row) throw new Error('시험 일정을 찾을 수 없습니다.');
+      var clash = rows.filter(function (r) {
+        return LMS.schoolExamKey(r) === key && r !== row;
+      })[0];
+      if (row && clash) throw new Error('같은 학교·학년의 같은 시험이 이미 있습니다.');
+      if (!row) row = clash || null;
+      if (row) {
+        Object.keys(input).forEach(function (k) {
+          if (k !== 'school_exam_id') row[k] = input[k];
+        });
+        row.updated_at = ts;
+      } else {
+        row = Object.assign({}, input, {
+          school_exam_id: nextIds('SCX', 1)[0],
+          created_at: ts,
+          updated_at: ts
+        });
+        rows.push(row);
+      }
+      saveTable('SchoolExams', rows);
+      return row;
+    });
+  }
+
+  function saveSchoolExamsBatch(list) {
+    return withLock(function () {
+      return (list || []).map(function (item) { return saveSchoolExam(item); });
+    });
+  }
+
+  function deleteSchoolExam(id) {
+    return withLock(function () {
+      var rows = table('SchoolExams');
+      var next = rows.filter(function (r) { return LMS.toStr(r.school_exam_id) !== LMS.toStr(id); });
+      if (next.length === rows.length) throw new Error('시험 일정을 찾을 수 없습니다.');
+      saveTable('SchoolExams', next);
+      return true;
+    });
+  }
+
+  // ----- Schema migrations (lms.kv JSON; idempotent, versioned in _Meta) -----
+
+  function schemaVersion_() {
+    var row = LMS.findById(table('_Meta'), 'prefix', LMS.SCHEMA_META_KEY);
+    var v = row ? parseInt(row.next_seq, 10) : 1;
+    return isFinite(v) ? v : 1;
+  }
+
+  function migrateToV2_() {
+    var ts = now();
+    var classes = table('Classes');
+    classes.forEach(function (cls) {
+      if (!Array.isArray(cls.schedule)) {
+        var legacy = LMS.scheduleFromLegacy(cls.weekday, cls.start_time, cls.end_time);
+        try {
+          cls.schedule = LMS.normalizeSchedule(legacy);
+        } catch (e) {
+          cls.schedule = legacy;
+        }
+        var summary = LMS.scheduleSummary(cls.schedule);
+        cls.start_time = summary.start_time || LMS.toStr(cls.start_time);
+        cls.end_time = summary.end_time || LMS.toStr(cls.end_time);
+      }
+      if (!LMS.toStr(cls.class_type)) cls.class_type = '정규';
+      ['exam_period_id', 'target_school', 'target_grade'].forEach(function (k) {
+        if (cls[k] === undefined || cls[k] === null) cls[k] = '';
+      });
+    });
+    saveTable('Classes', classes);
+
+    var rels = table('StudentClasses');
+    rels.forEach(function (r) {
+      if (!LMS.toStr(r.assignment_type)) r.assignment_type = '정규';
+      if (r.source_class_id === undefined || r.source_class_id === null) r.source_class_id = '';
+    });
+    saveTable('StudentClasses', rels);
+
+    var makeups = table('MakeupSessions');
+    makeups.forEach(function (m) {
+      ['start_time', 'end_time'].forEach(function (k) {
+        var t = LMS.normalizeTime(m[k]);
+        if (t) m[k] = t;
+      });
+    });
+    saveTable('MakeupSessions', makeups);
+
+    var groups = {};
+    table('Lessons').forEach(function (row) {
+      var key = LMS.sessionKey(row.lesson_date, row.class_id);
+      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, rows: [] };
+      groups[key].rows.push(row);
+    });
+    var notices = table('ClassSessionNotices');
+    notices.forEach(function (n) {
+      var key = LMS.sessionKey(n.lesson_date, n.class_id);
+      if (!groups[key]) groups[key] = { date: n.lesson_date, classId: n.class_id, rows: [] };
+      groups[key].notice = LMS.toStr(n.class_notice);
+    });
+    var sessions = table('ClassSessions');
+    var existing = {};
+    sessions.forEach(function (r) { existing[LMS.sessionKey(r.lesson_date, r.class_id)] = true; });
+    var missing = Object.keys(groups).filter(function (k) { return !existing[k]; }).sort();
+    var ids = missing.length ? nextIds('SES', missing.length) : [];
+    missing.forEach(function (key, i) {
+      var g = groups[key];
+      var tested = g.rows.filter(function (r) { return LMS.toStr(r.test_status) === '실시'; });
+      var max = LMS.modeValue(tested.map(function (r) { return LMS.toStr(r.test_max_score); }));
+      sessions.push({
+        session_id: ids[i],
+        lesson_date: LMS.toStr(g.date),
+        class_id: LMS.toStr(g.classId),
+        progress: LMS.modeValue(g.rows.map(function (r) { return LMS.toStr(r.progress); })),
+        content: '',
+        test_title: '',
+        test_max_score: max ? LMS.toNum(max) : '',
+        test_difficulty: LMS.modeValue(tested.map(function (r) { return LMS.toStr(r.test_difficulty); })),
+        class_notice: g.notice || '',
+        memo: '',
+        created_at: ts,
+        updated_at: ts
+      });
+    });
+    saveTable('ClassSessions', sessions);
+  }
+
+  /** Bring stored tables up to LMS.SCHEMA_VERSION. Returns true when anything ran. */
+  function ensureSchema() {
+    var version = schemaVersion_();
+    if (version >= LMS.SCHEMA_VERSION) return false;
+    return withLock(function () {
+      if (schemaVersion_() < 2) migrateToV2_();
+      var meta = table('_Meta');
+      var row = LMS.findById(meta, 'prefix', LMS.SCHEMA_META_KEY);
+      if (!row) {
+        row = { prefix: LMS.SCHEMA_META_KEY, next_seq: LMS.SCHEMA_VERSION };
+        meta.push(row);
+      }
+      row.next_seq = LMS.SCHEMA_VERSION;
+      saveTable('_Meta', meta);
+      return true;
+    });
+  }
+
+  /** Light payload for the app shell: settings, today, and the global search index. */
+  function getShellBootstrap() {
+    var classes = table('Classes');
+    var rels = table('StudentClasses');
+    var today = store.today();
+    return {
+      settings: settings(),
+      grades: LMS.GRADE_OPTIONS,
+      today: today,
+      search: {
+        students: table('Students').map(function (s) {
+          var classNames = rels.filter(function (r) {
+            return LMS.toStr(r.student_id) === LMS.toStr(s.student_id) && LMS.relActiveOn(r, today);
+          }).map(function (r) {
+            var cls = LMS.findById(classes, 'class_id', r.class_id);
+            return cls ? cls.class_name : '';
+          }).filter(Boolean);
+          var digits = function (v) { return LMS.toStr(v).replace(/\D/g, ''); };
+          return {
+            id: s.student_id,
+            name: LMS.toStr(s.name),
+            grade: LMS.toStr(s.grade),
+            school: LMS.toStr(s.school),
+            status: LMS.toStr(s.status),
+            phones: [digits(s.student_phone).slice(-4), digits(s.parent_phone).slice(-4)].filter(Boolean),
+            classes: classNames
+          };
+        }),
+        classes: classes.map(function (c) {
+          return {
+            id: c.class_id,
+            name: LMS.toStr(c.class_name),
+            grade: LMS.toStr(c.grade),
+            status: LMS.toStr(c.status),
+            class_type: LMS.toStr(c.class_type) || '정규',
+            schedule_label: LMS.scheduleLabel(LMS.classSchedule(c))
+          };
+        })
+      }
+    };
+  }
+
   function getLookups() {
     return {
       classes: getClasses({}),
@@ -2106,7 +2955,24 @@ LMS.createService = function (store) {
     };
   }
 
-  return {
+  var views = LMS.createViews ? LMS.createViews({
+    table: table,
+    store: store,
+    requireClass: requireClass,
+    requireStudent: requireStudent,
+    rosterOn: rosterOn,
+    examPeriods: examPeriods_,
+    getClassSession: getClassSession,
+    getClassPlan: getClassPlan,
+    getClassPlans: getClassPlans,
+    getTodayTeachingTasks: getTodayTeachingTasks,
+    getDayAgenda: getDayAgenda,
+    getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard,
+    regularClassIdsOf: regularClassIdsOf_,
+    generateDailyReports: generateDailyReports
+  }) : {};
+
+  return Object.assign({
     getStudents: getStudents,
     getStudent: getStudent,
     createStudent: createStudent,
@@ -2170,8 +3036,25 @@ LMS.createService = function (store) {
     getLearningAlerts: getLearningAlerts,
     getClassStats: getClassStats,
     getLookups: getLookups,
-    getBootstrap: getBootstrap
-  };
+    getBootstrap: getBootstrap,
+    getClassSession: getClassSession,
+    saveClassSession: saveClassSession,
+    ensureSchema: ensureSchema,
+    getShellBootstrap: getShellBootstrap,
+    saveTodaySession: saveTodaySession,
+    generateMonthlyReportsBulk: generateMonthlyReportsBulk,
+    saveExamPeriod: saveExamPeriod,
+    applyExamGroups: applyExamGroups,
+    addTempAssignment: addTempAssignment,
+    endTempAssignment: endTempAssignment,
+    removeTempAssignment: removeTempAssignment,
+    setPeriodSuspendedClasses: setPeriodSuspendedClasses,
+    closeExamPeriod: closeExamPeriod,
+    deleteExamPeriod: deleteExamPeriod,
+    saveSchoolExam: saveSchoolExam,
+    saveSchoolExamsBatch: saveSchoolExamsBatch,
+    deleteSchoolExam: deleteSchoolExam
+  }, views);
 };
 
 if (typeof module !== 'undefined' && module.exports) {
