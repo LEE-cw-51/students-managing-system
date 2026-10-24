@@ -1165,11 +1165,85 @@ LMS.createViews = function (ctx) {
     };
   }
 
+  // ----- Reports -----
+
+  /**
+   * Monthly report status for a class (members during the month, plus anyone recorded in it)
+   * or, without classId, every enrolled student.
+   */
+  function getMonthlyReportBoard(classId, year, month) {
+    var y = Number(year);
+    var m = Number(month);
+    if (!y || !m) throw new Error('연도와 월을 올바르게 입력해 주세요.');
+    var range = LMS.monthRange(y, m);
+    var students = table('Students');
+    var ids = {};
+    if (classId) {
+      ctx.requireClass(classId);
+      table('StudentClasses').forEach(function (r) {
+        if (LMS.toStr(r.class_id) !== LMS.toStr(classId) || LMS.toStr(r.status) === '종료' && !r.end_date) return;
+        if (LMS.rangesOverlap(r.start_date, r.end_date, range.start, range.end)) ids[r.student_id] = true;
+      });
+      table('Lessons').forEach(function (l) {
+        if (LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.inRange(l.lesson_date, range.start, range.end)) ids[l.student_id] = true;
+      });
+    } else {
+      students.forEach(function (s) { if (LMS.toStr(s.status) === '재원') ids[s.student_id] = true; });
+    }
+    var reports = {};
+    table('MonthlyReports').forEach(function (r) {
+      if (Number(r.year) === y && Number(r.month) === m) reports[r.student_id] = r;
+    });
+    var lessonCount = {};
+    table('Lessons').forEach(function (l) {
+      if (ids[l.student_id] && LMS.inRange(l.lesson_date, range.start, range.end)) lessonCount[l.student_id] = (lessonCount[l.student_id] || 0) + 1;
+    });
+    var rows = Object.keys(ids).map(function (sid) {
+      var s = LMS.findById(students, 'student_id', sid) || { name: sid };
+      var r = reports[sid];
+      return {
+        student_id: sid,
+        name: s.name,
+        grade: s.grade,
+        student_status: s.status,
+        lesson_count: lessonCount[sid] || 0,
+        status: r ? (LMS.toStr(r.status) || '임시') : '미작성',
+        monthly_report_id: r ? r.monthly_report_id : '',
+        updated_at: r ? r.updated_at : '',
+        preview: r ? LMS.toStr(r.report_text).slice(0, 80) : ''
+      };
+    }).sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); });
+    var count = function (st) { return rows.filter(function (r) { return r.status === st; }).length; };
+    return { year: y, month: m, class_id: classId || '', rows: rows, counts: { none: count('미작성'), draft: count('임시'), final: count('확정') } };
+  }
+
+  /** Daily reports of a class/date plus the roster students who have no record that day. */
+  function getDailyReportBoard(date, classId) {
+    if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var cls = ctx.requireClass(classId);
+    var reports = ctx.generateDailyReports(date, classId);
+    var recorded = {};
+    reports.reports.forEach(function (r) { recorded[r.student_id] = true; });
+    var missing = ctx.rosterOn(classId, date).filter(function (s) {
+      return LMS.toStr(s.status) === '재원' && !recorded[s.student_id];
+    }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
+    return {
+      date: date,
+      class: { class_id: cls.class_id, class_name: cls.class_name },
+      meets: LMS.classMeetsOnDate(cls, date, ctx.examPeriods()),
+      reports: reports.reports,
+      class_test_average: reports.class_test_average,
+      missing: missing
+    };
+  }
+
   function studentBadges(student) {
     return LMS.toStr(student.status) === '재원' ? badgesFor(student) : [];
   }
 
   return {
+    getMonthlyReportBoard: getMonthlyReportBoard,
+    getDailyReportBoard: getDailyReportBoard,
     getExamPeriods: getExamPeriods,
     getExamPeriodDetail: getExamPeriodDetail,
     proposeExamGroups: proposeExamGroups,

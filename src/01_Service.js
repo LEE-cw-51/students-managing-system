@@ -1676,6 +1676,32 @@ LMS.createService = function (store) {
     });
   }
 
+  /**
+   * Basic-template monthly reports for many students. Confirmed (확정) reports are never
+   * touched; existing drafts are replaced only with options.overwrite.
+   */
+  function generateMonthlyReportsBulk(studentIds, year, month, options) {
+    options = options || {};
+    var y = Number(year);
+    var m = Number(month);
+    if (!y || !m || m < 1 || m > 12) throw new Error('연도와 월을 올바르게 입력해 주세요.');
+    return withLock(function () {
+      return (studentIds || []).map(function (sid) {
+        try {
+          var gen = generateMonthlyReport(sid, y, m);
+          var existing = gen.existing;
+          if (existing && LMS.toStr(existing.status) === '확정') return { student_id: sid, result: 'skipped', reason: '확정됨' };
+          if (existing && !options.overwrite) return { student_id: sid, result: 'skipped', reason: '이미 있음' };
+          if (!gen.stats.total_lessons) return { student_id: sid, result: 'skipped', reason: '이 달 수업 기록 없음' };
+          var row = saveMonthlyReport({ student_id: sid, year: y, month: m, report_text: gen.generated_text, status: '임시' });
+          return { student_id: sid, result: 'created', monthly_report_id: row.monthly_report_id };
+        } catch (e) {
+          return { student_id: sid, result: 'failed', reason: e.message };
+        }
+      });
+    });
+  }
+
   function getCounselingNotes(studentId) {
     requireStudent(studentId);
     var tasks = table('Tasks');
@@ -2942,7 +2968,8 @@ LMS.createService = function (store) {
     getTodayTeachingTasks: getTodayTeachingTasks,
     getDayAgenda: getDayAgenda,
     getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard,
-    regularClassIdsOf: regularClassIdsOf_
+    regularClassIdsOf: regularClassIdsOf_,
+    generateDailyReports: generateDailyReports
   }) : {};
 
   return Object.assign({
@@ -3015,6 +3042,7 @@ LMS.createService = function (store) {
     ensureSchema: ensureSchema,
     getShellBootstrap: getShellBootstrap,
     saveTodaySession: saveTodaySession,
+    generateMonthlyReportsBulk: generateMonthlyReportsBulk,
     saveExamPeriod: saveExamPeriod,
     applyExamGroups: applyExamGroups,
     addTempAssignment: addTempAssignment,
