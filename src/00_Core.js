@@ -18,7 +18,9 @@ LMS.PREFIX = {
   task: 'TSK',
   plan: 'PLN',
   homeworkItem: 'HWI',
-  homeworkCheck: 'HWC'
+  homeworkCheck: 'HWC',
+  session: 'SES',
+  examPeriod: 'EXP'
 };
 
 LMS.TABLES = {
@@ -29,11 +31,12 @@ LMS.TABLES = {
   Classes: [
     'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
     'weekday', 'start_time', 'end_time', 'textbook', 'current_progress',
-    'class_homework', 'memo', 'status', 'created_at', 'updated_at'
+    'class_homework', 'memo', 'status', 'created_at', 'updated_at',
+    'schedule', 'class_type', 'exam_period_id', 'target_school', 'target_grade'
   ],
   StudentClasses: [
     'id', 'student_id', 'class_id', 'start_date', 'end_date',
-    'status', 'created_at', 'updated_at'
+    'status', 'created_at', 'updated_at', 'assignment_type', 'source_class_id'
   ],
   Lessons: [
     'lesson_id', 'lesson_date', 'student_id', 'class_id', 'attendance',
@@ -44,13 +47,22 @@ LMS.TABLES = {
   ClassSessionNotices: [
     'id', 'lesson_date', 'class_id', 'class_notice', 'created_at', 'updated_at'
   ],
+  ClassSessions: [
+    'session_id', 'lesson_date', 'class_id', 'progress', 'content',
+    'test_title', 'test_max_score', 'test_difficulty', 'class_notice', 'memo',
+    'created_at', 'updated_at'
+  ],
+  ExamPeriods: [
+    'exam_period_id', 'title', 'start_date', 'end_date', 'suspended_class_ids',
+    'memo', 'status', 'created_at', 'updated_at'
+  ],
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
     'generated_at', 'updated_at', 'status'
   ],
   CounselingNotes: [
     'note_id', 'student_id', 'kind', 'counsel_date', 'title', 'content',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at', 'follow_up_date', 'follow_up_title', 'follow_up_task_id'
   ],
   MakeupSessions: [
     'makeup_id', 'makeup_date', 'start_time', 'end_time', 'kind',
@@ -86,7 +98,12 @@ LMS.GRADE_OPTIONS = [
 
 LMS.STUDENT_STATUS = ['재원', '휴원', '퇴원'];
 LMS.CLASS_STATUS = ['운영', '종료'];
-LMS.REL_STATUS = ['현재', '종료'];
+LMS.REL_STATUS = ['현재', '종료', '임시'];
+LMS.CLASS_TYPES = ['정규', '시험대비'];
+LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
+LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
+LMS.SCHEMA_VERSION = 2;
+LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
 LMS.DIFFICULTY = ['상', '중', '하'];
 LMS.ASSIGNMENT = ['A', 'B', 'C'];
@@ -98,7 +115,7 @@ LMS.MAKEUP_KIND = ['반', '학생'];
 LMS.MAKEUP_STATUS = ['예정', '완료', '취소'];
 LMS.TASK_KIND = ['counsel_parent', 'counsel_student', 'homework_check', 'admin', 'other'];
 LMS.TASK_STATUS = ['예정', '완료', '취소'];
-LMS.TASK_SOURCE = ['manual'];
+LMS.TASK_SOURCE = ['manual', 'counseling'];
 LMS.PLAN_PERIOD = ['일간', '주간', '월간'];
 LMS.HOMEWORK_CHECK_STATUS = ['완료', '미완료'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -115,7 +132,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -210,6 +227,219 @@ LMS.classMeetingDatesInRange = function (weekdayStr, start, end) {
   return LMS.datesInRange(start, end).filter(function (date) {
     return LMS.classMeetsOn(weekdayStr, date);
   });
+};
+
+/**
+ * Normalize a typed time to "HH:MM".
+ * "1800" → 18:00, "930" → 09:30, "18" → 18:00, "18:3" / "183" → 18:30.
+ * Returns '' for blank input and null when the value cannot be a time.
+ */
+LMS.normalizeTime = function (raw) {
+  var text = LMS.toStr(raw).replace(/\s+/g, '');
+  if (!text) return '';
+  var h;
+  var m;
+  var parts = text.split(':');
+  if (parts.length === 2) {
+    if (!/^\d{1,2}$/.test(parts[0]) || !/^\d{0,2}$/.test(parts[1])) return null;
+    h = Number(parts[0]);
+    m = parts[1].length === 1 ? Number(parts[1]) * 10 : Number(parts[1] || 0);
+  } else if (parts.length === 1 && /^\d{1,4}$/.test(text)) {
+    if (text.length <= 2) {
+      h = Number(text);
+      m = 0;
+    } else if (text.length === 3) {
+      h = Number(text.slice(0, 1));
+      m = Number(text.slice(1));
+      if (m > 59) {
+        h = Number(text.slice(0, 2));
+        m = Number(text.slice(2)) * 10;
+      }
+    } else {
+      h = Number(text.slice(0, 2));
+      m = Number(text.slice(2));
+    }
+  } else {
+    return null;
+  }
+  if (!isFinite(h) || !isFinite(m) || h > 23 || m > 59) return null;
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+};
+
+/** Validate and sort a per-weekday schedule: [{ day, start, end }]. */
+LMS.normalizeSchedule = function (list) {
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list);
+    } catch (e) {
+      list = [];
+    }
+  }
+  var seen = {};
+  var out = [];
+  (Array.isArray(list) ? list : []).forEach(function (item) {
+    var day = LMS.toStr(item && item.day);
+    if (!day) return;
+    if (LMS.WEEKDAYS.indexOf(day) === -1) throw new Error('요일이 올바르지 않습니다: ' + day);
+    if (seen[day]) throw new Error(day + '요일이 중복되었습니다.');
+    seen[day] = true;
+    var start = LMS.normalizeTime(item.start);
+    var end = LMS.normalizeTime(item.end);
+    if (start === null) throw new Error(day + '요일 시작 시간이 올바르지 않습니다.');
+    if (end === null) throw new Error(day + '요일 종료 시간이 올바르지 않습니다.');
+    if (start && end && end <= start) {
+      throw new Error(day + '요일 종료 시간이 시작 시간보다 늦어야 합니다.');
+    }
+    out.push({ day: day, start: start, end: end });
+  });
+  return out.sort(function (a, b) {
+    return LMS.WEEKDAYS.indexOf(a.day) - LMS.WEEKDAYS.indexOf(b.day);
+  });
+};
+
+/** Build a schedule from the legacy "월/수" + single start/end fields. */
+LMS.scheduleFromLegacy = function (weekdayStr, start, end) {
+  var s = LMS.normalizeTime(start);
+  var e = LMS.normalizeTime(end);
+  return LMS.parseClassWeekdays(weekdayStr).map(function (day) {
+    return { day: day, start: s || LMS.toStr(start), end: e || LMS.toStr(end) };
+  });
+};
+
+/** Legacy summary fields derived from a schedule. */
+LMS.scheduleSummary = function (schedule) {
+  var list = schedule || [];
+  return {
+    weekday: list.map(function (s) { return s.day; }).join('/'),
+    start_time: list.length ? LMS.toStr(list[0].start) : '',
+    end_time: list.length ? LMS.toStr(list[0].end) : ''
+  };
+};
+
+/** Human label: "월 18:00–20:00 · 수 19:00–21:00" or "월/수 18:00–20:00" when uniform. */
+LMS.scheduleLabel = function (schedule) {
+  var list = schedule || [];
+  if (!list.length) return '';
+  var uniform = list.every(function (s) {
+    return s.start === list[0].start && s.end === list[0].end;
+  });
+  var span = function (s) {
+    return s.start ? s.start + (s.end ? '–' + s.end : '') : '';
+  };
+  if (uniform) {
+    var t = span(list[0]);
+    return list.map(function (s) { return s.day; }).join('/') + (t ? ' ' + t : '');
+  }
+  return list.map(function (s) {
+    var t2 = span(s);
+    return s.day + (t2 ? ' ' + t2 : '');
+  }).join(' · ');
+};
+
+/** Schedule of a class row, falling back to legacy fields for unmigrated rows. */
+LMS.classSchedule = function (cls) {
+  if (!cls) return [];
+  if (Array.isArray(cls.schedule)) return cls.schedule;
+  if (typeof cls.schedule === 'string' && cls.schedule) {
+    try {
+      var parsed = JSON.parse(cls.schedule);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {
+      // fall through to legacy fields
+    }
+  }
+  return LMS.scheduleFromLegacy(cls.weekday, cls.start_time, cls.end_time);
+};
+
+/** { start, end } for the class on that date, or null when it has no slot that weekday. */
+LMS.classTimeOn = function (cls, isoDate) {
+  var day = LMS.weekdayName(isoDate);
+  var list = LMS.classSchedule(cls);
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].day === day) return { start: LMS.toStr(list[i].start), end: LMS.toStr(list[i].end) };
+  }
+  return null;
+};
+
+LMS.examPeriodActive = function (period) {
+  return !!period && LMS.toStr(period.status) !== '취소';
+};
+
+LMS.examPeriodCovers = function (period, isoDate) {
+  if (!LMS.examPeriodActive(period)) return false;
+  return LMS.inRange(isoDate, LMS.toStr(period.start_date), LMS.toStr(period.end_date));
+};
+
+LMS.suspendedClassIds = function (period) {
+  var raw = period ? period.suspended_class_ids : null;
+  if (Array.isArray(raw)) return raw.map(LMS.toStr);
+  return LMS.toStr(raw).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+};
+
+/** Exam period that suspends this regular class on the date, if any. */
+LMS.classSuspensionOn = function (cls, isoDate, examPeriods) {
+  var id = LMS.toStr(cls && cls.class_id);
+  var list = examPeriods || [];
+  for (var i = 0; i < list.length; i++) {
+    if (LMS.examPeriodCovers(list[i], isoDate) && LMS.suspendedClassIds(list[i]).indexOf(id) !== -1) {
+      return list[i];
+    }
+  }
+  return null;
+};
+
+/**
+ * Whether a class actually meets on the date: operating, has a slot that weekday,
+ * exam classes only inside their period, regular classes not suspended by one.
+ * An empty schedule means no meetings (unlike the legacy classMeetsOn).
+ */
+LMS.classMeetsOnDate = function (cls, isoDate, examPeriods) {
+  if (!cls || LMS.toStr(cls.status) !== '운영') return false;
+  if (!LMS.classTimeOn(cls, isoDate)) return false;
+  if (LMS.toStr(cls.class_type) === '시험대비') {
+    var period = LMS.findById(examPeriods || [], 'exam_period_id', cls.exam_period_id);
+    return LMS.examPeriodCovers(period, isoDate);
+  }
+  return !LMS.classSuspensionOn(cls, isoDate, examPeriods);
+};
+
+/** Closest earlier date the class met (skipping suspensions), searching back limitDays. */
+LMS.previousMeetingDateFor = function (cls, isoDate, examPeriods, limitDays) {
+  var raw = LMS.toStr(isoDate);
+  if (!LMS.isIsoDate(raw) || !LMS.classSchedule(cls).length) return '';
+  var limit = limitDays || 90;
+  var cur = LMS.addDays(raw, -1);
+  for (var i = 0; i < limit; i++) {
+    if (LMS.classMeetsOnDate(cls, cur, examPeriods)) return cur;
+    cur = LMS.addDays(cur, -1);
+  }
+  return '';
+};
+
+LMS.classMeetingDatesFor = function (cls, start, end, examPeriods) {
+  return LMS.datesInRange(start, end).filter(function (date) {
+    return LMS.classMeetsOnDate(cls, date, examPeriods);
+  });
+};
+
+/** Whether a student-class relation covers the date (regular or temporary). */
+LMS.relActiveOn = function (rel, isoDate) {
+  if (!rel) return false;
+  var status = LMS.toStr(rel.status);
+  var start = LMS.toStr(rel.start_date);
+  var end = LMS.toStr(rel.end_date);
+  if (status === '종료' && !end) return false;
+  if (status !== '현재' && status !== '종료' && status !== '임시') return false;
+  if (start && isoDate < start) return false;
+  if (end && isoDate > end) return false;
+  return true;
+};
+
+/** Grouping key for exam-period classes: normalized school + grade. */
+LMS.schoolGroupKey = function (school, grade) {
+  var s = LMS.toStr(school).replace(/\s+/g, '').replace(/학교$/, '');
+  if (!s) return '';
+  return s + '|' + LMS.toStr(grade);
 };
 
 LMS.splitHomeworkLines = function (text) {
@@ -356,18 +586,19 @@ LMS.formatPlanPeriodLabel = function (periodType, periodKey) {
   return Number(ym[0]) + '년 ' + Number(ym[1]) + '월';
 };
 
-LMS.buildRegularClassEvents = function (classes, start, end) {
+LMS.buildRegularClassEvents = function (classes, start, end, examPeriods) {
   var events = [];
   var dates = LMS.datesInRange(start, end);
   (classes || []).forEach(function (cls) {
     if (LMS.toStr(cls.status) !== '운영') return;
     dates.forEach(function (date) {
-      if (!LMS.classMeetsOn(cls.weekday, date)) return;
+      if (!LMS.classMeetsOnDate(cls, date, examPeriods)) return;
+      var slot = LMS.classTimeOn(cls, date) || {};
       events.push({
-        event_type: '정규',
+        event_type: LMS.toStr(cls.class_type) === '시험대비' ? '시험대비' : '정규',
         date: date,
-        start_time: LMS.toStr(cls.start_time),
-        end_time: LMS.toStr(cls.end_time),
+        start_time: LMS.toStr(slot.start),
+        end_time: LMS.toStr(slot.end),
         class_id: cls.class_id,
         class_name: cls.class_name,
         title: cls.class_name,
@@ -903,22 +1134,94 @@ LMS.validateClassInput = function (data, isUpdate) {
   if (semester && ['1', '2'].indexOf(semester) === -1) {
     throw new Error('학기는 1 또는 2여야 합니다.');
   }
-  return {
+  var has = function (key) {
+    return Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined;
+  };
+  var out = {
     class_id: LMS.toStr(data.class_id),
     school_year: LMS.toStr(data.school_year),
     semester: semester,
     grade: LMS.toStr(data.grade),
     class_name: className,
     teacher: LMS.toStr(data.teacher),
-    weekday: LMS.toStr(data.weekday),
-    start_time: LMS.toStr(data.start_time),
-    end_time: LMS.toStr(data.end_time),
     textbook: LMS.toStr(data.textbook),
     current_progress: LMS.toStr(data.current_progress),
     class_homework: LMS.toStr(data.class_homework),
     memo: LMS.toStr(data.memo),
     status: status
   };
+  // Schedule is the source of truth; weekday/start/end are derived for legacy readers.
+  // Updates that send neither leave the stored schedule untouched.
+  if (has('schedule') || has('weekday') || !isUpdate) {
+    var schedule;
+    if (has('schedule')) {
+      schedule = LMS.normalizeSchedule(data.schedule);
+    } else {
+      var start = LMS.normalizeTime(data.start_time);
+      var end = LMS.normalizeTime(data.end_time);
+      if (start === null) throw new Error('시작 시간 형식이 올바르지 않습니다.');
+      if (end === null) throw new Error('종료 시간 형식이 올바르지 않습니다.');
+      schedule = LMS.normalizeSchedule(LMS.scheduleFromLegacy(data.weekday, start, end));
+      out.schedule_from_legacy = true;
+    }
+    var summary = LMS.scheduleSummary(schedule);
+    out.schedule = schedule;
+    out.weekday = summary.weekday;
+    out.start_time = summary.start_time;
+    out.end_time = summary.end_time;
+  }
+  if (has('class_type') || !isUpdate) {
+    var classType = LMS.toStr(data.class_type) || '정규';
+    LMS.assertEnum(classType, LMS.CLASS_TYPES, '반 종류');
+    out.class_type = classType;
+  }
+  ['exam_period_id', 'target_school', 'target_grade'].forEach(function (key) {
+    if (has(key) || !isUpdate) out[key] = LMS.toStr(data[key]);
+  });
+  return out;
+};
+
+/** Most frequent non-empty value (first seen wins ties); '' when none. */
+LMS.modeValue = function (values) {
+  var counts = {};
+  var order = [];
+  (values || []).forEach(function (v) {
+    var key = LMS.toStr(v);
+    if (!key) return;
+    if (!counts[key]) {
+      counts[key] = 0;
+      order.push(key);
+    }
+    counts[key] += 1;
+  });
+  var best = '';
+  order.forEach(function (key) {
+    if (!best || counts[key] > counts[best]) best = key;
+  });
+  return best;
+};
+
+LMS.CLASS_SESSION_FIELDS = [
+  'progress', 'content', 'test_title', 'test_max_score', 'test_difficulty', 'class_notice', 'memo'
+];
+
+/** Partial input: only the session fields present in data are returned. */
+LMS.validateClassSessionInput = function (data) {
+  data = data || {};
+  if (!LMS.isIsoDate(data.lesson_date)) throw new Error('수업 날짜가 올바르지 않습니다.');
+  if (LMS.isBlank(data.class_id)) throw new Error('반 정보를 찾을 수 없습니다.');
+  var out = { lesson_date: LMS.toStr(data.lesson_date), class_id: LMS.toStr(data.class_id) };
+  LMS.CLASS_SESSION_FIELDS.forEach(function (key) {
+    if (!Object.prototype.hasOwnProperty.call(data, key) || data[key] === undefined) return;
+    out[key] = LMS.toStr(data[key]);
+  });
+  if (out.test_max_score !== undefined && out.test_max_score !== '') {
+    var max = LMS.toNum(out.test_max_score);
+    if (max === null || max <= 0) throw new Error('테스트 만점은 0보다 큰 숫자여야 합니다.');
+    out.test_max_score = max;
+  }
+  if (out.test_difficulty) LMS.assertEnum(out.test_difficulty, LMS.DIFFICULTY, '난이도', true);
+  return out;
 };
 
 LMS.validateCounselingNoteInput = function (data, isUpdate) {
@@ -1042,12 +1345,11 @@ LMS.validateMakeupSessionInput = function (data, isUpdate) {
   if (isUpdate && studentIds.length > 1) {
     throw new Error('수정할 때는 학생을 한 명만 선택해 주세요.');
   }
-  var start = LMS.toStr(data.start_time);
-  var end = LMS.toStr(data.end_time);
-  if (start && !LMS.isTime(start)) throw new Error('시작 시간 형식이 올바르지 않습니다.');
-  if (end && !LMS.isTime(end)) throw new Error('종료 시간 형식이 올바르지 않습니다.');
-  if (start) start = start.slice(0, 5);
-  if (end) end = end.slice(0, 5);
+  var start = LMS.normalizeTime(LMS.toStr(data.start_time).slice(0, 5));
+  var end = LMS.normalizeTime(LMS.toStr(data.end_time).slice(0, 5));
+  if (start === null) throw new Error('시작 시간 형식이 올바르지 않습니다.');
+  if (end === null) throw new Error('종료 시간 형식이 올바르지 않습니다.');
+  if (start && end && end <= start) throw new Error('종료 시간이 시작 시간보다 늦어야 합니다.');
   var status = LMS.toStr(data.status) || '예정';
   LMS.assertEnum(status, LMS.MAKEUP_STATUS, '보강 상태');
   return {
@@ -1158,6 +1460,8 @@ LMS.TABLE_PK = {
   StudentClasses: 'id',
   Lessons: 'lesson_id',
   ClassSessionNotices: 'id',
+  ClassSessions: 'session_id',
+  ExamPeriods: 'exam_period_id',
   MonthlyReports: 'monthly_report_id',
   CounselingNotes: 'note_id',
   MakeupSessions: 'makeup_id',
