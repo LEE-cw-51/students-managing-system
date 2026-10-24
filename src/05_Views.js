@@ -1140,7 +1140,20 @@ LMS.createViews = function (ctx) {
       var left = ctx.rosterOn(id, period.start_date).filter(function (s) {
         return LMS.toStr(s.status) === '재원' && !placed[s.student_id];
       }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
-      return { class_id: id, class_name: c.class_name, last_suspended: last, resume_date: LMS.addDays(last, 1), unplaced: left };
+      // Return schedule: who comes back to this class on which day.
+      var byDay = {};
+      temp.forEach(function (tc) {
+        tc.students.forEach(function (m) {
+          var sources = ctx.regularClassIdsOf(m.student_id, period.start_date, period.end_date);
+          if (sources.indexOf(id) === -1 && m.source_class_id !== id) return;
+          var back = LMS.addDays(m.end_date || period.end_date, 1);
+          (byDay[back] = byDay[back] || []).push(m.name);
+        });
+      });
+      var returns = Object.keys(byDay).sort().map(function (d) {
+        return { date: d, names: byDay[d].sort(function (a, b) { return a.localeCompare(b, 'ko'); }) };
+      });
+      return { class_id: id, class_name: c.class_name, last_suspended: last, resume_date: LMS.addDays(last, 1), returns: returns, unplaced: left };
     });
     return {
       period: Object.assign({}, period, { state: periodState(period, today) }),

@@ -51,20 +51,30 @@ describe('applying groups', () => {
     assert.equal(t.api.getTodayClassSession('2026-10-28', hanbit.class_id).students.length, 0);
   });
 
-  it('resumes the original class the day after its last student returns (E1)', () => {
+  it('returns each student after their own exam; the class restarts with the first one back (E1)', () => {
     const t = setup();
     applyAll(t);
     const detail = () => t.api.getExamPeriodDetail(t.period.exam_period_id);
     const a = () => detail().suspended.find((s) => s.class_id === t.classA);
-    assert.equal(a().resume_date, '2026-11-16', '한빛 11-11, 푸른 11-15 → resume 11-16');
     const p = () => [LMS.findById(t.api.getExamPeriods(), 'exam_period_id', t.period.exam_period_id)];
-    assert.equal(LMS.classMeetsOnDate(t.api.getClass(t.classA), '2026-11-16', p()), true);
-    assert.equal(LMS.classMeetsOnDate(t.api.getClass(t.classA), '2026-11-11', p()), false);
+    // A반: 한빛중 (exam 11-11) and 푸른중 (exam 11-15) students
+    assert.equal(a().resume_date, '2026-11-12', 'first student back the day after 11-11');
+    assert.deepEqual(a().returns.map((r) => r.date), ['2026-11-12', '2026-11-16']);
+    assert.equal(LMS.classMeetsOnDate(t.api.getClass(t.classA), '2026-11-04', p()), false, 'everyone away → suspended');
+    const classA = t.api.getClass(t.classA);
+    const meetDay = LMS.nextMeetingDateFor(classA, '2026-11-12', p());
+    assert.equal(meetDay, '2026-11-16', 'first A반 lesson after resuming (월/수)');
+    const roster = (d) => t.api.getTodayClassSession(d, t.classA).students.map((s) => s.name).sort();
+    assert.deepEqual(roster('2026-11-16'), ['김민준', '박지호', '이서연', '최하은'], 'all back on 11-16');
 
-    // 푸른중 students return early on 11-09 → A반 restarts after 한빛's 11-11.
+    // 푸른중 students finish early on 11-09 → they rejoin A반 from 11-10 while 한빛중 is still away.
     const pureun = detail().classes.find((c) => c.class_name.startsWith('푸른중 중2'));
     pureun.students.forEach((m) => t.api.endTempAssignment(m.rel_id, '2026-11-09'));
-    assert.equal(a().resume_date, '2026-11-12');
+    assert.equal(a().resume_date, '2026-11-10');
+    assert.equal(LMS.classMeetsOnDate(t.api.getClass(t.classA), '2026-11-11', p()), true);
+    assert.deepEqual(roster('2026-11-11'), ['박지호', '최하은'], 'only returned students in A반');
+    const hanbit = detail().classes.find((c) => c.class_name.startsWith('한빛중 중2'));
+    assert.equal(t.api.getTodayClassSession('2026-11-11', hanbit.class_id).students.length, 3, '한빛중 still in exam class');
   });
 
   it('keeps moved students off a class that was not suspended (E2)', () => {

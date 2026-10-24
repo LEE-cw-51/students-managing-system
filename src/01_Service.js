@@ -2446,8 +2446,10 @@ LMS.createService = function (store) {
   }
 
   /**
-   * For each suspended class, its last suspended day = latest end of its moved students'
-   * temporary assignments (the class restarts the next day). No moved students → period end.
+   * Batch start, individual return: each suspended class stays off until its first moved
+   * student is back, then meets with whoever has returned (students still away are left
+   * off its roster by rosterOn). Last suspended day = earliest end among its moved students'
+   * temporary assignments. No moved students → period end.
    */
   function recomputeResumeDates_(periodId) {
     var periods = table('ExamPeriods');
@@ -2461,7 +2463,7 @@ LMS.createService = function (store) {
         var sources = regularClassIdsOf_(r.student_id, period.start_date, period.end_date);
         if (sources.indexOf(classId) === -1 && LMS.toStr(r.source_class_id) !== classId) return;
         var end = LMS.toStr(r.end_date) || period.end_date;
-        if (end > last) last = end;
+        if (!last || end < last) last = end;
       });
       map[classId] = last && last < period.end_date ? last : period.end_date;
     });

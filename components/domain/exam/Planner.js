@@ -132,7 +132,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
 
       <section className="card">
         <h3>휴강할 원래 반</h3>
-        <p className="hint" style={{ marginTop: 0 }}>체크한 반은 기간 동안 휴강하고, 옮겨 간 학생이 모두 돌아오면 다음 날부터 다시 수업합니다.</p>
+        <p className="hint" style={{ marginTop: 0 }}>체크한 반은 시작일에 학생 전원이 시험대비 반으로 옮겨 휴강합니다. 학생은 각자 학교 시험이 끝나면 바로 원래 반으로 돌아오고, 원래 반은 돌아온 학생부터 다시 수업합니다.</p>
         <div className="roster-chips">
           {data.regular_classes.map((c) => (
             <button key={c.class_id} type="button" className={'tag ' + (suspended.has(c.class_id) ? 'amber' : 'muted')} style={{ padding: '6px 10px' }}

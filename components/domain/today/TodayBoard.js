@@ -74,7 +74,7 @@ export default function TodayBoard({ date, onOpenClass }) {
               </div>
             ) : <div className="card"><EmptyState title="이 날은 수업이 없습니다">위의 주간 띠에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState></div>}
             {b.suspended.length ? (
-              <p className="muted" style={{ marginTop: 8 }}>시험대비 휴강: {b.suspended.map((s) => `${s.class_name}(${shortDate(s.resume_date)}부터 수업)`).join(', ')}</p>
+              <p className="muted" style={{ marginTop: 8 }}>시험대비 휴강: {b.suspended.map((s) => `${s.class_name}(${shortDate(s.resume_date)}부터 돌아온 학생과 수업)`).join(', ')}</p>
             ) : null}
           </section>
 

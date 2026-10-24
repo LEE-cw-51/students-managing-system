@@ -28,7 +28,7 @@ function ReturnModal({ member, period, onClose, onDone }) {
   return (
     <Modal title={`${member.name} 복귀일 변경`} onClose={onClose}>
       <form className="stack" onSubmit={submit}>
-        <Field label="시험대비 반 마지막 수업일" hint={`다음 날부터 ${member.source_class_name || '원래 반'} 명단으로 돌아갑니다. 원래 반은 옮겨 간 학생이 모두 돌아오면 재개합니다.`}>
+        <Field label="시험대비 반 마지막 수업일" hint={`다음 날부터 ${member.source_class_name || '원래 반'} 명단으로 돌아갑니다. 시험이 끝난 학생부터 바로 원래 반 수업에 들어갑니다.`}>
           {(id) => <input id={id} type="date" min={member.start_date} max={period.end_date} value={date} onChange={(e) => setDate(e.target.value)} />}
         </Field>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
@@ -179,13 +179,19 @@ export default function PeriodOperation({ detail, onChanged }) {
         {detail.suspended.length ? (
           <div className="table-wrap">
             <table className="data-table stack-mobile">
-              <thead><tr><th>반</th><th>휴강</th><th>다시 수업</th><th>시험대비 반 없는 학생</th></tr></thead>
+              <thead><tr><th>반</th><th>전원 휴강</th><th>복귀 일정 (돌아온 학생부터 수업)</th><th>시험대비 반 없는 학생</th></tr></thead>
               <tbody>
                 {detail.suspended.map((s) => (
                   <tr key={s.class_id}>
                     <td className="primary"><Link href={`/classes/${s.class_id}`}>{s.class_name}</Link></td>
-                    <td data-label="휴강">{shortDate(period.start_date)} ~ {shortDate(s.last_suspended)}</td>
-                    <td data-label="다시 수업"><span className="tag ok">{shortDate(s.resume_date)}부터</span></td>
+                    <td data-label="전원 휴강">{shortDate(period.start_date)} ~ {shortDate(s.last_suspended)}</td>
+                    <td data-label="복귀 일정">
+                      <div className="stack-sm">
+                        {s.returns.length ? s.returns.map((r) => (
+                          <div key={r.date}><span className="tag ok">{shortDate(r.date)}</span> {r.names.join(', ')}</div>
+                        )) : <span className="muted">-</span>}
+                      </div>
+                    </td>
                     <td data-label="미편성">{s.unplaced.length ? s.unplaced.map((u) => <Link key={u.student_id} href={`/students/${u.student_id}`} style={{ marginRight: 6 }}>{u.name}</Link>) : <span className="muted">없음</span>}</td>
                   </tr>
                 ))}
