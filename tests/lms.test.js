@@ -15,10 +15,20 @@ describe('IDs and scores', () => {
     assert.equal(LMS.formatId('CLS', 127), 'CLS_000127');
   });
 
-  it('normalizes scores across different max values', () => {
-    assert.equal(LMS.normalizedScore(18, 20), 90);
-    assert.equal(LMS.normalizedScore(45, 50), 90);
-    assert.equal(LMS.normalizedScore(27, 30), 90);
+  it('averages raw scores only when max scores match', () => {
+    const same = LMS.collectRawScoresForStats([
+      { test_status: '실시', test_score: 18, test_max_score: 20 },
+      { test_status: '실시', test_score: 16, test_max_score: 20 }
+    ]);
+    assert.equal(same.comparable, true);
+    assert.deepEqual(same.scores, [18, 16]);
+    const mixed = LMS.collectRawScoresForStats([
+      { test_status: '실시', test_score: 18, test_max_score: 20 },
+      { test_status: '실시', test_score: 40, test_max_score: 50 }
+    ]);
+    assert.equal(mixed.comparable, false);
+    assert.deepEqual(mixed.scores, []);
+    assert.equal(mixed.test_count, 2);
   });
 
   it('returns null instead of NaN for invalid scores', () => {
@@ -119,7 +129,7 @@ describe('students classes and lessons', () => {
 });
 
 describe('reports and stats', () => {
-  it('excludes 미실시 tests from monthly average', () => {
+  it('excludes 미실시 tests from monthly average and uses raw scores', () => {
     const api = svc();
     const seeded = seedDemo(api);
     api.saveLesson({
@@ -128,18 +138,18 @@ describe('reports and stats', () => {
       class_id: seeded.class.class_id,
       attendance: '출석',
       test_status: '실시',
-      test_score: 40,
-      test_max_score: 50
+      test_score: 16,
+      test_max_score: 20
     });
     const stats = api.getMonthlyStats(seeded.students[0].student_id, 2026, 9);
     assert.equal(stats.test_count, 2);
-    assert.equal(stats.test_average, 85);
-    assert.equal(stats.test_median, 85);
-    assert.equal(stats.test_high, 90);
-    assert.equal(stats.test_low, 80);
-    assert.equal(stats.test_median_display, '85.0');
+    assert.equal(stats.test_average, 17);
+    assert.equal(stats.test_median, 17);
+    assert.equal(stats.test_high, 18);
+    assert.equal(stats.test_low, 16);
+    assert.equal(stats.test_median_display, '17.0');
     const monthly = api.generateMonthlyReport(seeded.students[0].student_id, 2026, 9);
-    assert.match(monthly.text, /평균은 85\.0점입니다\. \(중간값 85\.0점, 최고 90\.0점, 최저 80\.0점\)/);
+    assert.match(monthly.text, /평균은 17\.0점입니다\. \(중간값 17\.0점, 최고 18\.0점, 최저 16\.0점\)/);
     const none = api.getMonthlyStats(seeded.students[1].student_id, 2026, 9);
     assert.equal(none.test_count, 0);
     assert.equal(none.test_average_display, '-');
@@ -151,14 +161,14 @@ describe('reports and stats', () => {
     const seeded = seedDemo(api);
     const batch = api.generateDailyReports('2026-09-14', seeded.class.class_id);
     assert.equal(batch.class_test_average.test_count, 2);
-    assert.equal(batch.class_test_average.test_average, 95);
-    assert.equal(batch.class_test_average.test_median, 95);
-    assert.equal(batch.class_test_average.test_high, 100);
-    assert.equal(batch.class_test_average.test_low, 90);
-    assert.equal(batch.class_test_average.test_average_display, '95.0');
-    assert.equal(batch.class_test_average.test_median_display, '95.0');
-    assert.equal(batch.class_test_average.test_high_display, '100.0');
-    assert.equal(batch.class_test_average.test_low_display, '90.0');
+    assert.equal(batch.class_test_average.test_average, 19);
+    assert.equal(batch.class_test_average.test_median, 19);
+    assert.equal(batch.class_test_average.test_high, 20);
+    assert.equal(batch.class_test_average.test_low, 18);
+    assert.equal(batch.class_test_average.test_average_display, '19.0');
+    assert.equal(batch.class_test_average.test_median_display, '19.0');
+    assert.equal(batch.class_test_average.test_high_display, '20.0');
+    assert.equal(batch.class_test_average.test_low_display, '18.0');
     assert.deepEqual(batch.reports.map((r) => r.student_name), ['김철수', '이영희', '홍길동']);
 
     const undone = api.getTodayClassSession('2026-09-14', seeded.class.class_id)
@@ -181,7 +191,7 @@ describe('reports and stats', () => {
     const t2 = api.generateDailyReport(hong.lesson.lesson_id).text;
     assert.match(t2, /18 \/ 20/);
     assert.match(t2, /난이도: 중/);
-    assert.match(t2, /\(반 평균 95\.0 · 중간값 95\.0 · 최고 100\.0 · 최저 90\.0\)/);
+    assert.match(t2, /\(반 평균 19\.0 · 중간값 19\.0 · 최고 20\.0 · 최저 18\.0\)/);
     assert.doesNotMatch(t2, /집중도:/);
     assert.match(t2, /5\. 학생 피드백: 계산 실수가 잦음/);
   });
@@ -233,21 +243,17 @@ describe('reports and stats', () => {
     assert.doesNotMatch(batch.reports[0].text, /집중도:/);
   });
 
-  it('averages daily class tests after normalizing different max scores', () => {
+  it('skips class average when max scores differ', () => {
     const avg = LMS.computeDailyClassTestAverage([
       { test_status: '실시', test_score: 18, test_max_score: 20 },
       { test_status: '실시', test_score: 40, test_max_score: 50 },
       { test_status: '미실시', test_score: 0, test_max_score: 20 }
     ]);
     assert.equal(avg.test_count, 2);
-    assert.equal(avg.test_average, 85);
-    assert.equal(avg.test_median, 85);
-    assert.equal(avg.test_high, 90);
-    assert.equal(avg.test_low, 80);
-    assert.equal(avg.test_average_display, '85.0');
-    assert.equal(avg.test_median_display, '85.0');
-    assert.equal(avg.test_high_display, '90.0');
-    assert.equal(avg.test_low_display, '80.0');
+    assert.equal(avg.comparable, false);
+    assert.equal(avg.test_average, null);
+    assert.equal(avg.test_average_display, '-');
+    assert.equal(avg.test_median_display, '-');
   });
 
   it('computes median for odd and even score lists', () => {
@@ -552,10 +558,10 @@ describe('student extras counseling makeup and calendar', () => {
     const rows = api.getStudentLessons(seeded.students[0].student_id, '2026-09-01', '2026-09-30');
     const byDate = {};
     rows.forEach((r) => { byDate[r.lesson_date] = r; });
-    assert.equal(byDate['2026-09-14'].class_test_average.test_average, 95);
-    assert.equal(byDate['2026-09-14'].class_test_average.test_average_display, '95.0');
-    assert.equal(byDate['2026-09-16'].class_test_average.test_average, 65);
-    assert.equal(byDate['2026-09-16'].class_test_average.test_average_display, '65.0');
+    assert.equal(byDate['2026-09-14'].class_test_average.test_average, 19);
+    assert.equal(byDate['2026-09-14'].class_test_average.test_average_display, '19.0');
+    assert.equal(byDate['2026-09-16'].class_test_average.test_average, 13);
+    assert.equal(byDate['2026-09-16'].class_test_average.test_average_display, '13.0');
   });
 
   it('puts regular classes and makeup sessions on the calendar', () => {
@@ -683,7 +689,7 @@ describe('agenda and tasks', () => {
     const a = api.createStudent({ name: '김철수', class_id: c.class_id });
     const b = api.createStudent({ name: '이영희', class_id: c.class_id });
     api.saveLesson({
-      lesson_date: '2026-09-10',
+      lesson_date: '2026-09-07',
       student_id: a.student_id,
       class_id: c.class_id,
       attendance: '출석',
@@ -696,7 +702,9 @@ describe('agenda and tasks', () => {
     assert.equal(incomplete.length, 1);
     assert.equal(incomplete[0].class_id, c.class_id);
     assert.equal(incomplete[0].incomplete_count, 2);
-    assert.ok(agenda.items.some((item) => item.kind === 'homework_check' && item.class_id === c.class_id));
+    const hwCheck = agenda.items.find((item) => item.kind === 'homework_check' && item.class_id === c.class_id);
+    assert.ok(hwCheck);
+    assert.equal(hwCheck.prior_lesson_date, '2026-09-07');
 
     api.saveLesson({
       lesson_date: '2026-09-14',
@@ -933,5 +941,176 @@ describe('class lesson plans', () => {
     assert.ok(session.daily_plan);
     assert.equal(session.daily_plan.title, '오늘 진도');
     assert.equal(session.daily_plan.content, '일차방정식 복습');
+  });
+});
+
+describe('homework checklist and weekly dashboard', () => {
+  it('computes previous class meeting and assignment grades', () => {
+    assert.equal(LMS.previousClassMeetingDate('화/목/토', '2026-09-15'), '2026-09-12'); // 화←토
+    assert.equal(LMS.previousClassMeetingDate('화/목/토', '2026-09-17'), '2026-09-15'); // 목←화
+    assert.equal(LMS.previousClassMeetingDate('월/수/금', '2026-09-14'), '2026-09-11'); // 월←금
+    assert.equal(LMS.assignmentGradeFromChecks(2, 2), 'A');
+    assert.equal(LMS.assignmentGradeFromChecks(1, 2), 'C');
+    assert.equal(LMS.assignmentGradeFromChecks(7, 10), 'B');
+    assert.equal(LMS.assignmentGradeFromChecks(0, 0), '');
+  });
+
+  it('saves homework slots and checks them next class with A/B/C', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '화목토반', weekday: '화/목/토' });
+    const a = api.createStudent({ name: '김완료', class_id: c.class_id });
+    const b = api.createStudent({ name: '이일부', class_id: c.class_id });
+    const assigned = '2026-09-12'; // 토
+    const checkDate = '2026-09-15'; // 화
+    const saved = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      titles: ['워크북 10쪽', '오답노트']
+    });
+    assert.equal(saved.items.length, 2);
+    assert.match(saved.items[0].item_id, /^HWI_/);
+
+    const result = api.saveHomeworkChecks({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      check_date: checkDate,
+      checks: [
+        { student_id: a.student_id, item_id: saved.items[0].item_id, status: '완료' },
+        { student_id: a.student_id, item_id: saved.items[1].item_id, status: '완료' },
+        { student_id: b.student_id, item_id: saved.items[0].item_id, status: '완료' },
+        { student_id: b.student_id, item_id: saved.items[1].item_id, status: '미완료' }
+      ]
+    });
+    const byStudent = Object.fromEntries(result.grades.map((g) => [g.student_id, g]));
+    assert.equal(byStudent[a.student_id].assignment_completion, 'A');
+    assert.equal(byStudent[b.student_id].assignment_completion, 'C');
+
+    const session = api.getTodayClassSession(checkDate, c.class_id);
+    assert.equal(session.prior_homework.assigned_date, assigned);
+    assert.equal(session.prior_homework.items.length, 2);
+    assert.equal(session.prior_homework.checks_by_student[a.student_id][saved.items[0].item_id], '완료');
+  });
+
+  it('builds weekly must-complete slots for 화목토 and 월수금', () => {
+    const api = svc();
+    const tue = api.createClass({ class_name: '화목토반', weekday: '화/목/토' });
+    const mon = api.createClass({ class_name: '월수금반', weekday: '월/수/금' });
+    api.createStudent({ name: '화목토학생', class_id: tue.class_id });
+    api.createStudent({ name: '월수금학생', class_id: mon.class_id });
+
+    // week of 2026-09-14 (Mon) .. 2026-09-20 (Sun)
+    api.saveSessionHomework({
+      lesson_date: '2026-09-12', class_id: tue.class_id, titles: ['토 숙제']
+    });
+    api.saveSessionHomework({
+      lesson_date: '2026-09-15', class_id: tue.class_id, titles: ['화 숙제']
+    });
+    api.saveSessionHomework({
+      lesson_date: '2026-09-17', class_id: tue.class_id, titles: ['목 숙제']
+    });
+    api.saveSessionHomework({
+      lesson_date: '2026-09-11', class_id: mon.class_id, titles: ['금 숙제']
+    });
+    api.saveSessionHomework({
+      lesson_date: '2026-09-14', class_id: mon.class_id, titles: ['월 숙제']
+    });
+    api.saveSessionHomework({
+      lesson_date: '2026-09-16', class_id: mon.class_id, titles: ['수 숙제']
+    });
+
+    const dash = api.getWeeklyHomeworkDashboard('2026-09-16');
+    assert.equal(dash.week_start, '2026-09-14');
+    assert.equal(dash.week_end, '2026-09-20');
+    const byName = Object.fromEntries(dash.classes.map((c) => [c.class_name, c]));
+    assert.deepEqual(byName['화목토반'].slots.map((s) => s.assigned_date), [
+      '2026-09-12', '2026-09-15', '2026-09-17'
+    ]);
+    assert.deepEqual(byName['화목토반'].slots.map((s) => s.check_date), [
+      '2026-09-15', '2026-09-17', '2026-09-19'
+    ]);
+    assert.deepEqual(byName['월수금반'].slots.map((s) => s.assigned_date), [
+      '2026-09-11', '2026-09-14', '2026-09-16'
+    ]);
+    assert.equal(byName['화목토반'].slots[0].items[0].title, '토 숙제');
+    assert.ok(api.getDashboard('2026-09-16').weekly_homework);
+  });
+
+  it('materializes legacy homework text into checklist items', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반', weekday: '월/수' });
+    const s = api.createStudent({ name: '레거시', class_id: c.class_id });
+    api.saveLesson({
+      lesson_date: '2026-09-09',
+      student_id: s.student_id,
+      class_id: c.class_id,
+      attendance: '출석',
+      test_status: '미실시',
+      homework: '프린트 1\n프린트 2'
+    });
+    const prior = api.getTodayClassSession('2026-09-14', c.class_id).prior_homework;
+    assert.equal(prior.assigned_date, '2026-09-09');
+    assert.equal(prior.from_legacy, true);
+    assert.equal(prior.items.length, 2);
+    const checked = api.saveHomeworkChecks({
+      lesson_date: '2026-09-09',
+      class_id: c.class_id,
+      check_date: '2026-09-14',
+      checks: [
+        { student_id: s.student_id, index: 0, status: '완료' },
+        { student_id: s.student_id, index: 1, status: '완료' }
+      ]
+    });
+    assert.equal(checked.items.length, 2);
+    assert.match(checked.items[0].item_id, /^HWI_/);
+    assert.equal(checked.grades[0].assignment_completion, 'A');
+  });
+
+  it('preserves homework item ids and checks when re-saving the same titles', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '보존반', weekday: '화/목/토' });
+    const s = api.createStudent({ name: '체크학생', class_id: c.class_id });
+    const assigned = '2026-09-12';
+    const first = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      titles: ['워크북', '오답노트']
+    });
+    const id0 = first.items[0].item_id;
+    const id1 = first.items[1].item_id;
+    api.saveHomeworkChecks({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      check_date: '2026-09-15',
+      checks: [
+        { student_id: s.student_id, item_id: id0, status: '완료' },
+        { student_id: s.student_id, item_id: id1, status: '미완료' }
+      ]
+    });
+
+    const again = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      titles: ['워크북', '오답노트']
+    });
+    assert.equal(again.items[0].item_id, id0);
+    assert.equal(again.items[1].item_id, id1);
+
+    const renamed = api.saveSessionHomework({
+      lesson_date: assigned,
+      class_id: c.class_id,
+      items: [
+        { item_id: id0, title: '워크북 개정' },
+        { item_id: id1, title: '오답노트' }
+      ]
+    });
+    assert.equal(renamed.items[0].item_id, id0);
+    assert.equal(renamed.items[0].title, '워크북 개정');
+
+    const session = api.getSessionHomework(assigned, c.class_id);
+    const check = session.checks.find((row) =>
+      row.item_id === id0 && row.student_id === s.student_id
+    );
+    assert.ok(check);
+    assert.equal(check.status, '완료');
   });
 });

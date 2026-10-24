@@ -678,7 +678,7 @@
               stat('반 평균', avg.test_average_display) +
               stat('중간값', avg.test_median_display) +
               stat('최고/최저', avg.test_high_display + ' / ' + avg.test_low_display) +
-              '</div><p class="muted" style="margin:10px 0 0">실시한 테스트만 100점 환산합니다. 실시한 학생 보고서에 반 통계 한 줄이 포함됩니다.</p></div>'
+              '</div><p class="muted" style="margin:10px 0 0">만점이 같은 실시 테스트의 원점수 통계입니다. 실시한 학생 보고서에 반 통계 한 줄이 포함됩니다.</p></div>'
             : '<div class="card"><p class="muted" style="margin:0">이날 실시된 테스트가 없어 반 통계는 표시하지 않습니다.</p></div>';
           document.getElementById('daily-list').innerHTML = summary + rows.map(function (r, i) {
             return '<div class="card report-card"><div class="toolbar"><h3 style="margin:0">' + esc(r.student_name) + '</h3>' +

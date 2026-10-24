@@ -598,6 +598,451 @@ LMS.createService = function (store) {
     });
   }
 
+  function listHomeworkItemRows_(date, classId) {
+    return table('HomeworkItems').filter(function (row) {
+      return LMS.toStr(row.lesson_date) === LMS.toStr(date) &&
+        LMS.toStr(row.class_id) === LMS.toStr(classId);
+    }).sort(function (a, b) {
+      var so = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+      if (so) return so;
+      return LMS.toStr(a.item_id).localeCompare(LMS.toStr(b.item_id));
+    });
+  }
+
+  function legacyHomeworkItems_(date, classId) {
+    var lessons = getLessons(date, classId);
+    var text = '';
+    for (var i = 0; i < lessons.length; i++) {
+      if (LMS.toStr(lessons[i].homework)) {
+        text = LMS.toStr(lessons[i].homework);
+        break;
+      }
+    }
+    if (!text) {
+      var cls = LMS.findById(table('Classes'), 'class_id', classId);
+      if (cls) text = LMS.toStr(cls.class_homework);
+    }
+    return LMS.splitHomeworkLines(text).map(function (title, idx) {
+      return {
+        item_id: '',
+        lesson_date: LMS.toStr(date),
+        class_id: LMS.toStr(classId),
+        title: title,
+        sort_order: idx,
+        legacy: true
+      };
+    });
+  }
+
+  function getSessionHomework(date, classId) {
+    requireClass(classId);
+    if (!LMS.isIsoDate(LMS.toStr(date))) {
+      throw new Error('수업 날짜가 올바르지 않습니다.');
+    }
+    var items = listHomeworkItemRows_(date, classId);
+    var fromLegacy = false;
+    if (!items.length) {
+      items = legacyHomeworkItems_(date, classId);
+      fromLegacy = !!items.length;
+    }
+    var checks = table('HomeworkChecks');
+    var checkByKey = {};
+    checks.forEach(function (c) {
+      checkByKey[LMS.toStr(c.item_id) + '|' + LMS.toStr(c.student_id)] = c;
+    });
+    var itemIds = items.map(function (it) { return it.item_id; }).filter(Boolean);
+    var enrichedItems = items.map(function (it) {
+      return {
+        item_id: it.item_id,
+        lesson_date: it.lesson_date,
+        class_id: it.class_id,
+        title: it.title,
+        sort_order: it.sort_order,
+        legacy: !!it.legacy
+      };
+    });
+    return {
+      lesson_date: LMS.toStr(date),
+      class_id: LMS.toStr(classId),
+      items: enrichedItems,
+      from_legacy: fromLegacy,
+      checks: checks.filter(function (c) {
+        return itemIds.indexOf(LMS.toStr(c.item_id)) !== -1;
+      })
+    };
+  }
+
+  function syncLessonHomeworkText_(date, classId, titlesText) {
+    var lessons = table('Lessons');
+    var changed = false;
+    var text = LMS.toStr(titlesText);
+    lessons.forEach(function (row) {
+      if (LMS.toStr(row.lesson_date) !== LMS.toStr(date)) return;
+      if (LMS.toStr(row.class_id) !== LMS.toStr(classId)) return;
+      if (LMS.toStr(row.homework) === text) return;
+      row.homework = text;
+      row.updated_at = now();
+      changed = true;
+    });
+    if (changed) saveTable('Lessons', lessons);
+  }
+
+  function saveSessionHomework(data) {
+    return withLock(function () {
+      data = data || {};
+      var date = LMS.toStr(data.lesson_date || data.date);
+      var classId = LMS.toStr(data.class_id);
+      requireClass(classId);
+      if (!LMS.isIsoDate(date)) throw new Error('수업 날짜가 올바르지 않습니다.');
+      var incoming = [];
+      if (Array.isArray(data.items)) {
+        data.items.forEach(function (it) {
+          if (typeof it === 'string') {
+            var s = LMS.toStr(it);
+            if (s) incoming.push({ title: s, item_id: '' });
+            return;
+          }
+          var t = LMS.toStr(it && it.title);
+          if (!t) return;
+          incoming.push({ title: t, item_id: LMS.toStr(it && it.item_id) });
+        });
+      } else if (Array.isArray(data.titles)) {
+        data.titles.forEach(function (t) {
+          var s = LMS.toStr(t);
+          if (s) incoming.push({ title: s, item_id: '' });
+        });
+      }
+
+      var rows = table('HomeworkItems');
+      var others = rows.filter(function (row) {
+        return !(LMS.toStr(row.lesson_date) === date && LMS.toStr(row.class_id) === classId);
+      });
+      var existing = rows.filter(function (row) {
+        return LMS.toStr(row.lesson_date) === date && LMS.toStr(row.class_id) === classId;
+      }).sort(function (a, b) {
+        var so = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+        if (so) return so;
+        return LMS.toStr(a.item_id).localeCompare(LMS.toStr(b.item_id));
+      });
+      var byId = {};
+      existing.forEach(function (row) { byId[LMS.toStr(row.item_id)] = row; });
+      var unused = existing.slice();
+      var planned = [];
+      var createCount = 0;
+
+      function takeUnused(pred) {
+        for (var i = 0; i < unused.length; i++) {
+          if (pred(unused[i], i)) {
+            return unused.splice(i, 1)[0];
+          }
+        }
+        return null;
+      }
+
+      incoming.forEach(function (inc) {
+        var match = null;
+        if (inc.item_id && byId[inc.item_id]) {
+          match = takeUnused(function (row) {
+            return LMS.toStr(row.item_id) === inc.item_id;
+          });
+        }
+        if (!match) {
+          match = takeUnused(function (row) {
+            return LMS.toStr(row.title) === inc.title;
+          });
+        }
+        if (!match && unused.length) {
+          // Rename in place so checks stay attached when slots are edited.
+          match = unused.shift();
+        }
+        if (match) {
+          planned.push({
+            item_id: match.item_id,
+            title: inc.title,
+            created_at: match.created_at,
+            isNew: false
+          });
+        } else {
+          createCount += 1;
+          planned.push({
+            item_id: '',
+            title: inc.title,
+            created_at: '',
+            isNew: true
+          });
+        }
+      });
+
+      var removedIds = unused.map(function (row) { return LMS.toStr(row.item_id); });
+      if (removedIds.length) {
+        var checks = table('HomeworkChecks').filter(function (c) {
+          return removedIds.indexOf(LMS.toStr(c.item_id)) === -1;
+        });
+        saveTable('HomeworkChecks', checks);
+      }
+
+      var ts = now();
+      var newIds = createCount ? nextIds('HWI', createCount) : [];
+      var idPos = 0;
+      var saved = planned.map(function (plan, idx) {
+        var itemId = plan.isNew ? newIds[idPos++] : plan.item_id;
+        return {
+          item_id: itemId,
+          lesson_date: date,
+          class_id: classId,
+          title: plan.title,
+          sort_order: idx,
+          created_at: plan.isNew ? ts : (plan.created_at || ts),
+          updated_at: ts
+        };
+      });
+      saveTable('HomeworkItems', others.concat(saved));
+      syncLessonHomeworkText_(date, classId, LMS.joinHomeworkTitles(saved));
+      return getSessionHomework(date, classId);
+    });
+  }
+
+  function homeworkCompletionForStudent_(items, checks, studentId) {
+    var itemIds = (items || []).map(function (it) { return LMS.toStr(it.item_id); }).filter(Boolean);
+    if (!itemIds.length) return { done: 0, total: 0, grade: '' };
+    var done = 0;
+    itemIds.forEach(function (itemId) {
+      var hit = (checks || []).some(function (c) {
+        return LMS.toStr(c.item_id) === itemId &&
+          LMS.toStr(c.student_id) === LMS.toStr(studentId) &&
+          LMS.toStr(c.status) === '완료';
+      });
+      if (hit) done += 1;
+    });
+    return {
+      done: done,
+      total: itemIds.length,
+      grade: LMS.assignmentGradeFromChecks(done, itemIds.length)
+    };
+  }
+
+  function saveHomeworkChecks(data) {
+    return withLock(function () {
+      data = data || {};
+      var date = LMS.toStr(data.lesson_date || data.assigned_date || data.date);
+      var classId = LMS.toStr(data.class_id);
+      var checkDate = LMS.toStr(data.check_date) || store.today();
+      requireClass(classId);
+      if (!LMS.isIsoDate(date)) throw new Error('숙제 배정일 형식이 올바르지 않습니다.');
+      if (checkDate && !LMS.isIsoDate(checkDate)) {
+        throw new Error('확인일 형식이 올바르지 않습니다.');
+      }
+      var session = getSessionHomework(date, classId);
+      var items = session.items;
+      if (session.from_legacy && items.length) {
+        session = saveSessionHomework({
+          lesson_date: date,
+          class_id: classId,
+          items: items.map(function (it) { return { title: it.title }; })
+        });
+        items = session.items;
+      }
+      if (!items.length) throw new Error('확인할 숙제 항목이 없습니다.');
+      var itemById = {};
+      items.forEach(function (it) { itemById[LMS.toStr(it.item_id)] = it; });
+      var incoming = Array.isArray(data.checks) ? data.checks : [];
+      var rows = table('HomeworkChecks');
+      var ts = now();
+      var byKey = {};
+      rows.forEach(function (row, idx) {
+        byKey[LMS.toStr(row.item_id) + '|' + LMS.toStr(row.student_id)] = idx;
+      });
+      var studentIds = {};
+      incoming.forEach(function (c) {
+        var itemId = LMS.toStr(c.item_id);
+        if (!itemId && c.index !== undefined && c.index !== null && items[Number(c.index)]) {
+          itemId = LMS.toStr(items[Number(c.index)].item_id);
+        }
+        if (!itemId && c.title) {
+          var byTitle = items.filter(function (it) {
+            return LMS.toStr(it.title) === LMS.toStr(c.title);
+          })[0];
+          if (byTitle) itemId = LMS.toStr(byTitle.item_id);
+        }
+        var studentId = LMS.toStr(c.student_id);
+        if (!itemById[itemId]) throw new Error('숙제 항목을 찾을 수 없습니다.');
+        requireStudent(studentId);
+        var status = LMS.toStr(c.status) || '미완료';
+        LMS.assertEnum(status, LMS.HOMEWORK_CHECK_STATUS, '숙제 완료 여부');
+        studentIds[studentId] = true;
+        var key = itemId + '|' + studentId;
+        if (Object.prototype.hasOwnProperty.call(byKey, key)) {
+          var existing = rows[byKey[key]];
+          existing.status = status;
+          existing.updated_at = ts;
+        } else {
+          var created = {
+            check_id: nextIds('HWC', 1)[0],
+            item_id: itemId,
+            student_id: studentId,
+            status: status,
+            created_at: ts,
+            updated_at: ts
+          };
+          byKey[key] = rows.length;
+          rows.push(created);
+        }
+      });
+      saveTable('HomeworkChecks', rows);
+
+      var checksForItems = rows.filter(function (c) {
+        return !!itemById[LMS.toStr(c.item_id)];
+      });
+      var grades = [];
+      var lessonUpserts = [];
+      Object.keys(studentIds).forEach(function (studentId) {
+        var comp = homeworkCompletionForStudent_(items, checksForItems, studentId);
+        grades.push({
+          student_id: studentId,
+          done: comp.done,
+          total: comp.total,
+          assignment_completion: comp.grade
+        });
+        if (!comp.grade) return;
+        lessonUpserts.push({
+          lesson_date: checkDate,
+          class_id: classId,
+          student_id: studentId,
+          attendance: '출석',
+          test_status: '미실시',
+          assignment_completion: comp.grade
+        });
+      });
+      if (lessonUpserts.length) {
+        var lessonRows = table('Lessons');
+        var index = {};
+        lessonRows.forEach(function (row, i) {
+          index[LMS.lessonKey(row.lesson_date, row.student_id, row.class_id)] = i;
+        });
+        var insertCount = 0;
+        lessonUpserts.forEach(function (row) {
+          var key = LMS.lessonKey(row.lesson_date, row.student_id, row.class_id);
+          if (index[key] === undefined) insertCount += 1;
+        });
+        var newIds = insertCount ? nextIds('LES', insertCount) : [];
+        var idPos = 0;
+        lessonUpserts.forEach(function (row) {
+          var key = LMS.lessonKey(row.lesson_date, row.student_id, row.class_id);
+          if (index[key] !== undefined) {
+            var prev = lessonRows[index[key]];
+            prev.assignment_completion = row.assignment_completion;
+            prev.updated_at = ts;
+          } else {
+            lessonRows.push({
+              lesson_id: newIds[idPos++],
+              lesson_date: row.lesson_date,
+              student_id: row.student_id,
+              class_id: row.class_id,
+              attendance: row.attendance,
+              test_status: row.test_status,
+              test_score: '',
+              test_max_score: '',
+              test_difficulty: '',
+              assignment_completion: row.assignment_completion,
+              concentration: '',
+              progress: '',
+              homework: '',
+              special_note: '',
+              created_at: ts,
+              updated_at: ts
+            });
+          }
+        });
+        saveTable('Lessons', lessonRows);
+      }
+
+      return {
+        assigned_date: date,
+        check_date: checkDate,
+        class_id: classId,
+        items: items,
+        checks: checksForItems,
+        grades: grades
+      };
+    });
+  }
+
+  function buildHomeworkSlot_(classId, className, checkDate, assignedDate, rosterIds) {
+    var session = assignedDate ? getSessionHomework(assignedDate, classId) : { items: [], checks: [] };
+    var items = session.items || [];
+    var checks = session.checks || [];
+    var itemCount = items.filter(function (it) { return it.item_id || it.title; }).length;
+    var doneCells = 0;
+    var totalCells = itemCount * (rosterIds || []).length;
+    var studentsIncomplete = 0;
+    (rosterIds || []).forEach(function (studentId) {
+      var comp = homeworkCompletionForStudent_(items.filter(function (it) { return it.item_id; }), checks, studentId);
+      if (!items.some(function (it) { return it.item_id; }) && itemCount) {
+        // legacy titles without ids: treat as incomplete until materialized
+        studentsIncomplete += 1;
+        return;
+      }
+      doneCells += comp.done;
+      if (comp.total && comp.done < comp.total) studentsIncomplete += 1;
+      if (!comp.total && itemCount) studentsIncomplete += 1;
+    });
+    return {
+      check_date: checkDate,
+      assigned_date: assignedDate || '',
+      items: items.map(function (it) {
+        return { item_id: it.item_id, title: it.title, sort_order: it.sort_order };
+      }),
+      completion: {
+        done: doneCells,
+        total: totalCells,
+        students_incomplete: studentsIncomplete,
+        item_count: itemCount,
+        student_count: (rosterIds || []).length
+      }
+    };
+  }
+
+  function getWeeklyHomeworkDashboard(anchorDate) {
+    anchorDate = anchorDate || store.today();
+    if (!LMS.isIsoDate(anchorDate)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var week = LMS.weekRange(anchorDate);
+    var classes = table('Classes').filter(function (c) {
+      return LMS.toStr(c.status) === '운영';
+    }).sort(function (a, b) {
+      return LMS.toStr(a.class_name).localeCompare(LMS.toStr(b.class_name), 'ko');
+    });
+    var result = classes.map(function (cls) {
+      var roster = getClassRoster(cls.class_id).filter(function (s) {
+        return LMS.toStr(s.status) === '재원';
+      });
+      var rosterIds = roster.map(function (s) { return s.student_id; });
+      var meetingDates = LMS.classMeetingDatesInRange(cls.weekday, week.start, week.end);
+      var slots = meetingDates.map(function (checkDate) {
+        var assigned = LMS.previousClassMeetingDate(cls.weekday, checkDate);
+        return buildHomeworkSlot_(cls.class_id, cls.class_name, checkDate, assigned, rosterIds);
+      });
+      var incompleteSlots = slots.filter(function (s) {
+        return s.completion.item_count > 0 && s.completion.students_incomplete > 0;
+      }).length;
+      return {
+        class_id: cls.class_id,
+        class_name: cls.class_name,
+        weekday: cls.weekday,
+        slots: slots,
+        incomplete_slot_count: incompleteSlots
+      };
+    }).filter(function (row) {
+      return row.slots.length > 0;
+    });
+    return {
+      anchor_date: anchorDate,
+      week_start: week.start,
+      week_end: week.end,
+      week_label: LMS.formatKoreanDate(week.start) + ' ~ ' + LMS.formatKoreanDate(week.end),
+      classes: result
+    };
+  }
+
   function getTodayClassSession(date, classId) {
     var cls = requireClass(classId);
     var students = getClassRoster(classId).filter(function (s) {
@@ -606,11 +1051,40 @@ LMS.createService = function (store) {
     var lessons = getLessons(date, classId);
     var byStudent = {};
     lessons.forEach(function (l) { byStudent[l.student_id] = l; });
+    var priorDate = LMS.previousClassMeetingDate(cls.weekday, date);
+    var priorHomework = priorDate ? getSessionHomework(priorDate, classId) : null;
+    var todayHomework = getSessionHomework(date, classId);
+    var priorChecksByStudent = {};
+    if (priorHomework) {
+      students.forEach(function (s) {
+        var map = {};
+        (priorHomework.items || []).forEach(function (it) {
+          if (!it.item_id) return;
+          var hit = (priorHomework.checks || []).filter(function (c) {
+            return LMS.toStr(c.item_id) === LMS.toStr(it.item_id) &&
+              LMS.toStr(c.student_id) === LMS.toStr(s.student_id);
+          })[0];
+          map[it.item_id] = hit ? hit.status : '미완료';
+        });
+        priorChecksByStudent[s.student_id] = map;
+      });
+    }
     return {
       class: cls,
       date: date,
       class_notice: getClassSessionNotice(date, classId),
       daily_plan: getClassPlan(classId, '일간', date),
+      prior_homework: priorHomework ? {
+        assigned_date: priorDate,
+        items: priorHomework.items,
+        from_legacy: priorHomework.from_legacy,
+        checks_by_student: priorChecksByStudent
+      } : null,
+      today_homework: {
+        lesson_date: date,
+        items: todayHomework.items,
+        from_legacy: todayHomework.from_legacy
+      },
       students: students.map(function (s) {
         return Object.assign({}, s, { lesson: byStudent[s.student_id] || null });
       }),
@@ -1343,10 +1817,12 @@ LMS.createService = function (store) {
     }
 
     (teaching.regular_classes || []).forEach(function (cls) {
-      var snap = getLastLessonSnapshot(cls.class_id, date);
-      var homework = LMS.toStr(snap && snap.homework);
-      if (!homework) return;
-      var preview = homework.split(/\n+/)[0].trim();
+      var classRow = LMS.findById(classes, 'class_id', cls.class_id) || cls;
+      var assignedDate = LMS.previousClassMeetingDate(classRow.weekday, date);
+      if (!assignedDate) return;
+      var hw = getSessionHomework(assignedDate, cls.class_id);
+      if (!(hw.items || []).length) return;
+      var preview = LMS.toStr(hw.items[0].title);
       if (preview.length > 40) preview = preview.slice(0, 40) + '…';
       items.push({
         id: 'auto:hw:' + cls.class_id,
@@ -1358,7 +1834,8 @@ LMS.createService = function (store) {
         class_id: cls.class_id,
         class_name: cls.class_name || '',
         homework_preview: preview,
-        prior_lesson_date: snap.lesson_date || '',
+        prior_lesson_date: assignedDate,
+        item_count: hw.items.length,
         action: 'check_homework'
       });
     });
@@ -1561,7 +2038,8 @@ LMS.createService = function (store) {
       classes: classes,
       teaching_tasks: getTodayTeachingTasks(date),
       learning_alerts: getLearningAlerts(8),
-      agenda: getDayAgenda(date)
+      agenda: getDayAgenda(date),
+      weekly_homework: getWeeklyHomeworkDashboard(date)
     };
   }
 
@@ -1681,6 +2159,10 @@ LMS.createService = function (store) {
     getClassPlans: getClassPlans,
     saveClassPlan: saveClassPlan,
     deleteClassPlan: deleteClassPlan,
+    getSessionHomework: getSessionHomework,
+    saveSessionHomework: saveSessionHomework,
+    saveHomeworkChecks: saveHomeworkChecks,
+    getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard,
     listCounselingNotes: listCounselingNotes,
     listMonthlyReportStatuses: listMonthlyReportStatuses,
     getLastLessonSnapshot: getLastLessonSnapshot,
