@@ -319,3 +319,4 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 @media (max-width: 640px) {
   .plan-vs { grid-template-columns: 1fr; }
 }
+.notice-bar a { color: inherit; font-weight: 700; }

@@ -115,6 +115,17 @@ function seedRich(api, today) {
     });
   });
 
+  [
+    ['한빛중학교', '중2', 16, '개념원리 중2-2', '1단원 삼각형의 성질 ~ 2단원 사각형의 성질'],
+    ['푸른중학교', '중2', 20, '교과서(천재)', '교과서 p.10~78, 익힘책 전체'],
+    ['새솔중학교', '중2', 23, '', '삼각형의 성질 ~ 닮음의 활용'],
+    ['한빛중학교', '중3', 12, '블랙라벨 중3', '이차방정식 ~ 이차함수 그래프'],
+    ['새솔중학교', '중3', 34, '', '이차함수 ~ 삼각비 1절']
+  ].forEach(([school, grade, offset, textbook, scope]) => api.saveSchoolExam({
+    school_year: today.slice(0, 4), semester: '2', exam_type: '기말', school, grade,
+    exam_date: LMS.addDays(today, offset), textbook, scope
+  }));
+
   api.saveCounselingNote({
     student_id: students[2].student_id, kind: '학부모', counsel_date: LMS.addDays(today, -6),
     title: '숙제 이행 관련 통화', content: '최근 과제 이행률이 낮아 가정에서 확인하시기로 함.'

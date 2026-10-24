@@ -20,7 +20,8 @@ LMS.PREFIX = {
   homeworkItem: 'HWI',
   homeworkCheck: 'HWC',
   session: 'SES',
-  examPeriod: 'EXP'
+  examPeriod: 'EXP',
+  schoolExam: 'SCX'
 };
 
 LMS.TABLES = {
@@ -55,6 +56,10 @@ LMS.TABLES = {
   ExamPeriods: [
     'exam_period_id', 'title', 'start_date', 'end_date', 'suspended_class_ids',
     'memo', 'status', 'created_at', 'updated_at'
+  ],
+  SchoolExams: [
+    'school_exam_id', 'school_year', 'semester', 'exam_type', 'title', 'school', 'school_key',
+    'grade', 'exam_date', 'textbook', 'scope', 'memo', 'created_at', 'updated_at'
   ],
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
@@ -102,6 +107,7 @@ LMS.REL_STATUS = ['현재', '종료', '임시'];
 LMS.CLASS_TYPES = ['정규', '시험대비'];
 LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
 LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
+LMS.SCHOOL_EXAM_TYPES = ['중간', '기말', '기타'];
 LMS.SCHEMA_VERSION = 2;
 LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
@@ -132,7 +138,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -1224,6 +1230,50 @@ LMS.validateClassSessionInput = function (data) {
   return out;
 };
 
+LMS.validateSchoolExamInput = function (data) {
+  data = data || {};
+  var school = LMS.toStr(data.school).replace(/\s+/g, ' ');
+  if (!school) throw new Error('학교를 입력해 주세요.');
+  var grade = LMS.toStr(data.grade);
+  if (!grade) throw new Error('학년을 선택해 주세요.');
+  var year = LMS.toStr(data.school_year);
+  if (!/^\d{4}$/.test(year)) throw new Error('학년도를 4자리 숫자로 입력해 주세요.');
+  var semester = LMS.toStr(data.semester);
+  if (['1', '2'].indexOf(semester) === -1) throw new Error('학기는 1 또는 2여야 합니다.');
+  var type = LMS.assertEnum(data.exam_type, LMS.SCHOOL_EXAM_TYPES, '시험 종류');
+  var title = LMS.toStr(data.title);
+  if (type === '기타' && !title) throw new Error('기타 시험은 시험 이름을 입력해 주세요.');
+  var date = LMS.toStr(data.exam_date);
+  if (date && !LMS.isIsoDate(date)) throw new Error('시험일 형식이 올바르지 않습니다.');
+  return {
+    school_exam_id: LMS.toStr(data.school_exam_id),
+    school_year: year,
+    semester: semester,
+    exam_type: type,
+    title: type === '기타' ? title : '',
+    school: school,
+    school_key: LMS.schoolGroupKey(school, grade),
+    grade: grade,
+    exam_date: date,
+    textbook: LMS.toStr(data.textbook),
+    scope: LMS.toStr(data.scope),
+    memo: LMS.toStr(data.memo)
+  };
+};
+
+/** Identity of a school exam: same year/semester/type/school+grade (and title for 기타). */
+LMS.schoolExamKey = function (row) {
+  return [row.school_year, row.semester, row.exam_type, row.school_key,
+    LMS.toStr(row.exam_type) === '기타' ? LMS.toStr(row.title) : ''].join('|');
+};
+
+LMS.daysBetween = function (fromIso, toIso) {
+  var a = LMS.toStr(fromIso).split('-').map(Number);
+  var b = LMS.toStr(toIso).split('-').map(Number);
+  if (a.length !== 3 || b.length !== 3) return null;
+  return Math.round((Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2])) / 86400000);
+};
+
 LMS.validateCounselingNoteInput = function (data, isUpdate) {
   data = data || {};
   if (isUpdate && LMS.isBlank(data.note_id)) {
@@ -1462,6 +1512,7 @@ LMS.TABLE_PK = {
   ClassSessionNotices: 'id',
   ClassSessions: 'session_id',
   ExamPeriods: 'exam_period_id',
+  SchoolExams: 'school_exam_id',
   MonthlyReports: 'monthly_report_id',
   CounselingNotes: 'note_id',
   MakeupSessions: 'makeup_id',

@@ -18,6 +18,7 @@ const NAV = [
   { href: '/today', label: '오늘', icon: '◷' },
   { href: '/students', label: '학생', icon: '◉' },
   { href: '/classes', label: '반', icon: '▦' },
+  { href: '/exams', label: '시험', icon: '✓' },
   { href: '/reports', label: '보고서', icon: '✎' },
   { href: '/settings', label: '설정', icon: '⚙' }
 ];

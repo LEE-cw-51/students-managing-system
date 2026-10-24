@@ -11,6 +11,7 @@ import { useBoot } from '@/components/shell/AppShell';
 import SessionEditor from './SessionEditor';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import { dDayLabel } from '@/lib/term';
 
 function ExamNotice({ exam }) {
   if (!exam || !exam.period) return null;
@@ -36,6 +37,7 @@ export function OverviewTab({ data }) {
         <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
         <Kpi label="테스트 평균" value={month.test_average_display} note="이번 달 · 만점 같은 테스트만" />
       </div>
+      {data.exams && data.exams.length ? <UpcomingExams exams={data.exams} /> : null}
       <div className="cols-2">
         <section className="card">
           <div className="card-head">
@@ -84,6 +86,32 @@ export function OverviewTab({ data }) {
         ) : <EmptyState title="배정된 학생이 없습니다">학생 탭에서 학생을 배정하세요.</EmptyState>}
       </section>
     </div>
+  );
+}
+
+function UpcomingExams({ exams }) {
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>다가오는 학교 시험</h2>
+        <Link className="link-btn" href="/exams">시험 일정 전체</Link>
+      </div>
+      <div className="table-wrap">
+        <table className="data-table stack-mobile">
+          <thead><tr><th>학교 · 학년</th><th>수학 시험일</th><th>범위</th><th>이 반 학생</th></tr></thead>
+          <tbody>
+            {exams.map((x) => (
+              <tr key={x.school_exam_id}>
+                <td className="primary"><strong>{x.school}</strong> <span className="muted">{x.grade} · {x.label}</span></td>
+                <td data-label="시험일">{shortDate(x.exam_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{dDayLabel(x.d_day)}</span></td>
+                <td data-label="범위" className="prewrap">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">미입력</span>}</td>
+                <td data-label="학생">{x.students.map((s) => s.name).join(', ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

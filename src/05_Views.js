@@ -167,6 +167,7 @@ LMS.createViews = function (ctx) {
 
     var week = LMS.weekRange(today);
     return {
+      exams: upcomingExamsFor(roster, 60),
       class: cls,
       today: today,
       roster: roster.map(function (s) {
@@ -451,7 +452,109 @@ LMS.createViews = function (ctx) {
     };
   }
 
+  // ----- School exams -----
+
+  function activeStudents_() {
+    return table('Students').filter(function (s) { return LMS.toStr(s.status) === '재원'; });
+  }
+
+  function currentClassNames_(studentId, today) {
+    var classes = table('Classes');
+    return table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.student_id) === LMS.toStr(studentId) && LMS.relActiveOn(r, today);
+    }).map(function (r) {
+      var c = LMS.findById(classes, 'class_id', r.class_id);
+      return c ? c.class_name : '';
+    }).filter(Boolean);
+  }
+
+  function examLabel(row) {
+    if (LMS.toStr(row.exam_type) === '기타') return LMS.toStr(row.title) || '기타 시험';
+    return row.semester + '학기 ' + row.exam_type + '고사';
+  }
+
+  function decorateExam(row, today, students) {
+    var matched = students.filter(function (s) {
+      return LMS.schoolGroupKey(s.school, s.grade) === LMS.toStr(row.school_key);
+    });
+    return Object.assign({}, row, {
+      label: examLabel(row),
+      d_day: row.exam_date ? LMS.daysBetween(today, row.exam_date) : null,
+      student_count: matched.length,
+      students: matched.map(function (s) {
+        return { student_id: s.student_id, name: s.name, classes: currentClassNames_(s.student_id, today) };
+      }).sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); })
+    });
+  }
+
+  /** School exams for a year/semester (optionally one type), with matched enrolled students. */
+  function getSchoolExams(filter) {
+    filter = filter || {};
+    var today = store.today();
+    var students = activeStudents_();
+    return table('SchoolExams').filter(function (r) {
+      if (filter.school_year && LMS.toStr(r.school_year) !== LMS.toStr(filter.school_year)) return false;
+      if (filter.semester && LMS.toStr(r.semester) !== LMS.toStr(filter.semester)) return false;
+      if (filter.exam_type && LMS.toStr(r.exam_type) !== LMS.toStr(filter.exam_type)) return false;
+      return true;
+    }).map(function (r) { return decorateExam(r, today, students); }).sort(function (a, b) {
+      var g = LMS.GRADE_OPTIONS.indexOf(a.grade) - LMS.GRADE_OPTIONS.indexOf(b.grade);
+      if (g) return g;
+      return LMS.toStr(a.school).localeCompare(LMS.toStr(b.school), 'ko');
+    });
+  }
+
+  /** Distinct schools of enrolled students (normalized), per grade, for pickers and bulk rows. */
+  function getSchoolOptions() {
+    var groups = {};
+    var missing = [];
+    activeStudents_().forEach(function (s) {
+      var key = LMS.schoolGroupKey(s.school, s.grade);
+      if (!key) {
+        missing.push({ student_id: s.student_id, name: s.name, grade: s.grade });
+        return;
+      }
+      if (!groups[key]) groups[key] = { school_key: key, grade: LMS.toStr(s.grade), spellings: {}, count: 0 };
+      var spelling = LMS.toStr(s.school).trim();
+      groups[key].spellings[spelling] = (groups[key].spellings[spelling] || 0) + 1;
+      groups[key].count += 1;
+    });
+    var list = Object.keys(groups).map(function (k) {
+      var g = groups[k];
+      // Most common spelling, preferring the longer form ("○○중학교") on ties.
+      var school = Object.keys(g.spellings).sort(function (a, b) {
+        return g.spellings[b] - g.spellings[a] || b.length - a.length;
+      })[0];
+      return { school_key: k, school: school, grade: g.grade, student_count: g.count };
+    }).sort(function (a, b) {
+      var gd = LMS.GRADE_OPTIONS.indexOf(a.grade) - LMS.GRADE_OPTIONS.indexOf(b.grade);
+      return gd || a.school.localeCompare(b.school, 'ko');
+    });
+    var schools = {};
+    list.forEach(function (g) { schools[g.school] = true; });
+    return { groups: list, schools: Object.keys(schools).sort(function (a, b) { return a.localeCompare(b, 'ko'); }), missing_school: missing };
+  }
+
+  /** Upcoming (today..+days) exams for the given students' schools, soonest first. */
+  function upcomingExamsFor(studentRows, days) {
+    var today = store.today();
+    var until = LMS.addDays(today, days || 45);
+    var keys = {};
+    studentRows.forEach(function (s) {
+      var k = LMS.schoolGroupKey(s.school, s.grade);
+      if (k) keys[k] = true;
+    });
+    var students = studentRows;
+    return table('SchoolExams').filter(function (r) {
+      return keys[LMS.toStr(r.school_key)] && r.exam_date && LMS.inRange(r.exam_date, today, until);
+    }).map(function (r) { return decorateExam(r, today, students); }).sort(function (a, b) {
+      return LMS.toStr(a.exam_date).localeCompare(LMS.toStr(b.exam_date));
+    });
+  }
+
   return {
+    getSchoolExams: getSchoolExams,
+    getSchoolOptions: getSchoolOptions,
     getClassList: getClassList,
     getClassOverview: getClassOverview,
     getClassProgressLog: getClassProgressLog,
