@@ -4,6 +4,7 @@
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
   LMS = require('./00_Core.js');
+  require('./05_Views.js');
 }
 
 LMS.createService = function (store) {
@@ -2422,7 +2423,19 @@ LMS.createService = function (store) {
     };
   }
 
-  return {
+  var views = LMS.createViews ? LMS.createViews({
+    table: table,
+    store: store,
+    requireClass: requireClass,
+    requireStudent: requireStudent,
+    rosterOn: rosterOn,
+    examPeriods: examPeriods_,
+    getClassSession: getClassSession,
+    getClassPlan: getClassPlan,
+    getClassPlans: getClassPlans
+  }) : {};
+
+  return Object.assign({
     getStudents: getStudents,
     getStudent: getStudent,
     createStudent: createStudent,
@@ -2491,7 +2504,7 @@ LMS.createService = function (store) {
     saveClassSession: saveClassSession,
     ensureSchema: ensureSchema,
     getShellBootstrap: getShellBootstrap
-  };
+  }, views);
 };
 
 if (typeof module !== 'undefined' && module.exports) {
