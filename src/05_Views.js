@@ -900,7 +900,96 @@ LMS.createViews = function (ctx) {
     return { monthly: monthly, lessons: lessons };
   }
 
+  // ----- Today board -----
+
+  var BOARD_HIDDEN_AGENDA = { incomplete_class: true, makeup: true, learning_alert: true, homework_check: true };
+
+  /** Everything the today screen shows above the lesson editor, for one date. */
+  function getTodayBoard(date) {
+    var today = store.today();
+    date = LMS.toStr(date) || today;
+    if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var periods = ctx.examPeriods();
+    var teaching = ctx.getTodayTeachingTasks(date);
+    var suspended = table('Classes').filter(function (c) {
+      return LMS.toStr(c.status) === '운영' && LMS.toStr(c.class_type) !== '시험대비' &&
+        LMS.classTimeOn(c, date) && LMS.classSuspensionOn(c, date, periods);
+    }).map(function (c) {
+      var p = LMS.classSuspensionOn(c, date, periods);
+      return { class_id: c.class_id, class_name: c.class_name, period_title: p.title };
+    });
+    var agenda = ctx.getDayAgenda(date);
+    var active = activeStudents_();
+    var flagged = [];
+    if (date === today) {
+      active.forEach(function (s) {
+        var b = badgesFor(s).filter(function (x) { return x.tone !== 'muted'; });
+        if (b.length) flagged.push({ student_id: s.student_id, name: s.name, badges: b });
+      });
+    }
+    var week = LMS.weekRange(date);
+    var makeups = table('MakeupSessions').filter(function (m) {
+      return LMS.toStr(m.status) !== '취소' && LMS.inRange(m.makeup_date, week.start, week.end);
+    });
+    var classes = table('Classes');
+    var weekDays = LMS.datesInRange(week.start, week.end).map(function (d) {
+      return {
+        date: d,
+        weekday: LMS.weekdayName(d),
+        class_count: classes.filter(function (c) { return LMS.classMeetsOnDate(c, d, periods); }).length,
+        makeup_count: makeups.filter(function (m) { return m.makeup_date === d; }).length
+      };
+    });
+    var hw = ctx.getWeeklyHomeworkDashboard(date);
+    return {
+      date: date,
+      today: today,
+      classes: teaching.regular_classes.sort(function (a, b) {
+        return LMS.toStr(a.start_time).localeCompare(LMS.toStr(b.start_time));
+      }),
+      suspended: suspended,
+      makeups: teaching.makeup_sessions,
+      tasks: (agenda.items || []).filter(function (i) { return !BOARD_HIDDEN_AGENDA[i.kind]; }),
+      overdue_tasks: date !== today ? [] : table('Tasks').filter(function (t) {
+        return LMS.toStr(t.status) === '예정' && LMS.toStr(t.due_date) < today;
+      }).sort(function (a, b) { return LMS.toStr(a.due_date).localeCompare(LMS.toStr(b.due_date)); }).map(function (t) {
+        var st = t.student_id ? LMS.findById(table('Students'), 'student_id', t.student_id) : null;
+        return {
+          id: t.task_id, task_id: t.task_id, source: 'manual', kind: t.kind, title: t.title, status: t.status,
+          due_date: t.due_date, memo: t.memo, student_id: t.student_id, student_name: st ? st.name : ''
+        };
+      }),
+      exams_soon: date === today ? upcomingExamsFor(active, 7) : [],
+      flagged: flagged.sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); }),
+      week: weekDays,
+      weekly_homework: {
+        week_label: hw.week_label,
+        classes: hw.classes.map(function (c) {
+          return {
+            class_id: c.class_id,
+            class_name: c.class_name,
+            incomplete_slot_count: c.incomplete_slot_count,
+            slots: c.slots.map(function (sl) {
+              return {
+                check_date: sl.check_date,
+                assigned_date: sl.assigned_date,
+                item_count: sl.completion.item_count,
+                students_incomplete: sl.completion.students_incomplete
+              };
+            })
+          };
+        })
+      }
+    };
+  }
+
+  function studentBadges(student) {
+    return LMS.toStr(student.status) === '재원' ? badgesFor(student) : [];
+  }
+
   return {
+    getTodayBoard: getTodayBoard,
+    studentBadges: studentBadges,
     getStudentList: getStudentList,
     getStudentOverview: getStudentOverview,
     getStudentAttendanceMonth: getStudentAttendanceMonth,

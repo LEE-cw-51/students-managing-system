@@ -1224,12 +1224,24 @@ LMS.createService = function (store) {
 
   function getTodayClassSession(date, classId) {
     var cls = requireClass(classId);
+    var periods = examPeriods_();
     var students = rosterOn(classId, date).filter(function (s) {
       return LMS.toStr(s.status) === '재원';
     });
     var lessons = getLessons(date, classId);
     var byStudent = {};
     lessons.forEach(function (l) { byStudent[l.student_id] = l; });
+    // Keep students who already have a record that day even if no longer on the roster.
+    var allStudents = table('Students');
+    lessons.forEach(function (l) {
+      if (students.some(function (s) { return s.student_id === l.student_id; })) return;
+      var extra = LMS.findById(allStudents, 'student_id', l.student_id);
+      if (extra) students.push(Object.assign({}, extra, { off_roster: true }));
+    });
+    var prevMeeting = LMS.previousMeetingDateFor(cls, date, periods);
+    var lastSession = table('ClassSessions').filter(function (r) {
+      return LMS.toStr(r.class_id) === LMS.toStr(classId) && LMS.toStr(r.lesson_date) < date && LMS.toStr(r.progress);
+    }).sort(function (a, b) { return LMS.toStr(b.lesson_date).localeCompare(LMS.toStr(a.lesson_date)); })[0];
     var priorDate = LMS.previousMeetingDateFor(cls, date, examPeriods_());
     var priorHomework = priorDate ? getSessionHomework(priorDate, classId) : null;
     var todayHomework = getSessionHomework(date, classId);
@@ -1248,10 +1260,16 @@ LMS.createService = function (store) {
         priorChecksByStudent[s.student_id] = map;
       });
     }
+    var suspension = LMS.toStr(cls.class_type) === '시험대비' ? null : LMS.classSuspensionOn(cls, date, periods);
     return {
-      class: cls,
+      class: Object.assign({}, cls, { schedule: LMS.classSchedule(cls), schedule_label: LMS.scheduleLabel(LMS.classSchedule(cls)) }),
       date: date,
       time: LMS.classTimeOn(cls, date),
+      meets: LMS.classMeetsOnDate(cls, date, periods),
+      suspension: suspension ? { title: suspension.title, start_date: suspension.start_date, end_date: suspension.end_date } : null,
+      prev_meeting: prevMeeting,
+      next_meeting: LMS.nextMeetingDateFor(cls, LMS.addDays(date, 1), periods),
+      last_progress: lastSession ? { date: lastSession.lesson_date, progress: lastSession.progress } : null,
       session: getClassSession(date, classId),
       class_notice: getClassSessionNotice(date, classId),
       daily_plan: getClassPlan(classId, '일간', date),
@@ -1259,6 +1277,7 @@ LMS.createService = function (store) {
         assigned_date: priorDate,
         items: priorHomework.items,
         from_legacy: priorHomework.from_legacy,
+        has_checks: (priorHomework.checks || []).length > 0,
         checks_by_student: priorChecksByStudent
       } : null,
       today_homework: {
@@ -1267,11 +1286,81 @@ LMS.createService = function (store) {
         from_legacy: todayHomework.from_legacy
       },
       students: students.map(function (s) {
-        return Object.assign({}, s, { lesson: byStudent[s.student_id] || null });
+        return Object.assign({}, s, {
+          lesson: byStudent[s.student_id] || null,
+          badges: views.studentBadges ? views.studentBadges(s) : []
+        });
       }),
       recorded_count: lessons.length,
       total_count: students.length
     };
+  }
+
+  /**
+   * Save one class lesson from the today screen in a single transaction:
+   * prior homework checks → today's homework → class session → every student row.
+   * Everything is validated before the first write.
+   */
+  function saveTodaySession(payload) {
+    return withLock(function () {
+      var p = payload || {};
+      var date = LMS.toStr(p.lesson_date);
+      var classId = LMS.toStr(p.class_id);
+      if (!LMS.isIsoDate(date)) throw new Error('수업 날짜가 올바르지 않습니다.');
+      requireClass(classId);
+      var sessionInput = LMS.validateClassSessionInput(Object.assign({}, p.session || {}, { lesson_date: date, class_id: classId }));
+      var students = Array.isArray(p.students) ? p.students : [];
+      if (!students.length) throw new Error('저장할 학생이 없습니다.');
+      var existingSession = findClassSessionRow_(date, classId);
+      var maxScore = sessionInput.test_max_score !== undefined ? sessionInput.test_max_score
+        : (existingSession ? existingSession.test_max_score : '');
+      var difficulty = sessionInput.test_difficulty !== undefined ? sessionInput.test_difficulty
+        : (existingSession ? existingSession.test_difficulty : '');
+      var hwTitles = (Array.isArray(p.homework_items) ? p.homework_items : []).map(function (it) {
+        return LMS.toStr(typeof it === 'string' ? it : it && it.title);
+      }).filter(Boolean);
+
+      var buildRow = function (s, grade) {
+        var absent = LMS.toStr(s.attendance) === '결석';
+        var tested = !absent && LMS.toStr(s.test_status) === '실시';
+        if (tested && LMS.isBlank(maxScore)) throw new Error('테스트 만점을 입력해 주세요.');
+        return {
+          lesson_date: date,
+          class_id: classId,
+          student_id: LMS.toStr(s.student_id),
+          attendance: absent ? '결석' : '출석',
+          test_status: tested ? '실시' : '미실시',
+          test_score: tested ? s.test_score : '',
+          test_max_score: tested ? maxScore : '',
+          test_difficulty: tested ? difficulty : '',
+          assignment_completion: LMS.toStr(s.assignment_completion) || grade || '',
+          concentration: absent ? 'ABSENT' : LMS.toStr(s.concentration),
+          homework: hwTitles.join('\n'),
+          special_note: LMS.toStr(s.special_note)
+        };
+      };
+      // Validate every row up front so a bad score never leaves a half-saved lesson.
+      students.forEach(function (s) {
+        requireStudent(s.student_id);
+        LMS.validateLessonInput(buildRow(s, ''));
+      });
+
+      var grades = {};
+      var prior = p.prior || {};
+      var checks = Array.isArray(prior.checks) ? prior.checks : [];
+      if (LMS.isIsoDate(LMS.toStr(prior.assigned_date)) && checks.length) {
+        var checked = saveHomeworkChecks({ lesson_date: prior.assigned_date, class_id: classId, check_date: date, checks: checks });
+        (checked.grades || []).forEach(function (g) { grades[g.student_id] = g.assignment_completion; });
+      }
+      if (Array.isArray(p.homework_items)) {
+        saveSessionHomework({ lesson_date: date, class_id: classId, items: p.homework_items });
+      }
+      saveClassSession(sessionInput);
+      var saved = saveLessonsBatch(students.map(function (s) {
+        return buildRow(s, grades[LMS.toStr(s.student_id)]);
+      }));
+      return { saved_count: saved.length, grades: grades, lessons: saved };
+    });
   }
 
   function enrichClassPlan(row) {
@@ -2529,7 +2618,10 @@ LMS.createService = function (store) {
     examPeriods: examPeriods_,
     getClassSession: getClassSession,
     getClassPlan: getClassPlan,
-    getClassPlans: getClassPlans
+    getClassPlans: getClassPlans,
+    getTodayTeachingTasks: getTodayTeachingTasks,
+    getDayAgenda: getDayAgenda,
+    getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard
   }) : {};
 
   return Object.assign({
@@ -2601,6 +2693,7 @@ LMS.createService = function (store) {
     saveClassSession: saveClassSession,
     ensureSchema: ensureSchema,
     getShellBootstrap: getShellBootstrap,
+    saveTodaySession: saveTodaySession,
     saveSchoolExam: saveSchoolExam,
     saveSchoolExamsBatch: saveSchoolExamsBatch,
     deleteSchoolExam: deleteSchoolExam

@@ -422,6 +422,19 @@ LMS.previousMeetingDateFor = function (cls, isoDate, examPeriods, limitDays) {
   return '';
 };
 
+/** Closest date on or after isoDate the class meets, searching forward limitDays. */
+LMS.nextMeetingDateFor = function (cls, isoDate, examPeriods, limitDays) {
+  var raw = LMS.toStr(isoDate);
+  if (!LMS.isIsoDate(raw) || !LMS.classSchedule(cls).length) return '';
+  var limit = limitDays || 90;
+  var cur = raw;
+  for (var i = 0; i < limit; i++) {
+    if (LMS.classMeetsOnDate(cls, cur, examPeriods)) return cur;
+    cur = LMS.addDays(cur, 1);
+  }
+  return '';
+};
+
 LMS.classMeetingDatesFor = function (cls, start, end, examPeriods) {
   return LMS.datesInRange(start, end).filter(function (date) {
     return LMS.classMeetsOnDate(cls, date, examPeriods);
