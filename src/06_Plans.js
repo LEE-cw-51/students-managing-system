@@ -295,6 +295,7 @@ LMS.createPlanner = function (ctx) {
       }
       units.forEach(function (u) { done[u] = (done[u] || 0) + weight / units.length; });
     });
+    curriculum.forEach(function (u) { if (u.completed) done[u.unit_id] = u.sessions; });
     meets.forEach(function (d) { if (!editableSet[d]) locked[d] = true; });
     var queue = LMS.remainingUnitSessions(curriculum, done);
     var split = LMS.assignUnitSessions(editable, queue);
@@ -457,6 +458,10 @@ LMS.createPlanner = function (ctx) {
         complete: doneCount >= u.sessions - 1e-9
       };
     });
+    if (support.ok && !units.some(function (u) { return u.done > 0; }) &&
+        Object.keys(computed.recorded).some(function (d) { return d < now; })) {
+      warnings.push({ code: 'no_start', message: '이미 나간 단원이 있다면 반 정보 수정의 단원 목록에서 ‘끝냄’으로 표시해 주세요. 그 다음 단원부터 계획합니다.' });
+    }
     var draft = pendingDraft(classId, month);
     var payload = draftPayload(draft);
     var version = baseVersion(cls);

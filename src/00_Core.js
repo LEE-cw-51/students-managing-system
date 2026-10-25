@@ -1354,7 +1354,8 @@ LMS.classCurriculum = function (cls) {
       unit_id: LMS.toStr(u.unit_id),
       textbook: LMS.toStr(u.textbook),
       title: LMS.toStr(u.title),
-      sessions: Math.max(1, Math.min(LMS.CURRICULUM_MAX_SESSIONS, Math.round(Number(u.sessions)) || 1))
+      sessions: Math.max(1, Math.min(LMS.CURRICULUM_MAX_SESSIONS, Math.round(Number(u.sessions)) || 1)),
+      completed: u.completed === true || u.completed === 'true'
     };
   });
 };
@@ -1380,7 +1381,11 @@ LMS.normalizeCurriculum = function (list, makeId) {
     var id = LMS.clipText(u.unit_id, 40);
     if (!id || seen[id]) id = makeId ? makeId() : '';
     if (id) seen[id] = true;
-    out.push({ unit_id: id, textbook: LMS.clipText(u.textbook, 100), title: title, sessions: sessions });
+    // completed: finished before plans existed (e.g. when the list is first entered mid-term).
+    out.push({
+      unit_id: id, textbook: LMS.clipText(u.textbook, 100), title: title, sessions: sessions,
+      completed: u.completed === true || u.completed === 'true'
+    });
   });
   return out;
 };

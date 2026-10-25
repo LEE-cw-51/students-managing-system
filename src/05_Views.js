@@ -171,6 +171,7 @@ LMS.createViews = function (ctx) {
     });
 
     var week = LMS.weekRange(today);
+    var upcoming = LMS.toStr(cls.status) === '운영' ? nextMeeting(cls, today) : null;
     return {
       exams: upcomingExamsFor(roster, 60),
       class: cls,
@@ -178,7 +179,7 @@ LMS.createViews = function (ctx) {
       roster: roster.map(function (s) {
         return { student_id: s.student_id, name: s.name, grade: s.grade, school: s.school, status: s.status };
       }),
-      next: LMS.toStr(cls.status) === '운영' ? nextMeeting(cls, today) : null,
+      next: upcoming,
       exam: examContext(cls, today),
       month: {
         lesson_count: Object.keys(lessons.reduce(function (m, l) { m[l.lesson_date] = 1; return m; }, {})).length,
@@ -189,6 +190,7 @@ LMS.createViews = function (ctx) {
       },
       recent: recent,
       plans: {
+        next_day: upcoming ? ctx.getClassPlan(classId, '일간', upcoming.date) : null,
         week: ctx.getClassPlan(classId, '주간', week.start),
         month: ctx.getClassPlan(classId, '월간', today.slice(0, 7))
       }

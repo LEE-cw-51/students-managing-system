@@ -255,3 +255,55 @@ describe('schema migration v3', () => {
     assert.equal(LMS.createService(store).ensureSchema(), false);
   });
 });
+
+describe('plan AI client', () => {
+  const { requestPlanAi, mapStudentRefs } = require('../lib/plan-ai.js');
+  const config = { key: 'k', baseUrl: 'https://ai.test/v1', model: 'm' };
+  const reply = (content, status = 200) => ({
+    ok: status < 400, status, json: async () => (status < 400 ? { model: 'used-model', choices: [{ message: { content } }] } : { error: { message: 'busy' } })
+  });
+
+  it('retries once when the reply is not JSON, then reads it', async () => {
+    const calls = [];
+    const fetch = async (url, init) => {
+      calls.push(JSON.parse(init.body));
+      return calls.length === 1 ? reply('계획은 이렇습니다') : reply('```json\n{"days": []}\n```');
+    };
+    const out = await requestPlanAi({ month: '2026-09' }, { config, fetch, minRetryMs: 0 });
+    assert.deepEqual(out, { result: { days: [] }, model: 'used-model' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].messages.length, 3, 'retry asks for JSON only');
+  });
+
+  it('gives up with a clear message after a second unreadable reply', async () => {
+    const fetch = async () => reply('no json');
+    await assert.rejects(requestPlanAi({}, { config, fetch, minRetryMs: 0 }), /읽을 수 없습니다/);
+  });
+
+  it('turns rate limits and missing keys into teacher-facing messages', async () => {
+    await assert.rejects(requestPlanAi({}, { config, fetch: async () => reply('', 429) }), /사용량/);
+    await assert.rejects(requestPlanAi({}, { config: { ...config, key: '' } }), /기본 분할/);
+  });
+
+  it('maps student refs back to ids and blanks unknown ones', () => {
+    const out = mapStudentRefs({ students: [{ ref: 's1', kind: '상담' }, { ref: 'S9' }] }, { S1: 'STU_000001' });
+    assert.deepEqual(out.students.map((s) => s.student_id), ['STU_000001', '']);
+  });
+});
+
+describe('starting point', () => {
+  it('starts after units marked as already finished', () => {
+    const { api, cls } = setup();
+    const marked = api.updateClass(Object.assign({}, cls, { curriculum: cls.curriculum.map((u, i) => Object.assign({}, u, { completed: i === 0 })) }));
+    assert.equal(marked.curriculum[0].completed, true);
+    const board = api.createSplitDraft(cls.class_id, '2026-09');
+    assert.equal(itemsByKey(board)['일간|2026-09-16'].proposed.title, '사각형의 성질 (1/3)');
+    assert.equal(board.curriculum[0].complete, true);
+  });
+
+  it('asks for a starting point when lessons exist but no unit is done', () => {
+    const { store, api, cls } = setup();
+    store.today = () => '2026-09-15';
+    assert.ok(api.getPlanBoard(cls.class_id, '2026-09').warnings.some((w) => w.code === 'no_start'));
+  });
+});

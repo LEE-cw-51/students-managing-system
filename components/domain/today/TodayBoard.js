@@ -28,6 +28,15 @@ export default function TodayBoard({ date, onOpenClass }) {
       toast(err.message, 'error');
     }
   };
+  const restoreClass = async (c) => {
+    try {
+      await api('restoreClassDate', { class_id: c.class_id, date });
+      toast(`${c.class_name} 휴강을 취소했습니다.`);
+      state.reload();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
   const finishMakeup = async (m) => {
     try {
       const row = await api('getMakeupSession', m.makeup_id);
@@ -73,6 +82,16 @@ export default function TodayBoard({ date, onOpenClass }) {
                 ))}
               </div>
             ) : <div className="card"><EmptyState title="이 날은 수업이 없습니다">위의 주간 띠에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState></div>}
+            {b.cancelled.length ? (
+              <div className="stack-sm" style={{ marginTop: 8 }}>
+                {b.cancelled.map((c) => (
+                  <div key={c.class_id} className="split muted">
+                    <span><span className="tag muted">휴강</span> {c.start_time} {c.class_name}{c.reason ? ` · ${c.reason}` : ''}</span>
+                    <button type="button" className="link-btn" onClick={() => restoreClass(c)}>휴강 취소</button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {b.suspended.length ? (
               <p className="muted" style={{ marginTop: 8 }}>시험대비 휴강: {b.suspended.map((s) => `${s.class_name}(${shortDate(s.resume_date)}부터 돌아온 학생과 수업)`).join(', ')}</p>
             ) : null}

@@ -39,7 +39,8 @@ export default function AppShell({ boot: initialBoot, children }) {
   const [boot, setBoot] = useState(initialBoot);
   const [open, setOpen] = useState(false);
 
-  const refresh = useCallback(() => api('getShellBootstrap').then(setBoot).catch(() => {}), []);
+  // Server-only flags (ai_enabled) come from the layout and survive a refresh.
+  const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled }))).catch(() => {}), []);
 
   useEffect(() => {
     setOpen(false);

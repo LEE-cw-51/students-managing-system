@@ -64,6 +64,7 @@ export function OverviewTab({ data }) {
             <Link className="link-btn" href="?tab=plans" scroll={false}>계획 관리</Link>
           </div>
           <div className="stack-sm">
+            {next ? <PlanLine label={`다음 수업 ${shortDate(next.date)}`} plan={plans.next_day} /> : null}
             <PlanLine label="이번 주" plan={plans.week} />
             <PlanLine label="이번 달" plan={plans.month} />
           </div>

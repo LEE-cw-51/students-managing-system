@@ -4,39 +4,47 @@ import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import WeekdaySchedule from '@/components/ui/WeekdaySchedule';
+import CurriculumEditor from './CurriculumEditor';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 
 const EMPTY = {
   class_name: '', grade: '', school_year: String(new Date().getFullYear()), semester: '',
-  teacher: '', textbook: '', memo: '', status: '운영', schedule: []
+  teacher: '', textbook: '', memo: '', status: '운영', schedule: [], curriculum: []
 };
 
 /** Create or edit a class. onSaved(row) after a successful save. */
 export default function ClassForm({ initial, onClose, onSaved }) {
   const boot = useBoot();
   const toast = useToast();
-  const [form, setForm] = useState(() => ({ ...EMPTY, ...(initial || {}), schedule: (initial && initial.schedule) || [] }));
+  const [form, setForm] = useState(() => ({
+    ...EMPTY, ...(initial || {}),
+    schedule: (initial && initial.schedule) || [],
+    curriculum: Array.isArray(initial && initial.curriculum) ? initial.curriculum : []
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e && e.target ? e.target.value : e }));
   const isEdit = !!form.class_id;
 
   const scheduleProblem = form.schedule.find((s) => !s.start || !s.end || s.end <= s.start);
+  const unitProblem = form.curriculum.findIndex((u) => u.title.trim() && !(Number(u.sessions) >= 1 && Number(u.sessions) <= 20));
 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.class_name.trim()) return setError('반 이름을 입력해 주세요.');
     if (!form.schedule.length) return setError('수업 요일을 하나 이상 선택해 주세요.');
     if (scheduleProblem) return setError(`${scheduleProblem.day}요일 시간을 확인해 주세요. (예: 1800 ~ 2000)`);
+    if (unitProblem !== -1) return setError(`${unitProblem + 1}번째 단원의 수업 횟수는 1~20회로 입력해 주세요.`);
     setError('');
     setSaving(true);
     try {
       const payload = {
         class_id: form.class_id, class_name: form.class_name.trim(), grade: form.grade,
         school_year: form.school_year, semester: form.semester, teacher: form.teacher,
-        textbook: form.textbook, memo: form.memo, status: form.status, schedule: form.schedule
+        textbook: form.textbook, memo: form.memo, status: form.status, schedule: form.schedule,
+        curriculum: form.curriculum.filter((u) => u.title.trim()).map((u) => ({ ...u, title: u.title.trim(), sessions: Number(u.sessions) }))
       };
       if (isEdit) {
         payload.current_progress = form.current_progress || '';
@@ -74,6 +82,9 @@ export default function ClassForm({ initial, onClose, onSaved }) {
           <Field label="교재" wide>{(id) => <input id={id} value={form.textbook} onChange={set('textbook')} />}</Field>
           <Field label="수업 요일 · 시간" wide hint="요일을 누른 뒤 시간을 숫자로 입력하세요. 1800 → 18:00">
             {() => <WeekdaySchedule value={form.schedule} onChange={set('schedule')} />}
+          </Field>
+          <Field label="교재 · 단원 목록 (강의 계획용)" wide hint="단원마다 예상 수업 횟수를 넣으세요. 이름을 바꾸거나 순서를 옮겨도 기존 계획과 연결이 유지됩니다.">
+            {() => <CurriculumEditor value={form.curriculum} onChange={set('curriculum')} textbook={form.textbook} />}
           </Field>
           <Field label="메모" wide>{(id) => <textarea id={id} value={form.memo} onChange={set('memo')} rows={2} />}</Field>
           {isEdit ? (

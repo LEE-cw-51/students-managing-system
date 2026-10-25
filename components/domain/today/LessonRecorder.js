@@ -7,11 +7,13 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import Badges from '@/components/domain/Badges';
 import DailyReportsModal from './DailyReportsModal';
+import CancelDayDialog from '@/components/domain/class/CancelDayDialog';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, shortDate, timeSpan } from '@/lib/format';
 
 const CONC = ['A', 'B', 'C', 'D'];
 const ASSIGN = ['A', 'B', 'C'];
+const PLAN_DONE = ['완료', '일부', '못 함'];
 
 function Chips({ value, options, onChange, label, disabled }) {
   return (
@@ -45,6 +47,7 @@ function initialForm(d) {
       ? { ...(prior.checks_by_student[s.student_id] || {}) }
       : Object.fromEntries(prior.items.filter((it) => it.item_id).map((it) => [it.item_id, '완료']))])) : {},
     homework: (d.today_homework.items || []).map((it) => ({ item_id: it.item_id || '', title: it.title })),
+    plan_done: d.daily_plan ? d.daily_plan.done_status || '' : '',
     students: Object.fromEntries(d.students.map((s) => {
       const l = s.lesson || {};
       return [s.student_id, {
@@ -88,6 +91,7 @@ function Editor({ data, onSaved, onGoDate }) {
   const [error, setError] = useState('');
   const [savedOnce, setSavedOnce] = useState(false);
   const [reports, setReports] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const dirty = JSON.stringify(form) !== baseline;
   useUnsavedGuard(dirty);
 
@@ -121,6 +125,16 @@ function Editor({ data, onSaved, onGoDate }) {
 
   const presentCount = data.students.filter((s) => form.students[s.student_id].attendance !== '결석').length;
 
+  const restore = async () => {
+    try {
+      await api('restoreClassDate', { class_id: cls.class_id, date: data.date });
+      toast('휴강을 취소했습니다.');
+      onSaved();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
   const save = async () => {
     setError('');
     const s = form.session;
@@ -139,6 +153,7 @@ function Editor({ data, onSaved, onGoDate }) {
           checks: data.students.flatMap((st) => priorItems.map((it) => ({ item_id: it.item_id, student_id: st.student_id, status: (form.checks[st.student_id] || {})[it.item_id] === '완료' ? '완료' : '미완료' })))
         } : null,
         homework_items: homework.filter((h) => h.title.trim()).map((h) => ({ item_id: h.item_id, title: h.title.trim() })),
+        ...(data.daily_plan ? { plan_done_status: form.plan_done } : {}),
         students: data.students.map((st) => {
           const v = form.students[st.student_id];
           const tested = s.test_on && v.attendance !== '결석' && String(v.test_score).trim() !== '';
@@ -169,7 +184,12 @@ function Editor({ data, onSaved, onGoDate }) {
     <div className="stack recorder">
       {!data.meets ? (
         <div className="notice-bar">
-          {data.suspension ? `${data.suspension.title} 기간이라 이 반은 휴강입니다. ` : '이 날은 이 반의 정규 수업일이 아닙니다. 보강이면 그대로 기록하세요. '}
+          {data.cancellation ? (
+            <>
+              이 날은 휴강으로 지정했습니다{data.cancellation.reason ? `(${data.cancellation.reason})` : ''}.{' '}
+              <button type="button" className="link-btn" onClick={restore}>휴강 취소</button>{' · '}
+            </>
+          ) : data.suspension ? `${data.suspension.title} 기간이라 이 반은 휴강입니다. ` : '이 날은 이 반의 정규 수업일이 아닙니다. 보강이면 그대로 기록하세요. '}
           {data.prev_meeting ? <button type="button" className="link-btn" onClick={() => onGoDate(data.prev_meeting)}>최근 수업일 {shortDate(data.prev_meeting)}</button> : null}
           {data.prev_meeting && data.next_meeting ? ' · ' : null}
           {data.next_meeting ? <button type="button" className="link-btn" onClick={() => onGoDate(data.next_meeting)}>다음 수업일 {shortDate(data.next_meeting)}</button> : null}
@@ -179,8 +199,21 @@ function Editor({ data, onSaved, onGoDate }) {
       <section className="card">
         <div className="card-head">
           <h2>① 반 공통</h2>
-          {data.daily_plan ? <span className="tag">오늘 계획: {data.daily_plan.title || data.daily_plan.content}</span> : null}
+          <span className="cluster">
+            {data.daily_plan ? <span className="tag">오늘 계획: {data.daily_plan.title || data.daily_plan.content}</span> : null}
+            {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={() => setCancelling(true)}>이 날 휴강</button> : null}
+          </span>
         </div>
+        {data.daily_plan ? (
+          <div className="field" style={{ marginBottom: 12 }}>
+            <span className="hint">오늘 계획대로 진행했나요? 다음 계획을 다시 나눌 때 씁니다.</span>
+            <Chips value={form.plan_done} options={PLAN_DONE} label="계획 진행 결과" onChange={(v) => setForm((f) => ({ ...f, plan_done: v }))} />
+          </div>
+        ) : null}
+        {cancelling ? (
+          <CancelDayDialog classId={cls.class_id} className={cls.class_name} date={data.date}
+            onClose={() => setCancelling(false)} onDone={() => onSaved()} />
+        ) : null}
         <div className="form-grid">
           <div className="field span-all">
             <label htmlFor="rec-progress">진도</label>
