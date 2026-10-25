@@ -12,7 +12,8 @@ export function parseCurriculumText(text, textbook) {
 
 /**
  * Ordered unit list for the class. unit_id stays on each row through edits and moves so the
- * plans that already point at a unit stay linked.
+ * plans that already point at a unit stay linked. "지금" marks where the class is when the list is
+ * entered: every unit before it is stored as completed, so the first draft starts there.
  */
 export default function CurriculumEditor({ value, onChange, textbook }) {
   const rows = value || [];
@@ -31,6 +32,8 @@ export default function CurriculumEditor({ value, onChange, textbook }) {
     onChange(rows.filter((_, j) => j !== i));
   };
   const total = rows.reduce((n, r) => n + (Number(r.sessions) || 0), 0);
+  const currentIndex = rows.some((r) => r.completed) ? rows.findIndex((r) => !r.completed) : 0;
+  const setCurrent = (i) => onChange(rows.map((r, j) => ({ ...r, completed: j < i })));
 
   return (
     <div className="stack-sm">
@@ -42,8 +45,8 @@ export default function CurriculumEditor({ value, onChange, textbook }) {
               <input aria-label={`${i + 1}번째 단원 수업 횟수`} inputMode="numeric" className="curriculum-sessions" value={r.sessions}
                 onChange={(e) => update(i, 'sessions', e.target.value.replace(/\D/g, ''))} />
               <span className="muted">회</span>
-              <label className="check-label curriculum-done" title="계획을 쓰기 전에 이미 나간 단원">
-                <input type="checkbox" checked={!!r.completed} onChange={(e) => update(i, 'completed', e.target.checked)} /> 끝냄
+              <label className="check-label curriculum-done" title="지금 나가는 단원 (앞 단원은 끝난 것으로 봅니다)">
+                <input type="radio" name="curriculum-current" checked={i === currentIndex} onChange={() => setCurrent(i)} /> 지금
               </label>
               <span className="cluster">
                 <button type="button" className="btn ghost sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="위로">▲</button>
@@ -53,7 +56,8 @@ export default function CurriculumEditor({ value, onChange, textbook }) {
             </li>
           ))}
         </ol>
-      ) : <span className="hint">단원을 순서대로 넣고, 이미 나간 단원은 ‘끝냄’으로 표시하세요. 단원을 넣으면 강의 계획을 실제 수업일에 맞춰 자동으로 나눌 수 있습니다.</span>}
+      ) : <span className="hint">단원을 순서대로 넣으면 강의 계획 초안을 실제 수업일에 맞춰 만들 수 있습니다.</span>}
+      {rows.length ? <span className="hint">‘지금’은 지금 나가는 단원입니다. 그 앞 단원은 끝난 것으로 보고 다음 초안을 이 단원부터 짭니다.</span> : null}
       <div className="cluster">
         <button type="button" className="btn secondary sm" onClick={() => onChange([...rows, { unit_id: '', textbook: textbook || '', title: '', sessions: 1 }])}>단원 추가</button>
         <button type="button" className="btn ghost sm" onClick={() => setPasting((v) => !v)}>여러 줄 붙여넣기</button>

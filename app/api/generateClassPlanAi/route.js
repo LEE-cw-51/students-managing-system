@@ -7,16 +7,14 @@ import { requestPlanAi, mapStudentRefs } from '../../../lib/plan-ai.js';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Read context → ask AI → save draft, in two short transactions so the AI wait never holds the DB lock.
+/**
+ * The plan screen's one "초안 만들기" button. With an AI key: read context → ask AI → save the
+ * draft, in two short transactions so the AI wait never holds the DB lock. Without a key, or when
+ * the AI call fails, the unit-order split is drafted instead and the draft says why.
+ */
 export async function POST(req) {
   if (!(await isAuthed())) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
-  }
-  if (!isMonthlyAiConfigured()) {
-    return NextResponse.json({
-      ok: false,
-      error: 'AI API 키가 설정되지 않았습니다. 기본 분할을 쓰거나 AI_API_KEY에 OpenRouter 키를 넣어 주세요.'
-    }, { status: 503 });
   }
   const body = await req.json().catch(() => ({}));
   const classId = body.class_id;
@@ -24,9 +22,20 @@ export async function POST(req) {
   if (!classId || !month) {
     return NextResponse.json({ ok: false, error: '반과 월을 선택해 주세요.' }, { status: 400 });
   }
+  const split = (note) => withService((api) => api.createSplitDraft(classId, month, note));
   try {
+    if (!isMonthlyAiConfigured()) {
+      return NextResponse.json({ ok: true, data: await split('AI 키가 없어 단원 순서대로 나눴습니다.') });
+    }
+    // Context errors (no unit list, no days left) would fail the split the same way: report them.
     const ctx = await withService((api) => api.getClassPlanContext(classId, month));
-    const ai = await requestPlanAi(ctx.input);
+    let ai;
+    try {
+      ai = await requestPlanAi(ctx.input);
+    } catch (e) {
+      const why = e && e.message ? e.message : String(e);
+      return NextResponse.json({ ok: true, data: await split('AI를 쓰지 못해 단원 순서대로 나눴습니다. (' + why + ')') });
+    }
     const result = mapStudentRefs(ai.result, ctx.aliases);
     const board = await withService((api) => api.saveAiPlanDraft(classId, month, result, {
       base_version: ctx.base_version,

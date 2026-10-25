@@ -9,8 +9,8 @@ import { api } from '@/lib/client-api';
 import { formatDate } from '@/lib/format';
 
 /**
- * Cancel one meeting day of a class. When that day had a plan, the second step asks what to do
- * with it: re-split the remaining plan (onReplan) or leave it for later.
+ * Cancel one meeting day of a class. When that day had a plan, the second step offers to make a
+ * new draft (onReplan) so the remaining days — whole-class makeups included — absorb it.
  */
 export default function CancelDayDialog({ classId, className, date, onClose, onDone, onReplan }) {
   const toast = useToast();
@@ -41,15 +41,12 @@ export default function CancelDayDialog({ classId, className, date, onClose, onD
     return (
       <Modal title="휴강한 날의 계획" onClose={onClose}>
         <div className="stack">
-          <p style={{ margin: 0 }}>이 날에는 <strong>{result.plan.title || '계획'}</strong> 수업이 잡혀 있었습니다. 어떻게 할까요?</p>
-          <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>
-            <li>다시 나누기: 남은 수업일에 단원을 다시 배정한 초안을 만들고, 비교해서 확정합니다.</li>
-            <li>보강일로 옮기기: 강의 계획 탭에서 반 보강을 잡은 뒤 이 날 계획의 ‘옮기기’를 누르세요.</li>
-          </ul>
+          <p style={{ margin: 0 }}>이 날에는 <strong>{result.plan.title || '계획'}</strong> 수업이 잡혀 있었습니다.</p>
+          <p className="muted" style={{ margin: 0 }}>초안을 다시 만들면 남은 수업일(반 보강 포함)에 다시 나눕니다. 보강을 잡을 거라면 오늘 화면의 ‘보강 추가’로 반 보강을 먼저 잡은 뒤 다시 만드세요.</p>
           <div className="form-actions">
             <button type="button" className="btn secondary" onClick={onClose}>그대로 두기</button>
             {onReplan ? (
-              <button type="button" className="btn" onClick={() => { onReplan(month); onClose(); }}>남은 계획 다시 나누기</button>
+              <button type="button" className="btn" onClick={() => { onReplan(month); onClose(); }}>초안 다시 만들기</button>
             ) : (
               <Link className="btn" href={`/classes/${classId}?tab=plans`}>강의 계획에서 정리하기</Link>
             )}

@@ -2761,7 +2761,6 @@ LMS.createService = function (store) {
       saveTable('HomeworkChecks', table('HomeworkChecks').filter(function (c) { return dropItems.indexOf(LMS.toStr(c.item_id)) === -1; }));
       saveTable('ClassPlans', table('ClassPlans').filter(inIds));
       saveTable('PlanDrafts', table('PlanDrafts').filter(inIds));
-      saveTable('PlanSuggestions', table('PlanSuggestions').filter(inIds));
       saveTable('ExamPeriods', table('ExamPeriods').filter(function (r) { return LMS.toStr(r.exam_period_id) !== LMS.toStr(periodId); }));
       return true;
     });
@@ -3013,7 +3012,9 @@ LMS.createService = function (store) {
     getDayAgenda: getDayAgenda,
     getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard,
     regularClassIdsOf: regularClassIdsOf_,
-    generateDailyReports: generateDailyReports
+    generateDailyReports: generateDailyReports,
+    // The planner is built just below; views call this only at request time.
+    currentUnit: function (classId) { return planner.getCurrentUnit ? planner.getCurrentUnit(classId) : null; }
   }) : {};
 
   var planner = LMS.createPlanner ? LMS.createPlanner({

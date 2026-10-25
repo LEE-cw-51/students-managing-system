@@ -189,12 +189,21 @@ LMS.createViews = function (ctx) {
         test_average_display: collected.comparable ? scores.average_display : '-'
       },
       recent: recent,
+      current_unit: ctx.currentUnit ? ctx.currentUnit(classId) : null,
       plans: {
         next_day: upcoming ? ctx.getClassPlan(classId, '일간', upcoming.date) : null,
-        week: ctx.getClassPlan(classId, '주간', week.start),
+        // Weeks are summaries of their day plans; an old hand-written week plan still wins.
+        week: ctx.getClassPlan(classId, '주간', week.start) || weekSummary(classId, week),
         month: ctx.getClassPlan(classId, '월간', today.slice(0, 7))
       }
     };
+  }
+
+  function weekSummary(classId, week) {
+    var days = ctx.getClassPlans({ class_id: classId, period_type: '일간', start: week.start, end: week.end })
+      .sort(function (a, b) { return LMS.toStr(a.period_key).localeCompare(LMS.toStr(b.period_key)); });
+    if (!days.length) return null;
+    return { title: days.map(function (p) { return LMS.toStr(p.title || p.content); }).filter(Boolean).join(' → ') };
   }
 
   /** Meeting dates (scheduled or recorded) with session data and the matching daily plan. */

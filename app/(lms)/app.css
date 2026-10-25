@@ -458,15 +458,15 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .plan-day.is-past { opacity: 0.85; }
 .draft-card { border: 2px dashed var(--navy); }
 .diff-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.diff-list li { display: grid; grid-template-columns: 130px 52px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.diff-list li { display: grid; grid-template-columns: 130px 52px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
 .diff-when { font-weight: 600; }
 .diff-text { min-width: 0; }
 @media (max-width: 640px) {
   .unit-row { grid-template-columns: minmax(0, 1fr) 70px; }
   .unit-row .progress { display: none; }
   .plan-day { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-  .diff-list li { grid-template-columns: auto auto; }
-  .diff-list .diff-text { grid-column: 1 / -1; }
+  .diff-list li { grid-template-columns: auto auto auto; }
+  .diff-list .diff-text { grid-column: 1 / -1; grid-row: 2; }
 }
 .curriculum-rows { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
 .curriculum-rows li { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto auto auto; gap: 6px; align-items: center; }
@@ -476,3 +476,5 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
   .curriculum-rows li { grid-template-columns: minmax(0, 1fr) 48px auto auto; }
   .curriculum-rows li .cluster { grid-column: 1 / -1; }
 }
+.plan-check { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 6px; }
+.plan-check .hint { flex-basis: 100%; }

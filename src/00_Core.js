@@ -23,7 +23,6 @@ LMS.PREFIX = {
   examPeriod: 'EXP',
   schoolExam: 'SCX',
   planDraft: 'PDR',
-  planSuggestion: 'PSG',
   unit: 'UNT'
 };
 
@@ -91,10 +90,6 @@ LMS.TABLES = {
     'draft_id', 'class_id', 'month', 'mode', 'payload', 'warnings', 'base_version',
     'model', 'status', 'created_at', 'updated_at'
   ],
-  PlanSuggestions: [
-    'suggestion_id', 'class_id', 'month', 'student_id', 'kind', 'title', 'reason',
-    'status', 'task_id', 'draft_id', 'created_at', 'updated_at'
-  ],
   HomeworkItems: [
     'item_id', 'lesson_date', 'class_id', 'title', 'sort_order',
     'created_at', 'updated_at'
@@ -141,7 +136,6 @@ LMS.PLAN_DONE_STATUS = ['완료', '일부', '못 함'];
 LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
 LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
 LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
-LMS.SUGGESTION_STATUS = ['제안', '확정', '무시'];
 LMS.CURRICULUM_MAX_SESSIONS = 20;
 LMS.HOMEWORK_CHECK_STATUS = ['완료', '미완료'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -158,7 +152,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'PSG', 'UNT'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -1735,7 +1729,6 @@ LMS.TABLE_PK = {
   Tasks: 'task_id',
   ClassPlans: 'plan_id',
   PlanDrafts: 'draft_id',
-  PlanSuggestions: 'suggestion_id',
   HomeworkItems: 'item_id',
   HomeworkChecks: 'check_id',
   Settings: 'key',

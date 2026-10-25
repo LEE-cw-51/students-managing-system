@@ -87,7 +87,7 @@ describe('single-day cancellation', () => {
 });
 
 describe('basic split', () => {
-  it('lays units on the remaining meeting days and links week and month plans', () => {
+  it('lays units on the remaining meeting days and summarizes weeks from them', () => {
     const { api, cls } = setup();
     const board = api.createSplitDraft(cls.class_id, '2026-09');
     const items = itemsByKey(board);
@@ -96,11 +96,13 @@ describe('basic split', () => {
     assert.equal(items['일간|2026-09-30'].proposed.title, '사각형의 성질 (3/3)');
     assert.equal(items['일간|2026-09-14'], undefined, 'recorded day is not planned');
     assert.deepEqual(board.draft.carry_over, ['도형의 닮음']);
-    assert.equal(items['주간|2026-09-14'].proposed.title, '삼각형의 성질');
-    assert.equal(items['주간|2026-09-21'].proposed.title, '삼각형의 성질 · 사각형의 성질');
+    assert.equal(items['주간|2026-09-14'], undefined, 'weeks are not planned separately');
     assert.equal(items['월간|2026-09'].proposed.title, '삼각형의 성질 ~ 사각형의 성질');
     const applied = confirmAll(api, board);
-    assert.equal(applied.applied_count, 9, '1 month + 3 weeks + 5 days');
+    assert.equal(applied.applied_count, 6, '1 month + 5 days');
+    assert.equal(applied.weeks.find((w) => w.week_start === '2026-09-21').summary, '삼각형의 성질 · 사각형의 성질');
+    assert.equal(api.getClassOverview(cls.class_id).plans.week.title, '삼각형의 성질 (1/2)');
+    assert.equal(api.getClassOverview(cls.class_id).current_unit.title, '삼각형의 성질');
     assert.equal(applied.draft, null);
     assert.equal(applied.days.find((d) => d.date === '2026-09-16').plan.source, 'split');
     // Other screens read confirmed plans as before.
@@ -193,23 +195,7 @@ describe('AI draft validation', () => {
     assert.equal(board.draft.mode, 'ai');
     assert.equal(board.draft.rationale, '시험 대비');
     assert.equal(board.draft.warnings.length, 3);
-    assert.deepEqual(board.suggestions.map((s) => s.title), ['오답 노트']);
-  });
-
-  it('creates one task per confirmed suggestion even when confirmed twice', () => {
-    const { store, api, demo, cls } = setup();
-    const board = api.saveAiPlanDraft(cls.class_id, '2026-09', {
-      students: [{ student_id: demo.students[1].student_id, kind: '상담', title: '학습 습관 상담', reason: '결석 2회' }]
-    }, {});
-    const id = board.suggestions[0].suggestion_id;
-    const first = api.decidePlanSuggestion({ suggestion_id: id, decision: '확정' });
-    const second = api.decidePlanSuggestion({ suggestion_id: id, decision: '확정' });
-    assert.equal(first.task_id, second.task_id);
-    const tasks = store.readTable('Tasks');
-    assert.equal(tasks.length, 1);
-    assert.equal(tasks[0].kind, 'counsel_student');
-    assert.equal(tasks[0].due_date, '2026-09-16', 'defaults to the next meeting day');
-    assert.throws(() => api.decidePlanSuggestion({ suggestion_id: id, decision: '무시' }), /이미 할 일로/);
+    assert.deepEqual(board.draft.students.map((s) => s.title), ['오답 노트']);
   });
 
   it('sends aliases instead of names in the AI context', () => {
@@ -229,16 +215,81 @@ describe('AI draft validation', () => {
   });
 });
 
-describe('moving a day plan', () => {
-  it('moves a plan to a class makeup day but not onto another plan', () => {
+describe('edit the draft, then confirm', () => {
+  function aiDraft(api, demo, cls) {
+    return api.saveAiPlanDraft(cls.class_id, '2026-09', {
+      days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }],
+      students: [
+        { student_id: demo.students[1].student_id, kind: '상담', title: '학습 습관 상담', reason: '결석 2회' },
+        { student_id: demo.students[2].student_id, kind: '보강', title: '결석분 보충', reason: '' }
+      ]
+    }, {});
+  }
+
+  it('stores edited items as the teacher\'s own plans and confirmed suggestions as tasks', () => {
+    const { store, api, demo, cls } = setup();
+    let board = aiDraft(api, demo, cls);
+    board = api.updatePlanDraftItem({
+      draft_id: board.draft.draft_id, key: '일간|2026-09-16',
+      fields: { title: '내가 고친 계획', homework: 'p.20', unit_ids: ['UNT_000001', 'U99'] }
+    });
+    const edited = itemsByKey(board)['일간|2026-09-16'];
+    assert.equal(edited.edited, true);
+    assert.equal(edited.selected, true);
+    assert.deepEqual(edited.proposed.unit_ids, ['UNT_000001'], 'unknown unit dropped');
+    board = api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { kind: '클리닉', title: '클리닉 1회', reason: '결석' } });
+    assert.equal(board.draft.students[0].kind, '클리닉');
+    const applied = api.applyPlanDraft({
+      draft_id: board.draft.draft_id, seen_version: board.base_version,
+      keys: board.draft.items.filter((it) => it.selected).map((it) => it.key),
+      student_keys: ['student|0', 'student|1']
+    });
+    assert.equal(applied.task_count, 2);
+    const day = applied.days.find((d) => d.date === '2026-09-16').plan;
+    assert.equal(day.title, '내가 고친 계획');
+    assert.equal(day.source, 'manual');
+    assert.equal(applied.days.find((d) => d.date === '2026-09-21').plan.source, 'ai');
+    const tasks = store.readTable('Tasks');
+    assert.deepEqual(tasks.map((t) => t.title), ['[클리닉] 클리닉 1회', '보강 일정 잡기: 결석분 보충']);
+    assert.equal(tasks[0].due_date, '2026-09-16', 'next meeting day');
+    assert.throws(() => api.applyPlanDraft({ draft_id: board.draft.draft_id, seen_version: applied.base_version, keys: ['일간|2026-09-21'] }), /이미 처리된 초안/);
+    // The next draft keeps the teacher's version unless they pick the new one.
+    const next = itemsByKey(api.createSplitDraft(cls.class_id, '2026-09'));
+    assert.equal(next['일간|2026-09-16'].action, 'change');
+    assert.equal(next['일간|2026-09-16'].selected, false);
+  });
+
+  it('refuses edits to locked days, missing items and finished drafts', () => {
+    const { store, api, demo, cls } = setup();
+    const board = aiDraft(api, demo, cls);
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: '일간|2026-09-14', fields: { title: 'x' } }), /찾을 수 없습니다/);
+    store.today = () => '2026-09-17';
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: '일간|2026-09-16', fields: { title: 'x' } }), /지난 수업/);
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { title: 'x', kind: '아무거나' } }), /제안 종류/);
+    api.discardPlanDraft(board.draft.draft_id);
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { title: 'x' } }), /이미 처리된 초안/);
+  });
+
+  it('drops suggestions with a discarded draft and prunes old finished drafts', () => {
+    const { store, api, demo, cls } = setup();
+    const board = aiDraft(api, demo, cls);
+    api.discardPlanDraft(board.draft.draft_id);
+    assert.equal(api.getPlanBoard(cls.class_id, '2026-09').draft, null);
+    assert.equal(store.readTable('Tasks').length, 0);
+    store.today = () => '2026-11-01';
+    store.now = () => '2026-11-01T10:00:00';
+    api.createSplitDraft(cls.class_id, '2026-11');
+    assert.deepEqual(store.readTable('PlanDrafts').map((d) => d.month), ['2026-11'], 'September drafts older than 30 days are gone');
+  });
+
+  it('re-splits onto a class makeup day after a cancellation', () => {
     const { api, cls } = setup();
     confirmAll(api, api.createSplitDraft(cls.class_id, '2026-09'));
-    const res = api.cancelClassDate({ class_id: cls.class_id, date: '2026-09-21' });
-    assert.throws(() => api.moveDailyPlan({ plan_id: res.plan.plan_id, to_date: '2026-09-22' }), /수업일/);
+    api.cancelClassDate({ class_id: cls.class_id, date: '2026-09-21' });
     api.saveMakeupSession({ makeup_date: '2026-09-22', kind: '반', class_id: cls.class_id, start_time: '18:00', end_time: '20:00' });
-    const moved = api.moveDailyPlan({ plan_id: res.plan.plan_id, to_date: '2026-09-22' });
-    assert.equal(moved.period_key, '2026-09-22');
-    assert.throws(() => api.moveDailyPlan({ plan_id: res.plan.plan_id, to_date: '2026-09-23' }), /이미 계획/);
+    const items = itemsByKey(api.createSplitDraft(cls.class_id, '2026-09'));
+    assert.equal(items['일간|2026-09-22'].proposed.title, '삼각형의 성질 (2/2)');
+    assert.equal(items['일간|2026-09-21'].action, 'remove');
   });
 });
 

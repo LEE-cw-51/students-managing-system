@@ -34,7 +34,8 @@ function initialForm(d) {
   const priorReady = !!(prior && prior.items && prior.items.some((it) => it.item_id));
   return {
     session: {
-      progress: ses.progress || '',
+      // No record yet → start from today's plan so the usual case is just a confirm.
+      progress: ses.progress || (!d.recorded_count && d.daily_plan ? d.daily_plan.title || '' : ''),
       content: ses.content || '',
       test_on: !!(ses.test_title || ses.test_max_score || anyTest),
       test_title: ses.test_title || '',
@@ -199,17 +200,8 @@ function Editor({ data, onSaved, onGoDate }) {
       <section className="card">
         <div className="card-head">
           <h2>① 반 공통</h2>
-          <span className="cluster">
-            {data.daily_plan ? <span className="tag">오늘 계획: {data.daily_plan.title || data.daily_plan.content}</span> : null}
-            {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={() => setCancelling(true)}>이 날 휴강</button> : null}
-          </span>
+          {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={() => setCancelling(true)}>이 날 휴강</button> : null}
         </div>
-        {data.daily_plan ? (
-          <div className="field" style={{ marginBottom: 12 }}>
-            <span className="hint">오늘 계획대로 진행했나요? 다음 계획을 다시 나눌 때 씁니다.</span>
-            <Chips value={form.plan_done} options={PLAN_DONE} label="계획 진행 결과" onChange={(v) => setForm((f) => ({ ...f, plan_done: v }))} />
-          </div>
-        ) : null}
         {cancelling ? (
           <CancelDayDialog classId={cls.class_id} className={cls.class_name} date={data.date}
             onClose={() => setCancelling(false)} onDone={() => onSaved()} />
@@ -217,6 +209,13 @@ function Editor({ data, onSaved, onGoDate }) {
         <div className="form-grid">
           <div className="field span-all">
             <label htmlFor="rec-progress">진도</label>
+            {data.daily_plan ? (
+              <div className="plan-check">
+                <span>계획: <strong>{data.daily_plan.title || data.daily_plan.content}</strong></span>
+                <Chips value={form.plan_done} options={PLAN_DONE} label="계획 진행 결과" onChange={(v) => setForm((f) => ({ ...f, plan_done: v }))} />
+                <span className="hint">고르지 않으면 계획대로 끝낸 것으로 봅니다. 다음 초안을 짤 때 씁니다.</span>
+              </div>
+            ) : null}
             <textarea id="rec-progress" rows={2} value={form.session.progress} onChange={(e) => setSession('progress', e.target.value)} />
             {data.last_progress ? (
               <span className="hint">지난 수업({shortDate(data.last_progress.date)}): {data.last_progress.progress}{' '}
