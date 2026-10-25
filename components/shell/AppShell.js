@@ -60,7 +60,9 @@ export default function AppShell({ boot: initialBoot, children }) {
       .finally(() => { window.location.href = '/login'; });
   };
 
-  const academy = (boot.settings && boot.settings.academy_name) || '학생 관리 시스템';
+  // The sidebar shows who is using it; the academy name stays for reports and PDFs.
+  const teacher = ((boot.settings && boot.settings.teacher_name) || '').trim();
+  const brand = teacher ? `${teacher} 선생님` : '학생 관리 시스템';
 
   return (
     <BootContext.Provider value={{ ...boot, refresh }}>
@@ -70,9 +72,9 @@ export default function AppShell({ boot: initialBoot, children }) {
           {open ? <div className="app-scrim" onClick={() => setOpen(false)} aria-hidden="true" /> : null}
           <aside className="app-sidebar" id="app-sidebar" data-open={open ? 'true' : 'false'}>
             <div className="brand">
-              <div className="brand-mark" aria-hidden="true">학</div>
+              <div className="brand-mark" aria-hidden="true">{teacher ? teacher.slice(0, 1) : '학'}</div>
               <div>
-                <strong className="display">{academy}</strong>
+                <strong className="display">{brand}</strong>
                 <span>수업 · 성적 · 상담</span>
               </div>
             </div>

@@ -144,6 +144,11 @@ export default function TodayBoard({ date, onOpenClass }) {
           <div className="cols-2">
             <section className="card">
               <div className="card-head"><h2>주의 학생 {b.flagged.length ? `${b.flagged.length}명` : ''}</h2><Link className="link-btn" href="/students">학생 목록</Link></div>
+              {b.unassigned_count ? (
+                <div className="notice-bar" style={{ marginBottom: 12 }}>
+                  반이 없는 재원생 {b.unassigned_count}명 · <Link href="/students?class=__none__">미배정 학생 보기</Link>
+                </div>
+              ) : null}
               {b.flagged.length ? (
                 <div className="stack-sm">
                   {b.flagged.map((f) => (

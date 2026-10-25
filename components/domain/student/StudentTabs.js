@@ -9,6 +9,50 @@ import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
+import Field from '@/components/ui/Field';
+import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
+
+/** Add a regular class to the student (추가 수강, or the first class for a 미배정 student). */
+function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
+  const boot = useBoot();
+  const toast = useToast();
+  const [classId, setClassId] = useState('');
+  const [date, setDate] = useState(boot.today);
+  const [error, setError] = useState('');
+  const targets = openRegularClasses(boot, exceptIds);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!classId) return setError('반을 골라 주세요.');
+    try {
+      await api('assignStudentToClass', { student_id: studentId, class_id: classId, start_date: date });
+      toast('반에 배정했습니다.');
+      boot.refresh();
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  return (
+    <Modal title="반 배정" onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <div className="form-grid">
+          <Field label="반">{(id) => (
+            <select id={id} value={classId} onChange={(e) => setClassId(e.target.value)}>
+              <option value="">반 선택</option>
+              {targets.map((c) => <option key={c.id} value={c.id}>{c.name}{c.schedule_label ? ` · ${c.schedule_label}` : ''}</option>)}
+            </select>
+          )}</Field>
+          <Field label="시작일">{(id) => <input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+        </div>
+        {error ? <div className="error-box" role="alert">{error}</div> : null}
+        <div className="form-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <button type="submit" className="btn">배정</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 function addDays(iso, delta) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -40,9 +84,13 @@ const CONC = { A: 'A', B: 'B', C: 'C', D: 'D', ABSENT: '결석' };
 
 // ---------------------------------------------------------------- 개요
 
-export function OverviewTab({ data }) {
+export function OverviewTab({ data, onChanged }) {
   const { month, next, classes, exams, recent_notes: notes, counseling, open_tasks: tasks, today } = data;
   const s = data.student;
+  const [changing, setChanging] = useState(null);
+  const [assigning, setAssigning] = useState(false);
+  const upcoming = data.upcoming_classes || [];
+  const done = () => { setChanging(null); setAssigning(false); onChanged(); };
   return (
     <div className="stack">
       <div className="kpis">
@@ -102,8 +150,11 @@ export function OverviewTab({ data }) {
       </div>
       <div className="cols-2">
         <section className="card">
-          <h2>수강 중인 반</h2>
-          {classes.length ? (
+          <div className="card-head">
+            <h2>수강 중인 반{data.unassigned ? <span className="tag warn" style={{ marginLeft: 8 }}>미배정</span> : null}</h2>
+            {s.status !== '퇴원' ? <button type="button" className="btn secondary sm" onClick={() => setAssigning(true)}>반 배정</button> : null}
+          </div>
+          {classes.length || upcoming.length ? (
             <div className="stack-sm">
               {classes.map((c) => (
                 <div key={c.rel_id} className="split">
@@ -111,11 +162,24 @@ export function OverviewTab({ data }) {
                     <Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link>
                     {c.assignment_type === '임시' ? <span className="tag amber" style={{ marginLeft: 6 }}>시험대비 · {c.source_class_name}에서 이동 ~{shortDate(c.end_date)}</span> : null}
                   </span>
-                  <span className="muted">{c.schedule_label}</span>
+                  <span className="cluster">
+                    <span className="muted">{c.schedule_label}</span>
+                    {c.assignment_type !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button> : null}
+                  </span>
+                </div>
+              ))}
+              {upcoming.map((c) => (
+                <div key={c.rel_id} className="split">
+                  <span><Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link> <span className="tag">{shortDate(c.start_date)}부터</span></span>
+                  <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button>
                 </div>
               ))}
             </div>
-          ) : <EmptyState title="수강 중인 반이 없습니다">반 화면의 학생 탭에서 배정하세요.</EmptyState>}
+          ) : <EmptyState title="다니는 반이 없습니다" action={s.status !== '퇴원' ? <button type="button" className="btn" onClick={() => setAssigning(true)}>반 배정</button> : null}>
+            {s.status === '재원' ? '재원생인데 반이 없어 미배정 상태입니다.' : null}
+          </EmptyState>}
+          {changing ? <ClassChangeDialog studentId={s.student_id} studentName={s.name} rel={changing} onClose={() => setChanging(null)} onDone={done} /> : null}
+          {assigning ? <AssignClassModal studentId={s.student_id} exceptIds={[...classes, ...upcoming].map((c) => c.class_id)} onClose={() => setAssigning(false)} onDone={done} /> : null}
         </section>
         <section className="card">
           <h2>기본 정보</h2>

@@ -40,7 +40,7 @@ function Workspace() {
             <PageHeader
               crumbs={[{ href: '/students', label: '학생' }]}
               title={<>{s.name}{s.status !== '재원' ? <span className="tag muted" style={{ marginLeft: 8, verticalAlign: 'middle' }}>{s.status}</span> : null}</>}
-              sub={<>{sub || '반 배정 없음'}{data.badges.length ? <div style={{ marginTop: 6 }}><Badges badges={data.badges} /></div> : null}</>}
+              sub={<>{sub || (data.unassigned ? '미배정' : '반 배정 없음')}{data.badges.length ? <div style={{ marginTop: 6 }}><Badges badges={data.badges} /></div> : null}</>}
               actions={(
                 <>
                   {s.parent_phone ? <a className="btn secondary" href={`tel:${s.parent_phone}`}>학부모 전화</a> : null}
@@ -49,7 +49,7 @@ function Workspace() {
               )}
             />
             <Tabs tabs={TABS} current={tab} />
-            {tab === 'overview' ? <OverviewTab data={data} /> : null}
+            {tab === 'overview' ? <OverviewTab data={data} onChanged={overview.reload} /> : null}
             {tab === 'attendance' ? <AttendanceTab studentId={id} today={data.today} /> : null}
             {tab === 'lessons' ? <LessonsTab studentId={id} /> : null}
             {tab === 'homework' ? <HomeworkTab studentId={id} /> : null}
