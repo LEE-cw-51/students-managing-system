@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAuthed } from '../../../lib/auth.js';
-import { withService } from '../../../lib/store.js';
+import { withService, isPublicApi } from '../../../lib/store.js';
 
 export const runtime = 'nodejs';
 
@@ -16,13 +16,13 @@ export async function POST(req, ctx) {
       if (name === 'apiBatch') {
         const calls = args[0] || [];
         return calls.map((c) => {
-          if (!c || typeof api[c.name] !== 'function') {
+          if (!c || !isPublicApi(api, c.name)) {
             throw new Error('알 수 없는 API입니다.');
           }
           return api[c.name].apply(api, c.args || []);
         });
       }
-      if (typeof api[name] !== 'function') {
+      if (!isPublicApi(api, name)) {
         throw new Error('알 수 없는 API입니다.');
       }
       return api[name].apply(api, args);

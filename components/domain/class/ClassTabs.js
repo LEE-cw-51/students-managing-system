@@ -64,12 +64,16 @@ export function OverviewTab({ data }) {
             <Link className="link-btn" href="?tab=plans" scroll={false}>계획 관리</Link>
           </div>
           <div className="stack-sm">
+            {next ? <PlanLine label={`다음 수업 ${shortDate(next.date)}`} plan={plans.next_day} /> : null}
             <PlanLine label="이번 주" plan={plans.week} />
             <PlanLine label="이번 달" plan={plans.month} />
           </div>
-          <div className="card-head" style={{ marginTop: 18 }}><h3>현재 진도 · 교재</h3></div>
+          <div className="card-head" style={{ marginTop: 18 }}><h3>지금 단원 · 교재</h3></div>
           <dl className="dl">
-            <dt>현재 진도</dt><dd>{cls.current_progress || '-'}</dd>
+            <dt>지금 단원</dt>
+            <dd>{data.current_unit
+              ? (data.current_unit.all_done ? '단원 목록을 모두 마쳤습니다' : `${data.current_unit.title}${data.current_unit.sessions > 1 ? ` (${data.current_unit.index}/${data.current_unit.sessions}회차)` : ''}`)
+              : (cls.current_progress || <span className="muted">정보 수정에서 단원 목록을 넣으면 표시됩니다</span>)}</dd>
             <dt>교재</dt><dd>{cls.textbook || '-'}</dd>
           </dl>
         </section>
