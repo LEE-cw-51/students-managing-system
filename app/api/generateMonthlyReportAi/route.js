@@ -8,6 +8,7 @@ import {
 } from '../../../lib/monthly-ai.js';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 export async function POST(req) {
   if (!(await isAuthed())) {

@@ -333,7 +333,7 @@ describe('plan AI client', () => {
 
   it('turns rate limits and missing keys into teacher-facing messages', async () => {
     await assert.rejects(requestPlanAi({}, { config, fetch: async () => reply('', 429) }), /사용량/);
-    await assert.rejects(requestPlanAi({}, { config: { ...config, key: '' } }), /기본 분할/);
+    await assert.rejects(requestPlanAi({}, { config: { ...config, key: '' } }), /AI_API_KEY/);
   });
 
   it('maps student refs back to ids and blanks unknown ones', () => {
@@ -356,5 +356,64 @@ describe('starting point', () => {
     const { store, api, cls } = setup();
     store.today = () => '2026-09-15';
     assert.ok(api.getPlanBoard(cls.class_id, '2026-09').warnings.some((w) => w.code === 'no_start'));
+  });
+});
+
+describe('one draft button', () => {
+  const { draftClassPlan } = require('../lib/plan-ai.js');
+  const config = { key: 'k', baseUrl: 'https://ai.test/v1', model: 'm' };
+  const runner = (api) => (fn) => Promise.resolve(fn(api));
+
+  it('uses the unit-order split when there is no AI key', async () => {
+    const { api, cls } = setup();
+    const board = await draftClassPlan(cls.class_id, '2026-09', runner(api), { configured: false });
+    assert.equal(board.draft.mode, 'split');
+    assert.match(board.draft.warnings[0], /AI 키가 없어/);
+  });
+
+  it('falls back to the split with the reason when the AI call fails', async () => {
+    const { api, cls } = setup();
+    const fetch = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    const board = await draftClassPlan(cls.class_id, '2026-09', runner(api), { configured: true, config, fetch });
+    assert.equal(board.draft.mode, 'split');
+    assert.match(board.draft.warnings[0], /사용량/);
+  });
+
+  it('saves an AI draft with students mapped back from aliases', async () => {
+    const { api, demo, cls } = setup();
+    const reply = { days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }], students: [{ ref: 'S1', kind: '상담', title: '면담' }] };
+    const fetch = async () => ({ ok: true, status: 200, json: async () => ({ model: 'mock', choices: [{ message: { content: JSON.stringify(reply) } }] }) });
+    const board = await draftClassPlan(cls.class_id, '2026-09', runner(api), { configured: true, config, fetch });
+    assert.equal(board.draft.mode, 'ai');
+    assert.equal(board.draft.model, 'mock');
+    const sorted = demo.students.map((s) => s.student_id).sort();
+    assert.equal(board.draft.students[0].student_id, sorted[0]);
+  });
+
+  it('still reports class problems instead of hiding them behind the split', async () => {
+    const store = createMemoryStore();
+    const api = LMS.createService(store);
+    const demo = seedDemo(api);
+    await assert.rejects(draftClassPlan(demo.class.class_id, '2026-09', runner(api), { configured: true, config }), /단원 목록/);
+  });
+});
+
+describe('shared AI client', () => {
+  it('runs the monthly report sections through the same client', async () => {
+    const { buildMonthlyAiSections } = require('../lib/monthly-ai.js');
+    let sent;
+    const fetch = async (url, init) => { sent = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '【학습 분석】\n좋음' } }] }) }; };
+    const out = await buildMonthlyAiSections({ student: { name: '가' } }, { config: { key: 'k', baseUrl: 'https://ai.test/v1', model: 'm' }, fetch });
+    assert.equal(out.text, '【학습 분석】\n좋음');
+    assert.equal(sent.temperature, 0.4);
+  });
+
+  it('keeps internal service functions off the browser API', () => {
+    const { isPublicApi } = require('../lib/store.js');
+    const api = LMS.createService(createMemoryStore());
+    assert.equal(isPublicApi(api, 'getPlanBoard'), true);
+    ['saveAiPlanDraft', 'getClassPlanContext', 'createSplitDraft', 'setDailyPlanDone', 'ensureSchema', 'nope'].forEach((n) => {
+      assert.equal(isPublicApi(api, n), false, n);
+    });
   });
 });
