@@ -1,5 +1,5 @@
 /**
- * Store-agnostic business API. GAS and the local mock share this layer.
+ * Store-agnostic business API. The Postgres store and the local file/memory store share this layer.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {

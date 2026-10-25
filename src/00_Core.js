@@ -1,6 +1,6 @@
 /**
  * Shared domain constants and pure functions.
- * Works in Apps Script (global) and Node (module.exports).
+ * Works in the browser (imported by React screens) and Node (module.exports).
  */
 var LMS = LMS || {};
 
