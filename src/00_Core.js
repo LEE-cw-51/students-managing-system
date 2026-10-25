@@ -21,7 +21,10 @@ LMS.PREFIX = {
   homeworkCheck: 'HWC',
   session: 'SES',
   examPeriod: 'EXP',
-  schoolExam: 'SCX'
+  schoolExam: 'SCX',
+  planDraft: 'PDR',
+  planSuggestion: 'PSG',
+  unit: 'UNT'
 };
 
 LMS.TABLES = {
@@ -33,7 +36,8 @@ LMS.TABLES = {
     'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
     'weekday', 'start_time', 'end_time', 'textbook', 'current_progress',
     'class_homework', 'memo', 'status', 'created_at', 'updated_at',
-    'schedule', 'class_type', 'exam_period_id', 'target_school', 'target_grade'
+    'schedule', 'class_type', 'exam_period_id', 'target_school', 'target_grade',
+    'curriculum', 'cancel_dates'
   ],
   StudentClasses: [
     'id', 'student_id', 'class_id', 'start_date', 'end_date',
@@ -81,7 +85,15 @@ LMS.TABLES = {
   ClassPlans: [
     'plan_id', 'class_id', 'period_type', 'period_key', 'title',
     'objectives', 'content', 'materials', 'homework', 'memo',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at', 'unit_ids', 'source', 'rationale', 'done_status'
+  ],
+  PlanDrafts: [
+    'draft_id', 'class_id', 'month', 'mode', 'payload', 'warnings', 'base_version',
+    'model', 'status', 'created_at', 'updated_at'
+  ],
+  PlanSuggestions: [
+    'suggestion_id', 'class_id', 'month', 'student_id', 'kind', 'title', 'reason',
+    'status', 'task_id', 'draft_id', 'created_at', 'updated_at'
   ],
   HomeworkItems: [
     'item_id', 'lesson_date', 'class_id', 'title', 'sort_order',
@@ -109,7 +121,7 @@ LMS.CLASS_TYPES = ['정규', '시험대비'];
 LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
 LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
 LMS.SCHOOL_EXAM_TYPES = ['중간', '기말', '기타'];
-LMS.SCHEMA_VERSION = 2;
+LMS.SCHEMA_VERSION = 3;
 LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
 LMS.DIFFICULTY = ['상', '중', '하'];
@@ -124,6 +136,13 @@ LMS.TASK_KIND = ['counsel_parent', 'counsel_student', 'homework_check', 'admin',
 LMS.TASK_STATUS = ['예정', '완료', '취소'];
 LMS.TASK_SOURCE = ['manual', 'counseling'];
 LMS.PLAN_PERIOD = ['일간', '주간', '월간'];
+LMS.PLAN_SOURCE = ['manual', 'split', 'ai'];
+LMS.PLAN_DONE_STATUS = ['완료', '일부', '못 함'];
+LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
+LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
+LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
+LMS.SUGGESTION_STATUS = ['제안', '확정', '무시'];
+LMS.CURRICULUM_MAX_SESSIONS = 20;
 LMS.HOMEWORK_CHECK_STATUS = ['완료', '미완료'];
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -139,7 +158,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'PSG', 'UNT'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
@@ -443,6 +462,36 @@ LMS.validateExamPeriodInput = function (data) {
   };
 };
 
+/** Array stored as JSON text or as an array; [] when blank or broken. */
+LMS.jsonList = function (value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      var parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+};
+
+/** One-off cancelled meeting days on the class row: [{ date, reason, created_at }]. */
+LMS.classCancelDates = function (cls) {
+  return LMS.jsonList(cls && cls.cancel_dates).filter(function (c) {
+    return c && LMS.isIsoDate(c.date);
+  });
+};
+
+/** The class's single-day cancellation on the date, if any. */
+LMS.classCancellationOn = function (cls, isoDate) {
+  var list = LMS.classCancelDates(cls);
+  for (var i = 0; i < list.length; i++) {
+    if (LMS.toStr(list[i].date) === LMS.toStr(isoDate)) return list[i];
+  }
+  return null;
+};
+
 /**
  * Whether a class actually meets on the date: operating, has a slot that weekday,
  * exam classes only inside their period, regular classes not suspended by one.
@@ -451,6 +500,7 @@ LMS.validateExamPeriodInput = function (data) {
 LMS.classMeetsOnDate = function (cls, isoDate, examPeriods) {
   if (!cls || LMS.toStr(cls.status) !== '운영') return false;
   if (!LMS.classTimeOn(cls, isoDate)) return false;
+  if (LMS.classCancellationOn(cls, isoDate)) return false;
   if (LMS.toStr(cls.class_type) === '시험대비') {
     var period = LMS.findById(examPeriods || [], 'exam_period_id', cls.exam_period_id);
     return LMS.examPeriodCovers(period, isoDate);
@@ -1287,7 +1337,57 @@ LMS.validateClassInput = function (data, isUpdate) {
   ['exam_period_id', 'target_school', 'target_grade'].forEach(function (key) {
     if (has(key) || !isUpdate) out[key] = LMS.toStr(data[key]);
   });
+  if (has('curriculum')) {
+    // Validate here; ids are assigned by the service, which knows the previous list.
+    LMS.normalizeCurriculum(data.curriculum);
+    out.curriculum = LMS.jsonList(data.curriculum);
+  }
   return out;
+};
+
+/** Units stored on the class: [{ unit_id, textbook, title, sessions }]. */
+LMS.classCurriculum = function (cls) {
+  return LMS.jsonList(cls && cls.curriculum).filter(function (u) {
+    return u && LMS.toStr(u.unit_id) && LMS.toStr(u.title);
+  }).map(function (u) {
+    return {
+      unit_id: LMS.toStr(u.unit_id),
+      textbook: LMS.toStr(u.textbook),
+      title: LMS.toStr(u.title),
+      sessions: Math.max(1, Math.min(LMS.CURRICULUM_MAX_SESSIONS, Math.round(Number(u.sessions)) || 1))
+    };
+  });
+};
+
+/**
+ * Validate a curriculum list. Units keep their unit_id across renames and reorders; new or
+ * duplicated rows get a fresh id from makeId (the app-wide sequence, so a deleted unit's id is
+ * never handed out again while old plans may still point at it).
+ */
+LMS.normalizeCurriculum = function (list, makeId) {
+  var rows = LMS.jsonList(list);
+  if (rows.length > 200) throw new Error('단원은 200개까지 입력할 수 있습니다.');
+  var seen = {};
+  var out = [];
+  rows.forEach(function (u, i) {
+    if (!u) return;
+    var title = LMS.clipText(u.title, 200);
+    if (!title) return;
+    var sessions = Number(u.sessions === undefined || u.sessions === '' ? 1 : u.sessions);
+    if (!isFinite(sessions) || Math.round(sessions) !== sessions || sessions < 1 || sessions > LMS.CURRICULUM_MAX_SESSIONS) {
+      throw new Error((i + 1) + '번째 단원의 수업 횟수는 1~' + LMS.CURRICULUM_MAX_SESSIONS + ' 사이 정수여야 합니다.');
+    }
+    var id = LMS.clipText(u.unit_id, 40);
+    if (!id || seen[id]) id = makeId ? makeId() : '';
+    if (id) seen[id] = true;
+    out.push({ unit_id: id, textbook: LMS.clipText(u.textbook, 100), title: title, sessions: sessions });
+  });
+  return out;
+};
+
+LMS.clipText = function (value, max) {
+  var s = LMS.toStr(value);
+  return s.length > max ? s.slice(0, max) : s;
 };
 
 /** Most frequent non-empty value (first seen wins ties); '' when none. */
@@ -1466,10 +1566,14 @@ LMS.validateClassPlanInput = function (data, isUpdate) {
   var materials = LMS.toStr(data.materials);
   var homework = LMS.toStr(data.homework);
   var memo = LMS.toStr(data.memo);
-  if (!title && !objectives && !content && !materials && !homework && !memo) {
+  var unitIds = LMS.uniqueIds(LMS.jsonList(data.unit_ids));
+  if (!title && !objectives && !content && !materials && !homework && !memo && !unitIds.length) {
     throw new Error('계획 내용을 한 곳 이상 입력해 주세요.');
   }
+  var doneStatus = periodType === '일간' ? LMS.assertEnum(data.done_status, LMS.PLAN_DONE_STATUS, '진행 결과', true) : '';
   return {
+    unit_ids: unitIds,
+    done_status: doneStatus,
     plan_id: LMS.toStr(data.plan_id),
     class_id: LMS.toStr(data.class_id),
     period_type: periodType,
@@ -1625,6 +1729,8 @@ LMS.TABLE_PK = {
   MakeupSessions: 'makeup_id',
   Tasks: 'task_id',
   ClassPlans: 'plan_id',
+  PlanDrafts: 'draft_id',
+  PlanSuggestions: 'suggestion_id',
   HomeworkItems: 'item_id',
   HomeworkChecks: 'check_id',
   Settings: 'key',

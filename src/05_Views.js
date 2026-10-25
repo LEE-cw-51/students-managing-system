@@ -924,6 +924,15 @@ LMS.createViews = function (ctx) {
       var last = LMS.classResumeDate(p, LMS.toStr(c.class_id)) || p.end_date;
       return { class_id: c.class_id, class_name: c.class_name, period_title: p.title, resume_date: LMS.addDays(last, 1) };
     });
+    var cancelled = table('Classes').filter(function (c) {
+      return LMS.toStr(c.status) === '운영' && LMS.classTimeOn(c, date) && LMS.classCancellationOn(c, date);
+    }).map(function (c) {
+      var time = LMS.classTimeOn(c, date);
+      return {
+        class_id: c.class_id, class_name: c.class_name, start_time: time.start, end_time: time.end,
+        reason: LMS.toStr(LMS.classCancellationOn(c, date).reason)
+      };
+    });
     var agenda = ctx.getDayAgenda(date);
     var active = activeStudents_();
     var flagged = [];
@@ -954,6 +963,7 @@ LMS.createViews = function (ctx) {
         return LMS.toStr(a.start_time).localeCompare(LMS.toStr(b.start_time));
       }),
       suspended: suspended,
+      cancelled: cancelled,
       makeups: teaching.makeup_sessions,
       tasks: (agenda.items || []).filter(function (i) { return !BOARD_HIDDEN_AGENDA[i.kind]; }),
       overdue_tasks: date !== today ? [] : table('Tasks').filter(function (t) {

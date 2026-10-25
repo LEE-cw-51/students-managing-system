@@ -5,6 +5,7 @@ var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
   LMS = require('./00_Core.js');
   require('./05_Views.js');
+  require('./06_Plans.js');
 }
 
 LMS.createService = function (store) {
@@ -258,10 +259,15 @@ LMS.createService = function (store) {
     return Object.assign({}, cls, { students: roster, student_count: roster.length });
   }
 
+  function newUnitId_() {
+    return nextIds(LMS.PREFIX.unit, 1)[0];
+  }
+
   function createClass(data) {
     return withLock(function () {
       var input = LMS.validateClassInput(data, false);
       delete input.schedule_from_legacy;
+      if (input.curriculum) input.curriculum = LMS.normalizeCurriculum(input.curriculum, newUnitId_);
       var id = nextIds('CLS', 1)[0];
       var ts = now();
       var row = Object.assign({}, input, {
@@ -282,6 +288,7 @@ LMS.createService = function (store) {
       var rows = table('Classes');
       var row = LMS.findById(rows, 'class_id', input.class_id);
       if (!row) throw new Error('반 정보를 찾을 수 없습니다.');
+      if (input.curriculum) input.curriculum = LMS.normalizeCurriculum(input.curriculum, newUnitId_);
       if (input.schedule_from_legacy) {
         // A legacy form re-sent the same weekday/time summary: keep per-day times.
         var prevSchedule = LMS.classSchedule(row);
@@ -1270,18 +1277,25 @@ LMS.createService = function (store) {
       });
     }
     var suspension = LMS.toStr(cls.class_type) === '시험대비' ? null : LMS.classSuspensionOn(cls, date, periods);
+    var cancellation = LMS.classCancellationOn(cls, date);
+    var dailyPlan = getClassPlan(classId, '일간', date);
+    var curriculum = LMS.classCurriculum(cls);
     return {
       class: Object.assign({}, cls, { schedule: LMS.classSchedule(cls), schedule_label: LMS.scheduleLabel(LMS.classSchedule(cls)) }),
       date: date,
       time: LMS.classTimeOn(cls, date),
       meets: LMS.classMeetsOnDate(cls, date, periods),
       suspension: suspension ? { title: suspension.title, start_date: suspension.start_date, end_date: suspension.end_date } : null,
+      cancellation: cancellation ? { date: cancellation.date, reason: LMS.toStr(cancellation.reason) } : null,
       prev_meeting: prevMeeting,
       next_meeting: LMS.nextMeetingDateFor(cls, LMS.addDays(date, 1), periods),
       last_progress: lastSession ? { date: lastSession.lesson_date, progress: lastSession.progress } : null,
       session: getClassSession(date, classId),
       class_notice: getClassSessionNotice(date, classId),
-      daily_plan: getClassPlan(classId, '일간', date),
+      daily_plan: dailyPlan ? Object.assign({}, dailyPlan, {
+        unit_titles: LMS.unitTitles(curriculum, LMS.jsonList(dailyPlan.unit_ids)),
+        done_status: LMS.toStr(dailyPlan.done_status)
+      }) : null,
       prior_homework: priorHomework ? {
         assigned_date: priorDate,
         items: priorHomework.items,
@@ -1368,7 +1382,9 @@ LMS.createService = function (store) {
       var saved = saveLessonsBatch(students.map(function (s) {
         return buildRow(s, grades[LMS.toStr(s.student_id)]);
       }));
-      return { saved_count: saved.length, grades: grades, lessons: saved };
+      var plan = Object.prototype.hasOwnProperty.call(p, 'plan_done_status') && planner.setDailyPlanDone
+        ? planner.setDailyPlanDone(classId, date, p.plan_done_status) : null;
+      return { saved_count: saved.length, grades: grades, lessons: saved, daily_plan: plan };
     });
   }
 
@@ -1468,6 +1484,10 @@ LMS.createService = function (store) {
           materials: input.materials,
           homework: input.homework,
           memo: input.memo,
+          unit_ids: input.unit_ids,
+          // A hand edit makes the plan the teacher's own; later splits treat it as fixed.
+          source: 'manual',
+          done_status: Object.prototype.hasOwnProperty.call(data, 'done_status') ? input.done_status : LMS.toStr(existing.done_status),
           updated_at: ts
         });
         rows[idx] = updated;
@@ -1485,6 +1505,10 @@ LMS.createService = function (store) {
         materials: input.materials,
         homework: input.homework,
         memo: input.memo,
+        unit_ids: input.unit_ids,
+        source: 'manual',
+        rationale: '',
+        done_status: input.done_status,
         created_at: ts,
         updated_at: ts
       };
@@ -2736,6 +2760,8 @@ LMS.createService = function (store) {
       saveTable('HomeworkItems', items.filter(inIds));
       saveTable('HomeworkChecks', table('HomeworkChecks').filter(function (c) { return dropItems.indexOf(LMS.toStr(c.item_id)) === -1; }));
       saveTable('ClassPlans', table('ClassPlans').filter(inIds));
+      saveTable('PlanDrafts', table('PlanDrafts').filter(inIds));
+      saveTable('PlanSuggestions', table('PlanSuggestions').filter(inIds));
       saveTable('ExamPeriods', table('ExamPeriods').filter(function (r) { return LMS.toStr(r.exam_period_id) !== LMS.toStr(periodId); }));
       return true;
     });
@@ -2875,12 +2901,30 @@ LMS.createService = function (store) {
     saveTable('ClassSessions', sessions);
   }
 
+  /** v3: plans written before AI planning are the teacher's own. Safe to re-run. */
+  function migrateToV3_() {
+    var plans = table('ClassPlans');
+    var changed = false;
+    plans.forEach(function (p) {
+      if (!LMS.toStr(p.source)) {
+        p.source = 'manual';
+        changed = true;
+      }
+      if (!Array.isArray(p.unit_ids)) {
+        p.unit_ids = LMS.jsonList(p.unit_ids);
+        changed = true;
+      }
+    });
+    if (changed) saveTable('ClassPlans', plans);
+  }
+
   /** Bring stored tables up to LMS.SCHEMA_VERSION. Returns true when anything ran. */
   function ensureSchema() {
     var version = schemaVersion_();
     if (version >= LMS.SCHEMA_VERSION) return false;
     return withLock(function () {
       if (schemaVersion_() < 2) migrateToV2_();
+      if (schemaVersion_() < 3) migrateToV3_();
       var meta = table('_Meta');
       var row = LMS.findById(meta, 'prefix', LMS.SCHEMA_META_KEY);
       if (!row) {
@@ -2972,6 +3016,19 @@ LMS.createService = function (store) {
     generateDailyReports: generateDailyReports
   }) : {};
 
+  var planner = LMS.createPlanner ? LMS.createPlanner({
+    table: table,
+    saveTable: saveTable,
+    store: store,
+    now: now,
+    withLock: withLock,
+    nextIds: nextIds,
+    requireClass: requireClass,
+    rosterOn: rosterOn,
+    examPeriods: examPeriods_,
+    saveTask: saveTask
+  }) : {};
+
   return Object.assign({
     getStudents: getStudents,
     getStudent: getStudent,
@@ -3054,7 +3111,7 @@ LMS.createService = function (store) {
     saveSchoolExam: saveSchoolExam,
     saveSchoolExamsBatch: saveSchoolExamsBatch,
     deleteSchoolExam: deleteSchoolExam
-  }, views);
+  }, views, planner);
 };
 
 if (typeof module !== 'undefined' && module.exports) {
