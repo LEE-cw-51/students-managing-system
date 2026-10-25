@@ -5,9 +5,8 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import WeekdaySchedule from '@/components/ui/WeekdaySchedule';
 import { useToast } from '@/components/ui/Toast';
 import { api, useApi } from '@/lib/client-api';
+import { OUT, excludeGroup, includeGroup } from '@/lib/exam-planner';
 import { shortDate } from '@/lib/format';
-
-const OUT = '__out__';
 
 /** Proposal → adjust → confirm. Students can move between groups or stay out. */
 function PlannerBody({ data, periodId, onApplied, firstTime }) {
@@ -19,6 +18,15 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
   const [saving, setSaving] = useState(false);
 
   const setGroup = (i, patch) => setGroups((list) => list.map((g, j) => (j === i ? { ...g, ...patch } : g)));
+  const setInclude = (i, include) => {
+    if (include) {
+      setGroups((list) => includeGroup(list, i));
+      return;
+    }
+    const next = excludeGroup(groups, pool, i);
+    setGroups(next.groups);
+    setPool(next.pool);
+  };
   const moveStudent = (from, sid, to) => {
     setGroups((list) => {
       const st = list[from].students.find((s) => s.student_id === sid);
@@ -75,12 +83,12 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
   return (
     <div className="stack">
       <p className="muted" style={{ margin: 0 }}>
-        재원생을 학교·학년별로 묶은 제안입니다. 반 이름·시간·날짜를 고치고, 학생을 다른 반으로 옮기거나 빼세요. 종료일은 그 학교 수학 시험일이 기본값입니다.
+        재원생을 학교·학년별로 묶은 제안입니다. 반 이름·시간·날짜를 고치고, 학생을 다른 반으로 옮기거나 빼세요. 그룹 체크를 해제하면 학생은 「편성 안 된 학생」으로 이동합니다. 종료일은 그 학교 수학 시험일이 기본값입니다.
       </p>
       {groups.length ? groups.map((g, i) => (
         <section key={g.key} className={'card plan-group' + (g.include ? '' : ' is-off')}>
           <div className="card-head">
-            <label className="check-label"><input type="checkbox" checked={g.include} onChange={(e) => setGroup(i, { include: e.target.checked })} /> {g.target_school} {g.target_grade} · {g.students.length}명</label>
+            <label className="check-label"><input type="checkbox" checked={g.include} onChange={(e) => setInclude(i, e.target.checked)} /> {g.target_school} {g.target_grade} · {g.students.length}명</label>
             {g.exam_date ? <span className="tag">학교 시험 {shortDate(g.exam_date)}</span> : <span className="tag muted">학교 시험일 미등록</span>}
           </div>
           {g.include ? (
