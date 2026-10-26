@@ -324,11 +324,33 @@ export function LessonsTab({ studentId }) {
 
 export function HomeworkTab({ studentId }) {
   const boot = useBoot();
+  const toast = useToast();
   const r = useRange('1m', boot.today);
   const state = useApi(() => api('getStudentHomework', studentId, { start: r.start, end: r.end }), [studentId, r.range]);
+  const [savingId, setSavingId] = useState('');
+
+  const setStatus = async (row, item, status) => {
+    if (!status || status === item.status || !item.item_id) return;
+    setSavingId(item.item_id);
+    try {
+      await api('saveHomeworkChecks', {
+        lesson_date: row.date,
+        class_id: row.class_id,
+        check_date: row.check_date,
+        checks: [{ student_id: studentId, item_id: item.item_id, status }]
+      });
+      toast(status === '완료' ? `"${item.title}"을(를) 완료로 바꿨습니다.` : `"${item.title}"을(를) 미완료로 바꿨습니다.`);
+      await state.reload();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSavingId('');
+    }
+  };
+
   return (
     <div className="stack">
-      <div className="split"><span className="muted">수업일에 낸 숙제와 다음 수업에서 확인한 결과입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">수업일에 낸 숙제와 다음 수업에서 확인한 결과입니다. 완료 여부는 여기서 바로 고칠 수 있습니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => (
           <>
@@ -354,12 +376,27 @@ export function HomeworkTab({ studentId }) {
                         <td className="primary">{shortDate(row.date)}</td>
                         <td data-label="반">{row.class_name}</td>
                         <td data-label="숙제">
-                          <div className="cluster">
-                            {row.items.map((it, i) => (
-                              <span key={i} className={'tag ' + (it.status === '완료' ? 'ok' : it.status === '미완료' ? 'danger' : 'muted')}>
-                                {it.status === '완료' ? '✓' : it.status === '미완료' ? '✕' : '·'} {it.title}
-                              </span>
-                            ))}
+                          <div className="cluster" style={{ alignItems: 'center' }}>
+                            {row.items.map((it) => {
+                              const tone = it.status === '완료' ? 'ok' : it.status === '미완료' ? 'danger' : 'muted';
+                              const busy = savingId === it.item_id;
+                              return (
+                                <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <span>{it.title}</span>
+                                  <select
+                                    aria-label={`${it.title} 완료 여부`}
+                                    value={it.status === '미확인' ? '' : it.status}
+                                    disabled={busy || !it.item_id}
+                                    onChange={(e) => setStatus(row, it, e.target.value)}
+                                    style={{ width: 'auto', minHeight: 28, padding: '2px 6px', fontSize: '0.85em' }}
+                                  >
+                                    {it.status === '미확인' ? <option value="">미확인</option> : null}
+                                    <option value="완료">완료</option>
+                                    <option value="미완료">미완료</option>
+                                  </select>
+                                </label>
+                              );
+                            })}
                           </div>
                         </td>
                       </tr>
