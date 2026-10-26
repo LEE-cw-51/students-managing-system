@@ -492,6 +492,7 @@ function MemberRows({ rows, selectable, selected, onToggle, onChange }) {
         <td data-label="구분">
           {r.assignment_type === '임시' ? <span className="tag amber">임시 ← {r.source_class_name}</span> : <span className="tag muted">정규</span>}
           {r.away ? <span className="tag amber" style={{ marginLeft: 4 }}>{r.away.class_name} 수업 중</span> : null}
+          {r.student_status === '휴원' ? <span className="tag muted" style={{ marginLeft: 4 }}>휴원 · 수업 기록 명단 제외</span> : null}
         </td>
         <td>{regular ? <button type="button" className="btn ghost sm" onClick={() => onChange(r)}>반 변경</button> : <span className="hint">시험 화면에서 변경</span>}</td>
       </tr>

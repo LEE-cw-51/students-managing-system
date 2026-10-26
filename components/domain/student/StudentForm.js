@@ -34,8 +34,13 @@ export default function StudentForm({ initial, onClose, onSaved }) {
         enrollment_date: form.enrollment_date, status: form.status, memo: form.memo
       };
       if (!isEdit && form.class_id) payload.class_id = form.class_id;
+      if (isEdit && initial.enrollment_date && form.enrollment_date !== initial.enrollment_date && initial.first_class_start === initial.enrollment_date) {
+        payload.sync_class_start = window.confirm(`첫 반 배정도 등록일(${initial.enrollment_date})에 시작했습니다. 반 배정 시작일도 ${form.enrollment_date}로 같이 옮길까요?`);
+      }
       const row = await api(isEdit ? 'updateStudent' : 'createStudent', payload);
-      toast(isEdit ? '학생 정보를 저장했습니다.' : `${row.name} 학생을 등록했습니다.`);
+      const sync = row.class_start_sync;
+      if (sync && !sync.synced) toast(`학생 정보는 저장했지만 반 배정 시작일은 옮기지 못했습니다. ${sync.problem}`, 'error');
+      else toast(isEdit ? '학생 정보를 저장했습니다.' : `${row.name} 학생을 등록했습니다.`);
       boot.refresh();
       onSaved(row);
     } catch (err) {

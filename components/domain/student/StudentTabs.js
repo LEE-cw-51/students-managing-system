@@ -485,14 +485,62 @@ export function ReportsTab({ studentId }) {
 
 // ---------------------------------------------------------------- 반 이력
 
+/** Change when a regular assignment starts. Shows the check result before saving. */
+function StartDateModal({ rel, onClose, onDone }) {
+  const toast = useToast();
+  const [date, setDate] = useState(rel.start_date || '');
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const pick = (v) => { setDate(v); setPreview(null); setError(''); };
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      // First press checks; a second press saves once the warning was shown.
+      if (!preview) {
+        const p = await api('previewClassStartChange', { id: rel.id, start_date: date });
+        if (p.problem) return setError(p.problem);
+        if (p.missing_count) return setPreview(p);
+      }
+      setSaving(true);
+      await api('updateStudentClassStart', { id: rel.id, start_date: date });
+      toast('반 배정 시작일을 바꿨습니다.');
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title={`${rel.class_name} 시작일 수정`} onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <Field label="시작일" hint="이 날부터 수업 기록 명단에 나옵니다.">{(id) => <input id={id} type="date" value={date} onChange={(e) => pick(e.target.value)} />}</Field>
+        {preview ? (
+          <div className="notice-bar" role="status">
+            {preview.missing_count}일치 수업에 이 학생 기록이 없습니다({preview.missing_dates.map(shortDate).join(', ')}). 저장하면 그 날짜 명단에 &lsquo;미기록&rsquo;으로 나옵니다.
+          </div>
+        ) : null}
+        {error ? <div className="error-box" role="alert">{error}</div> : null}
+        <div className="form-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <button type="submit" className="btn" disabled={saving || !date || date === rel.start_date}>{preview ? '그래도 저장' : '저장'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function HistoryTab({ studentId }) {
   const state = useApi(() => api('getStudent', studentId), [studentId]);
+  const [editing, setEditing] = useState(null);
   return (
     <Async state={state}>
       {(s) => s.class_history.length ? (
         <div className="table-wrap">
           <table className="data-table stack-mobile">
-            <thead><tr><th>반</th><th>기간</th><th>구분</th><th>상태</th></tr></thead>
+            <thead><tr><th>반</th><th>기간</th><th>구분</th><th>상태</th><th /></tr></thead>
             <tbody>
               {s.class_history.map((h) => (
                 <tr key={h.id}>
@@ -500,10 +548,12 @@ export function HistoryTab({ studentId }) {
                   <td data-label="기간">{h.start_date || '?'} ~ {h.end_date || '현재'}</td>
                   <td data-label="구분">{h.assignment_type === '임시' ? <span className="tag amber">시험대비 임시</span> : <span className="tag muted">정규</span>}</td>
                   <td data-label="상태">{h.status === '현재' ? <span className="tag ok">수강 중</span> : h.status === '임시' ? <span className="tag amber">임시</span> : <span className="tag muted">종료</span>}</td>
+                  <td className="right">{h.status !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setEditing(h)}>시작일 수정</button> : null}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {editing ? <StartDateModal rel={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); state.reload(); }} /> : null}
         </div>
       ) : <div className="card"><EmptyState title="반 배정 이력이 없습니다" /></div>}
     </Async>

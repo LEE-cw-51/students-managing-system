@@ -298,6 +298,9 @@ function Editor({ data, onSaved, onGoDate }) {
           <h2>④ 학생별 기록</h2>
           <span className="muted">출석 {presentCount}/{data.students.length}명</span>
         </div>
+        {data.on_leave && data.on_leave.length ? (
+          <p className="hint">휴원 학생 {data.on_leave.length}명({data.on_leave.map((s) => s.name).join(', ')})은 명단에서 뺐습니다.</p>
+        ) : null}
         {data.students.length ? (
           <div className="student-rows">
             {data.students.map((st) => {
