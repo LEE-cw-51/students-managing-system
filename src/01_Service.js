@@ -169,6 +169,7 @@ LMS.createService = function (store) {
       var rows = table('Students');
       var row = LMS.findById(rows, 'student_id', input.student_id);
       if (!row) throw new Error('학생 정보를 찾을 수 없습니다.');
+      var withdrawing = input.status === '퇴원' && LMS.toStr(row.status) !== '퇴원';
       row.name = input.name;
       row.grade = input.grade;
       row.school = input.school;
@@ -179,6 +180,10 @@ LMS.createService = function (store) {
       row.memo = input.memo;
       row.updated_at = now();
       saveTable('Students', rows);
+      if (withdrawing) {
+        regularRels_(row.student_id).forEach(function (r) { endRelForClosing_(r); });
+        saveTable('StudentClasses', table('StudentClasses'));
+      }
       return enrichStudent(row);
     });
   }
@@ -300,12 +305,19 @@ LMS.createService = function (store) {
         }
       }
       delete input.schedule_from_legacy;
+      var closing = input.status === '종료' && LMS.toStr(row.status) !== '종료';
       Object.keys(input).forEach(function (k) {
         if (k === 'class_id') return;
         row[k] = input[k];
       });
       row.updated_at = now();
       saveTable('Classes', rows);
+      if (closing && LMS.toStr(row.class_type) !== '시험대비') {
+        table('StudentClasses').filter(function (r) {
+          return LMS.toStr(r.class_id) === LMS.toStr(row.class_id) && LMS.toStr(r.status) === '현재';
+        }).forEach(function (r) { endRelForClosing_(r); });
+        saveTable('StudentClasses', table('StudentClasses'));
+      }
       return row;
     });
   }
@@ -339,12 +351,15 @@ LMS.createService = function (store) {
     return rels.filter(function (r) {
       if (LMS.toStr(r.class_id) !== LMS.toStr(classId) || !LMS.relActiveOn(r, date)) return false;
       return LMS.toStr(r.status) === '임시' || !away[LMS.toStr(r.student_id)];
-    }).map(function (r) {
-      return LMS.findById(students, 'student_id', r.student_id);
-    }).filter(function (s) {
-      if (!s || LMS.toStr(s.status) === '퇴원' || seen[s.student_id]) return false;
+    }).filter(function (r) {
+      var s = LMS.findById(students, 'student_id', r.student_id);
+      if (!s || seen[s.student_id]) return false;
+      // A withdrawn student still belongs to the past dates of a regular assignment closed with an end date.
+      if (LMS.toStr(s.status) === '퇴원' && (LMS.toStr(r.status) !== '종료' || !LMS.toStr(r.end_date))) return false;
       seen[s.student_id] = true;
       return true;
+    }).map(function (r) {
+      return LMS.findById(students, 'student_id', r.student_id);
     }).sort(function (a, b) {
       return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko');
     });
@@ -410,6 +425,27 @@ LMS.createService = function (store) {
     }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort()[0] || '';
   }
 
+  /** Last lesson date of the student in the class ('' when none). */
+  function lastLessonIn_(studentId, classId) {
+    return table('Lessons').filter(function (l) {
+      return LMS.toStr(l.student_id) === LMS.toStr(studentId) && LMS.toStr(l.class_id) === LMS.toStr(classId);
+    }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort().pop() || '';
+  }
+
+  /**
+   * End a current assignment because the student left or the class closed: the last day is
+   * yesterday, or the last lesson recorded in that class when it is later. Changes the row in place.
+   */
+  function endRelForClosing_(rel, lastDay) {
+    var end = lastDay || LMS.addDays(store.today(), -1);
+    var last = lastLessonIn_(rel.student_id, rel.class_id);
+    if (last > end) end = last;
+    if (end < LMS.toStr(rel.start_date)) end = LMS.toStr(rel.start_date);
+    rel.end_date = end;
+    rel.status = '종료';
+    rel.updated_at = now();
+  }
+
   /** Current regular assignments of a student (temporary exam placements are managed elsewhere). */
   function regularRels_(studentId) {
     return table('StudentClasses').filter(function (r) {
@@ -463,7 +499,37 @@ LMS.createService = function (store) {
     rel.status = '종료';
     rel.updated_at = now();
     saveTable('StudentClasses', table('StudentClasses'));
-    return assignStudentToClass({ student_id: rel.student_id, class_id: toClassId, start_date: start }, true);
+    var created = assignStudentToClass({ student_id: rel.student_id, class_id: toClassId, start_date: start }, true);
+    moveTempSource_(rel.student_id, LMS.toStr(rel.class_id), LMS.toStr(toClassId), start);
+    return created;
+  }
+
+  /**
+   * Exam-prep placements name the regular class the student is away from. After a move on `start`,
+   * the days from then on are away from the new class (a placement spanning the move is split).
+   */
+  function moveTempSource_(studentId, fromClassId, toClassId, start) {
+    var rels = table('StudentClasses');
+    var touched = {};
+    var ts = now();
+    rels.slice().forEach(function (r) {
+      if (LMS.toStr(r.status) !== '임시' || LMS.toStr(r.student_id) !== LMS.toStr(studentId)) return;
+      if (LMS.toStr(r.source_class_id) !== fromClassId || LMS.toStr(r.end_date) < start) return;
+      if (LMS.toStr(r.start_date) >= start) {
+        r.source_class_id = toClassId;
+      } else {
+        rels.push(Object.assign({}, r, {
+          id: nextIds('REL', 1)[0], start_date: start, source_class_id: toClassId, created_at: ts
+        }));
+        r.end_date = LMS.addDays(start, -1);
+      }
+      r.updated_at = ts;
+      var cls = LMS.findById(table('Classes'), 'class_id', r.class_id);
+      if (cls && cls.exam_period_id) touched[LMS.toStr(cls.exam_period_id)] = true;
+    });
+    if (!Object.keys(touched).length) return;
+    saveTable('StudentClasses', rels);
+    Object.keys(touched).forEach(recomputeResumeDates_);
   }
 
   function closeStudentClass(data) {
@@ -691,23 +757,54 @@ LMS.createService = function (store) {
     return row;
   }
 
-  /** Copy class-level fields onto every student lesson of that date/class (legacy readers use them). */
-  function writeSessionToLessons_(session, prevMax) {
+  function homeworkItemsOn_(date, classId) {
+    return table('HomeworkItems').filter(function (row) {
+      return LMS.toStr(row.lesson_date) === LMS.toStr(date) && LMS.toStr(row.class_id) === LMS.toStr(classId);
+    });
+  }
+
+  /** The class homework text of a date: its checklist items, else the text most student rows carry (legacy). */
+  function classHomeworkText_(date, classId) {
+    var items = listHomeworkItemRows_(date, classId);
+    if (items.length) return LMS.joinHomeworkTitles(items);
+    return LMS.modeValue(getLessons(date, classId).map(function (l) { return LMS.toStr(l.homework); }));
+  }
+
+  /**
+   * Copy the class-level fields of a date (session progress / difficulty / max, homework text) onto
+   * every student lesson of that date and class, so every reader of a lesson row sees the class values.
+   * options.prevMax: the session max before this save; options.homework: text to use when the date has
+   * no checklist; options.legacyHomework false: leave homework alone when there is no checklist;
+   * options.testedOnly: difficulty only on tested rows; options.keepMax: never touch max.
+   */
+  function applySessionToLessons_(date, classId, options) {
+    options = options || {};
+    var session = findClassSessionRow_(date, classId);
+    var homework = null;
+    if (homeworkItemsOn_(date, classId).length) homework = classHomeworkText_(date, classId);
+    else if (options.homework !== undefined) homework = LMS.toStr(options.homework);
+    else if (options.legacyHomework !== false) homework = classHomeworkText_(date, classId);
+    if (!session && homework === null) return;
     var lessons = table('Lessons');
-    var key = LMS.sessionKey(session.lesson_date, session.class_id);
+    var key = LMS.sessionKey(date, classId);
+    var prevMax = options.prevMax;
     var changed = false;
     lessons.forEach(function (row) {
       if (LMS.sessionKey(row.lesson_date, row.class_id) !== key) return;
-      var next = {
-        progress: LMS.toStr(session.progress),
-        test_difficulty: LMS.toStr(session.test_difficulty)
-      };
-      // Max score follows the session unless a student row carries its own different value.
-      if (!LMS.isBlank(session.test_max_score) &&
-          (LMS.isBlank(row.test_max_score) ||
-           (prevMax !== undefined && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
-        next.test_max_score = session.test_max_score;
+      var next = {};
+      if (session) {
+        next.progress = LMS.toStr(session.progress);
+        if (!options.testedOnly || LMS.toStr(row.test_status) === '실시') {
+          next.test_difficulty = LMS.toStr(session.test_difficulty);
+        }
+        // Max score follows the session unless a student row carries its own different value.
+        if (!options.keepMax && !LMS.isBlank(session.test_max_score) &&
+            (LMS.isBlank(row.test_max_score) ||
+             (prevMax !== undefined && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
+          next.test_max_score = session.test_max_score;
+        }
       }
+      if (homework !== null) next.homework = homework;
       Object.keys(next).forEach(function (k) {
         if (LMS.toStr(row[k]) !== LMS.toStr(next[k])) {
           row[k] = next[k];
@@ -718,18 +815,31 @@ LMS.createService = function (store) {
     if (changed) saveTable('Lessons', lessons);
   }
 
-  function syncClassProgress_(session) {
+  /**
+   * Keep Classes.current_progress on the latest recorded progress. prevProgress is the session's
+   * progress before this save: clearing the progress the class shows falls back to the latest left.
+   */
+  function syncClassProgress_(session, prevProgress) {
     var progress = LMS.toStr(session.progress);
-    if (!progress) return;
     var classId = LMS.toStr(session.class_id);
     var latest = table('ClassSessions').filter(function (r) {
       return LMS.toStr(r.class_id) === classId && LMS.toStr(r.progress);
-    }).map(function (r) { return LMS.toStr(r.lesson_date); }).sort().pop();
-    if (latest && latest > LMS.toStr(session.lesson_date)) return;
+    }).sort(function (a, b) {
+      return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
+    }).pop();
     var classes = table('Classes');
     var cls = LMS.findById(classes, 'class_id', classId);
-    if (!cls || LMS.toStr(cls.current_progress) === progress) return;
-    cls.current_progress = progress;
+    if (!cls) return;
+    var next;
+    if (progress) {
+      if (latest && LMS.toStr(latest.lesson_date) > LMS.toStr(session.lesson_date)) return;
+      next = progress;
+    } else {
+      if (!latest || !prevProgress || LMS.toStr(cls.current_progress) !== LMS.toStr(prevProgress)) return;
+      next = LMS.toStr(latest.progress);
+    }
+    if (LMS.toStr(cls.current_progress) === next) return;
+    cls.current_progress = next;
     cls.updated_at = now();
     saveTable('Classes', classes);
   }
@@ -760,10 +870,11 @@ LMS.createService = function (store) {
       requireClass(input.class_id);
       var prev = findClassSessionRow_(input.lesson_date, input.class_id);
       var prevMax = prev ? prev.test_max_score : undefined;
+      var prevProgress = prev ? LMS.toStr(prev.progress) : '';
       var row = upsertClassSession_(input);
       removeLegacyNotice_(input.lesson_date, input.class_id);
-      writeSessionToLessons_(row, prevMax);
-      syncClassProgress_(row);
+      applySessionToLessons_(row.lesson_date, row.class_id, { prevMax: prevMax });
+      syncClassProgress_(row, prevProgress);
       return Object.assign({}, row);
     });
   }
@@ -849,8 +960,8 @@ LMS.createService = function (store) {
   }
 
   /**
-   * Legacy forms send progress / test meta on each student row. When they do, that
-   * becomes the class session; otherwise the stored session is copied back onto the rows.
+   * Legacy forms send progress / homework / test meta on each student row. When they do, that
+   * becomes the class record; otherwise the stored class record is copied back onto the rows.
    */
   function syncSessionsFromLessons_(rawList, saved) {
     var groups = {};
@@ -873,12 +984,19 @@ LMS.createService = function (store) {
       // A partial batch must not move the class max; it only seeds an empty one.
       if (max && !(session && !LMS.isBlank(session.test_max_score))) fields.test_max_score = LMS.toNum(max);
       if (Object.keys(fields).length) {
+        var prevProgress = session ? LMS.toStr(session.progress) : '';
         fields.lesson_date = g.date;
         fields.class_id = g.classId;
         session = upsertClassSession_(fields);
-        syncClassProgress_(session);
+        syncClassProgress_(session, prevProgress);
       }
-      if (session) writeSessionToLessons_(session);
+      var homework = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.homework); }));
+      var titles = LMS.splitHomeworkLines(homework);
+      if (titles.length && homeworkItemsOn_(g.date, g.classId).length &&
+          LMS.joinHomeworkTitles(titles.map(function (t) { return { title: t }; })) !== classHomeworkText_(g.date, g.classId)) {
+        saveSessionHomework({ lesson_date: g.date, class_id: g.classId, titles: titles });
+      }
+      applySessionToLessons_(g.date, g.classId, homework ? { homework: homework } : {});
     });
   }
 
@@ -899,7 +1017,9 @@ LMS.createService = function (store) {
       }));
       prev = Object.assign(prev, merged, { updated_at: now(), lesson_id: prev.lesson_id, created_at: prev.created_at });
       saveTable('Lessons', lessons);
-      return prev;
+      // Progress / homework / difficulty are class values: an edit on one row edits the class record.
+      syncSessionsFromLessons_([data], [prev]);
+      return LMS.findById(table('Lessons'), 'lesson_id', prev.lesson_id) || prev;
     });
   }
 
@@ -915,14 +1035,8 @@ LMS.createService = function (store) {
   }
 
   function legacyHomeworkItems_(date, classId) {
-    var lessons = getLessons(date, classId);
-    var text = '';
-    for (var i = 0; i < lessons.length; i++) {
-      if (LMS.toStr(lessons[i].homework)) {
-        text = LMS.toStr(lessons[i].homework);
-        break;
-      }
-    }
+    // The text most student rows carry, so one student's diverging row never becomes the class homework.
+    var text = LMS.modeValue(getLessons(date, classId).map(function (l) { return LMS.toStr(l.homework); }));
     if (!text) {
       var cls = LMS.findById(table('Classes'), 'class_id', classId);
       if (cls) text = LMS.toStr(cls.class_homework);
@@ -1078,6 +1192,8 @@ LMS.createService = function (store) {
         }
       });
 
+      var oldItems = existing.slice();
+      var oldChecks = table('HomeworkChecks').filter(function (c) { return !!byId[LMS.toStr(c.item_id)]; });
       var removedIds = unused.map(function (row) { return LMS.toStr(row.item_id); });
       if (removedIds.length) {
         var checks = table('HomeworkChecks').filter(function (c) {
@@ -1103,8 +1219,59 @@ LMS.createService = function (store) {
       });
       saveTable('HomeworkItems', others.concat(saved));
       syncLessonHomeworkText_(date, classId, LMS.joinHomeworkTitles(saved));
+      regradeCheckedLesson_(date, classId, oldItems, oldChecks);
       return getSessionHomework(date, classId);
     });
+  }
+
+  /**
+   * Date whose homework is checked at the lesson on `date`: the previous scheduled meeting, or a
+   * later recorded day (a makeup, or a day of the class's old timetable) when there is one.
+   */
+  function priorLessonDate_(cls, date) {
+    var best = LMS.previousMeetingDateFor(cls, date, examPeriods_());
+    var floor = best || LMS.addDays(date, -90);
+    var classId = LMS.toStr(cls.class_id);
+    var consider = function (row) {
+      var d = LMS.toStr(row.lesson_date);
+      if (LMS.toStr(row.class_id) !== classId || d >= date || d <= floor || (best && d <= best)) return;
+      best = d;
+    };
+    table('Lessons').forEach(consider);
+    table('ClassSessions').forEach(consider);
+    table('HomeworkItems').forEach(consider);
+    return best;
+  }
+
+  /**
+   * After the homework items of `date` change, the auto grades written on the lesson that checked
+   * them follow the new items. A grade the teacher picked by hand (≠ the old auto grade) is kept.
+   */
+  function regradeCheckedLesson_(date, classId, oldItems, oldChecks) {
+    if (!oldChecks.length) return;
+    var cls = LMS.findById(table('Classes'), 'class_id', classId);
+    if (!cls) return;
+    var checkDate = table('Lessons').filter(function (l) {
+      return LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.toStr(l.lesson_date) > LMS.toStr(date);
+    }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort()[0];
+    if (!checkDate || priorLessonDate_(cls, checkDate) !== LMS.toStr(date)) return;
+    var items = listHomeworkItemRows_(date, classId);
+    var ids = {};
+    items.forEach(function (it) { ids[LMS.toStr(it.item_id)] = true; });
+    var checks = table('HomeworkChecks').filter(function (c) { return !!ids[LMS.toStr(c.item_id)]; });
+    var lessons = table('Lessons');
+    var changed = false;
+    lessons.forEach(function (row) {
+      if (LMS.toStr(row.class_id) !== LMS.toStr(classId) || LMS.toStr(row.lesson_date) !== checkDate) return;
+      var before = homeworkCompletionForStudent_(oldItems, oldChecks, row.student_id).grade;
+      if (!before || LMS.toStr(row.assignment_completion) !== before) return;
+      var after = homeworkCompletionForStudent_(items, checks, row.student_id).grade;
+      if (after === before) return;
+      row.assignment_completion = after;
+      row.updated_at = now();
+      changed = true;
+    });
+    if (changed) saveTable('Lessons', lessons);
   }
 
   function homeworkCompletionForStudent_(items, checks, studentId) {
@@ -1259,6 +1426,8 @@ LMS.createService = function (store) {
           }
         });
         saveTable('Lessons', lessonRows);
+        // Rows created here are lessons of the check date: give them that date's class record.
+        applySessionToLessons_(checkDate, classId);
       }
 
       return {
@@ -1323,7 +1492,7 @@ LMS.createService = function (store) {
         var rosterIds = rosterOn(cls.class_id, checkDate).filter(function (s) {
           return LMS.toStr(s.status) === '재원';
         }).map(function (s) { return s.student_id; });
-        var assigned = LMS.previousMeetingDateFor(cls, checkDate, periods);
+        var assigned = priorLessonDate_(cls, checkDate);
         return buildHomeworkSlot_(cls.class_id, cls.class_name, checkDate, assigned, rosterIds);
       });
       var incompleteSlots = slots.filter(function (s) {
@@ -1368,7 +1537,7 @@ LMS.createService = function (store) {
     var lastSession = table('ClassSessions').filter(function (r) {
       return LMS.toStr(r.class_id) === LMS.toStr(classId) && LMS.toStr(r.lesson_date) < date && LMS.toStr(r.progress);
     }).sort(function (a, b) { return LMS.toStr(b.lesson_date).localeCompare(LMS.toStr(a.lesson_date)); })[0];
-    var priorDate = LMS.previousMeetingDateFor(cls, date, examPeriods_());
+    var priorDate = priorLessonDate_(cls, date);
     var priorHomework = priorDate ? getSessionHomework(priorDate, classId) : null;
     var todayHomework = getSessionHomework(date, classId);
     var priorChecksByStudent = {};
@@ -3027,6 +3196,52 @@ LMS.createService = function (store) {
     if (changed) saveTable('ClassPlans', plans);
   }
 
+  /**
+   * v4: re-align copies that drifted before saves kept them in sync. Safe to re-run.
+   * - Student lessons take their date's class record (progress, difficulty on tested rows, checklist homework).
+   * - Withdrawn students and closed classes no longer keep an open (현재) assignment.
+   * - Exam-prep placements point at a regular class the student actually attended in that range.
+   */
+  function migrateToV4_() {
+    var keys = {};
+    table('ClassSessions').concat(table('HomeworkItems')).forEach(function (r) {
+      keys[LMS.sessionKey(r.lesson_date, r.class_id)] = { date: LMS.toStr(r.lesson_date), classId: LMS.toStr(r.class_id) };
+    });
+    Object.keys(keys).sort().forEach(function (k) {
+      applySessionToLessons_(keys[k].date, keys[k].classId, { legacyHomework: false, testedOnly: true, keepMax: true });
+    });
+
+    var students = table('Students');
+    var classes = table('Classes');
+    var rels = table('StudentClasses');
+    var relsChanged = false;
+    rels.forEach(function (r) {
+      if (LMS.toStr(r.status) !== '현재') return;
+      var st = LMS.findById(students, 'student_id', r.student_id);
+      var cls = LMS.findById(classes, 'class_id', r.class_id);
+      var gone = st && LMS.toStr(st.status) === '퇴원';
+      var closed = cls && LMS.toStr(cls.status) === '종료' && LMS.toStr(cls.class_type) !== '시험대비';
+      if (!gone && !closed) return;
+      // Best guess for the last day: the last lesson there, else when the student / class row last changed.
+      var changedOn = LMS.toStr((gone ? st : cls).updated_at).slice(0, 10);
+      endRelForClosing_(r, lastLessonIn_(r.student_id, r.class_id) || (LMS.isIsoDate(changedOn) ? changedOn : LMS.toStr(r.start_date)));
+      relsChanged = true;
+    });
+    var touched = {};
+    rels.forEach(function (r) {
+      if (LMS.toStr(r.status) !== '임시') return;
+      var sources = regularClassIdsOf_(r.student_id, r.start_date, r.end_date);
+      if (!sources.length || sources.indexOf(LMS.toStr(r.source_class_id)) !== -1) return;
+      r.source_class_id = sources[0];
+      r.updated_at = now();
+      relsChanged = true;
+      var cls = LMS.findById(classes, 'class_id', r.class_id);
+      if (cls && cls.exam_period_id) touched[LMS.toStr(cls.exam_period_id)] = true;
+    });
+    if (relsChanged) saveTable('StudentClasses', rels);
+    Object.keys(touched).forEach(recomputeResumeDates_);
+  }
+
   /** Bring stored tables up to LMS.SCHEMA_VERSION. Returns true when anything ran. */
   function ensureSchema() {
     var version = schemaVersion_();
@@ -3034,6 +3249,7 @@ LMS.createService = function (store) {
     return withLock(function () {
       if (schemaVersion_() < 2) migrateToV2_();
       if (schemaVersion_() < 3) migrateToV3_();
+      if (schemaVersion_() < 4) migrateToV4_();
       var meta = table('_Meta');
       var row = LMS.findById(meta, 'prefix', LMS.SCHEMA_META_KEY);
       if (!row) {
