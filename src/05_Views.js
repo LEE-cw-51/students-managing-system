@@ -659,6 +659,16 @@ LMS.createViews = function (ctx) {
   }
 
   /** 재원생 with no class today and none booked: the 미배정 state (derived, not stored). */
+  /** Start date of the student's first regular class assignment ('' when none). */
+  function firstRegularStart_(studentId) {
+    var classes = table('Classes');
+    return table('StudentClasses').filter(function (r) {
+      if (LMS.toStr(r.student_id) !== LMS.toStr(studentId) || LMS.toStr(r.status) === '임시') return false;
+      var c = LMS.findById(classes, 'class_id', r.class_id);
+      return !c || LMS.toStr(c.class_type) !== '시험대비';
+    }).map(function (r) { return LMS.toStr(r.start_date); }).filter(Boolean).sort()[0] || '';
+  }
+
   function isUnassigned_(student, today) {
     return LMS.toStr(student.status) === '재원' && !activeRels_(student.student_id, today).length &&
       !upcomingRels_(student.student_id, today).length;
@@ -764,7 +774,7 @@ LMS.createViews = function (ctx) {
       }
     });
     return {
-      student: Object.assign({}, s),
+      student: Object.assign({}, s, { first_class_start: firstRegularStart_(s.student_id) }),
       today: today,
       classes: rels,
       upcoming_classes: upcomingRels_(studentId, today),

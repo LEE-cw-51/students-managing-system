@@ -170,6 +170,7 @@ LMS.createService = function (store) {
       var row = LMS.findById(rows, 'student_id', input.student_id);
       if (!row) throw new Error('학생 정보를 찾을 수 없습니다.');
       var withdrawing = input.status === '퇴원' && LMS.toStr(row.status) !== '퇴원';
+      var prevEnrollment = LMS.toStr(row.enrollment_date);
       row.name = input.name;
       row.grade = input.grade;
       row.school = input.school;
@@ -184,8 +185,30 @@ LMS.createService = function (store) {
         regularRels_(row.student_id).forEach(function (r) { endRelForClosing_(r); });
         saveTable('StudentClasses', table('StudentClasses'));
       }
-      return enrichStudent(row);
+      var startSync = null;
+      if (data && data.sync_class_start && prevEnrollment && LMS.toStr(row.enrollment_date) !== prevEnrollment) {
+        // Only the first regular assignment, and only when it started on the old enrollment date.
+        var first = firstRegularRel_(row.student_id);
+        if (first && LMS.toStr(first.start_date) === prevEnrollment) {
+          var problem = classStartProblem_(first, LMS.toStr(row.enrollment_date));
+          if (problem) startSync = { synced: false, problem: problem };
+          else {
+            applyClassStart_(first, LMS.toStr(row.enrollment_date));
+            startSync = { synced: true, problem: '' };
+          }
+        }
+      }
+      return Object.assign(enrichStudent(row), { class_start_sync: startSync });
     });
+  }
+
+  function firstRegularRel_(studentId) {
+    var classes = table('Classes');
+    return table('StudentClasses').filter(function (r) {
+      if (LMS.toStr(r.student_id) !== LMS.toStr(studentId) || LMS.toStr(r.status) === '임시') return false;
+      var c = LMS.findById(classes, 'class_id', r.class_id);
+      return !c || LMS.toStr(c.class_type) !== '시험대비';
+    }).sort(function (a, b) { return LMS.toStr(a.start_date).localeCompare(LMS.toStr(b.start_date)); })[0] || null;
   }
 
   function archiveStudent(studentId) {
@@ -399,6 +422,8 @@ LMS.createService = function (store) {
           LMS.toStr(r.status) === '현재';
       });
       if (exists) throw new Error('이미 해당 반에 소속되어 있습니다.');
+      var clash = sameClassOverlap_(studentId, classId, start, '', '');
+      if (clash) throw new Error('이 반의 이전 배정(' + clash.start_date + ' ~ ' + clash.end_date + ')과 기간이 겹칩니다. 시작일을 ' + LMS.addDays(clash.end_date, 1) + ' 이후로 잡아 주세요.');
       var ts = now();
       var row = {
         id: nextIds('REL', 1)[0],
@@ -444,6 +469,96 @@ LMS.createService = function (store) {
     rel.end_date = end;
     rel.status = '종료';
     rel.updated_at = now();
+  }
+
+  /** Another assignment of the student in the same class whose period overlaps [start, end] (null when none). */
+  function sameClassOverlap_(studentId, classId, start, end, ignoreId) {
+    return table('StudentClasses').filter(function (r) {
+      if (LMS.toStr(r.id) === LMS.toStr(ignoreId) || LMS.toStr(r.status) === '임시') return false;
+      if (LMS.toStr(r.student_id) !== LMS.toStr(studentId) || LMS.toStr(r.class_id) !== LMS.toStr(classId)) return false;
+      if (LMS.toStr(r.status) === '종료' && !r.end_date) return false;
+      return LMS.rangesOverlap(r.start_date, r.end_date, start, end);
+    })[0] || null;
+  }
+
+  /** Why the regular assignment cannot start on `start`, or '' when it can. */
+  function classStartProblem_(rel, start) {
+    if (!rel || LMS.toStr(rel.status) === '임시') return '시험대비 임시 배정은 시험 화면에서 바꿔 주세요.';
+    if (!LMS.isIsoDate(start)) return '시작일 형식이 올바르지 않습니다.';
+    var end = LMS.toStr(rel.end_date);
+    if (end && start > end) return '시작일은 이 배정의 마지막 수업일(' + end + ')보다 늦을 수 없습니다.';
+    var first = table('Lessons').filter(function (l) {
+      var d = LMS.toStr(l.lesson_date);
+      return LMS.toStr(l.student_id) === LMS.toStr(rel.student_id) && LMS.toStr(l.class_id) === LMS.toStr(rel.class_id) &&
+        d >= LMS.toStr(rel.start_date) && (!end || d <= end);
+    }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort()[0];
+    if (first && start > first) return '이 반 수업 기록이 ' + first + '부터 있어 시작일을 그 뒤로 옮길 수 없습니다.';
+    var clash = sameClassOverlap_(rel.student_id, rel.class_id, start, end, rel.id);
+    if (clash) return '이 반의 다른 배정(' + clash.start_date + ' ~ ' + (clash.end_date || '현재') + ')과 기간이 겹칩니다.';
+    // A move ends the old class the day before the new one starts; pulling the start earlier would overlap it.
+    var dayBefore = LMS.addDays(LMS.toStr(rel.start_date), -1);
+    var classes = table('Classes');
+    var prev = table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.student_id) === LMS.toStr(rel.student_id) && LMS.toStr(r.status) === '종료' &&
+        LMS.toStr(r.class_id) !== LMS.toStr(rel.class_id) && LMS.toStr(r.end_date) === dayBefore;
+    })[0];
+    if (prev && start <= dayBefore) {
+      var pc = LMS.findById(classes, 'class_id', prev.class_id);
+      return '반 이동으로 시작한 배정입니다. 이전 반(' + (pc ? pc.class_name : prev.class_id) + ')의 마지막 수업일(' + dayBefore + ') 다음 날보다 앞당길 수 없습니다.';
+    }
+    return '';
+  }
+
+  /** Recorded class days in the newly covered range on which the student has no lesson. */
+  function classStartMissingDates_(rel, start) {
+    var from = LMS.toStr(start);
+    var to = LMS.addDays(LMS.toStr(rel.start_date), -1);
+    if (!from || from > to) return [];
+    var cid = LMS.toStr(rel.class_id);
+    var dates = {};
+    table('ClassSessions').concat(table('Lessons')).forEach(function (r) {
+      if (LMS.toStr(r.class_id) === cid && LMS.inRange(r.lesson_date, from, to)) dates[LMS.toStr(r.lesson_date)] = true;
+    });
+    table('Lessons').forEach(function (l) {
+      if (LMS.toStr(l.class_id) === cid && LMS.toStr(l.student_id) === LMS.toStr(rel.student_id)) delete dates[LMS.toStr(l.lesson_date)];
+    });
+    return Object.keys(dates).sort();
+  }
+
+  /** Check a start-date change before saving: the blocking reason, and class days that would show this student unrecorded. */
+  function previewClassStartChange(data) {
+    data = data || {};
+    var rel = LMS.findById(table('StudentClasses'), 'id', data.id);
+    if (!rel) throw new Error('반 배정 정보를 찾을 수 없습니다.');
+    var start = LMS.toStr(data.start_date);
+    var problem = classStartProblem_(rel, start);
+    var missing = problem ? [] : classStartMissingDates_(rel, start);
+    return { id: rel.id, start_date: start, problem: problem, missing_dates: missing, missing_count: missing.length };
+  }
+
+  function applyClassStart_(rel, start) {
+    var from = start < LMS.toStr(rel.start_date) ? start : LMS.toStr(rel.start_date);
+    rel.start_date = start;
+    rel.updated_at = now();
+    saveTable('StudentClasses', table('StudentClasses'));
+    // Resume dates of exam-prep periods are computed from regular assignment ranges.
+    examPeriods_().forEach(function (p) {
+      if (LMS.rangesOverlap(p.start_date, p.end_date, from, rel.end_date)) recomputeResumeDates_(p.exam_period_id);
+    });
+    return rel;
+  }
+
+  /** Change when a regular assignment starts (e.g. a student entered with today's date for an earlier class). */
+  function updateStudentClassStart(data) {
+    return withLock(function () {
+      data = data || {};
+      var rel = LMS.findById(table('StudentClasses'), 'id', data.id);
+      if (!rel) throw new Error('반 배정 정보를 찾을 수 없습니다.');
+      var start = LMS.toStr(data.start_date);
+      var problem = classStartProblem_(rel, start);
+      if (problem) throw new Error(problem);
+      return applyClassStart_(rel, start);
+    });
   }
 
   /** Current regular assignments of a student (temporary exam placements are managed elsewhere). */
@@ -1520,9 +1635,13 @@ LMS.createService = function (store) {
   function getTodayClassSession(date, classId) {
     var cls = requireClass(classId);
     var periods = examPeriods_();
-    var students = rosterOn(classId, date).filter(function (s) {
+    var roster = rosterOn(classId, date);
+    var students = roster.filter(function (s) {
       return LMS.toStr(s.status) === '재원';
     });
+    var onLeave = roster.filter(function (s) {
+      return LMS.toStr(s.status) === '휴원';
+    }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
     var lessons = getLessons(date, classId);
     var byStudent = {};
     lessons.forEach(function (l) { byStudent[l.student_id] = l; });
@@ -1593,6 +1712,7 @@ LMS.createService = function (store) {
           badges: views.studentBadges ? views.studentBadges(s) : []
         });
       }),
+      on_leave: onLeave,
       recorded_count: lessons.length,
       total_count: students.length
     };
@@ -3376,6 +3496,8 @@ LMS.createService = function (store) {
     getStudentClasses: getStudentClasses,
     getClassRoster: getClassRoster,
     assignStudentToClass: assignStudentToClass,
+    previewClassStartChange: previewClassStartChange,
+    updateStudentClassStart: updateStudentClassStart,
     closeStudentClass: closeStudentClass,
     moveStudent: moveStudent,
     moveStudents: moveStudents,
