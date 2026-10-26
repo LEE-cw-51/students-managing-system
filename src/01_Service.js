@@ -370,8 +370,11 @@ LMS.createService = function (store) {
     var run = function () {
       var studentId = LMS.toStr(data.student_id);
       var classId = LMS.toStr(data.class_id);
-      requireStudent(studentId);
-      requireClass(classId);
+      var student = requireStudent(studentId);
+      var cls = requireClass(classId);
+      if (LMS.toStr(student.status) === '퇴원') throw new Error('퇴원한 학생은 반에 배정할 수 없습니다.');
+      if (LMS.toStr(cls.status) !== '운영') throw new Error('종료된 반에는 배정할 수 없습니다.');
+      if (LMS.toStr(cls.class_type) === '시험대비') throw new Error('시험대비 반은 시험 화면에서 편성해 주세요.');
       var start = LMS.toStr(data.start_date) || store.today();
       if (!LMS.isIsoDate(start)) throw new Error('반 시작일 형식이 올바르지 않습니다.');
       var rels = table('StudentClasses');
@@ -399,22 +402,84 @@ LMS.createService = function (store) {
     return alreadyLocked ? run() : withLock(run);
   }
 
+  /** First lesson date of the student in the class on or after `from` ('' when none). */
+  function lessonOnOrAfter_(studentId, classId, from) {
+    return table('Lessons').filter(function (l) {
+      return LMS.toStr(l.student_id) === LMS.toStr(studentId) &&
+        LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.toStr(l.lesson_date) >= from;
+    }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort()[0] || '';
+  }
+
+  /** Current regular assignments of a student (temporary exam placements are managed elsewhere). */
+  function regularRels_(studentId) {
+    return table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.student_id) === LMS.toStr(studentId) && LMS.toStr(r.status) === '현재';
+    });
+  }
+
+  /**
+   * The one assignment a move or removal acts on: by relation id, by class, or the only regular
+   * class. A student in two classes must say which one, so moving never ends both.
+   */
+  function pickRel_(studentId, relId, classId) {
+    var rels = regularRels_(studentId);
+    if (relId) {
+      var byId = LMS.findById(table('StudentClasses'), 'id', relId);
+      if (!byId || LMS.toStr(byId.student_id) !== LMS.toStr(studentId)) throw new Error('반 배정 정보를 찾을 수 없습니다.');
+      if (LMS.toStr(byId.status) === '임시') throw new Error('시험대비 임시 배정은 시험 화면에서 바꿔 주세요.');
+      if (LMS.toStr(byId.status) !== '현재') throw new Error('이미 끝난 반 배정입니다.');
+      return byId;
+    }
+    if (classId) {
+      var byClass = rels.filter(function (r) { return LMS.toStr(r.class_id) === LMS.toStr(classId); })[0];
+      if (!byClass) throw new Error('현재 반 배정 정보를 찾을 수 없습니다.');
+      return byClass;
+    }
+    if (!rels.length) throw new Error('지금 다니는 반이 없습니다. 반 배정을 써 주세요.');
+    if (rels.length > 1) throw new Error('두 반 이상 다니는 학생입니다. 어느 반에서 옮길지 골라 주세요.');
+    return rels[0];
+  }
+
+  /** Why moving this assignment to the class on the date is not allowed, or '' when it is. */
+  function moveProblem_(rel, toClassId, start) {
+    if (!LMS.isIsoDate(start)) return '이동일 형식이 올바르지 않습니다.';
+    if (LMS.toStr(rel.class_id) === LMS.toStr(toClassId)) return '지금 다니는 반과 같은 반입니다.';
+    var cls = LMS.findById(table('Classes'), 'class_id', toClassId);
+    if (!cls) return '옮겨 갈 반을 찾을 수 없습니다.';
+    if (LMS.toStr(cls.status) !== '운영') return '종료된 반으로는 옮길 수 없습니다.';
+    if (LMS.toStr(cls.class_type) === '시험대비') return '시험대비 반은 시험 화면에서 편성해 주세요.';
+    var already = regularRels_(rel.student_id).some(function (r) { return LMS.toStr(r.class_id) === LMS.toStr(toClassId); });
+    if (already) return '이미 ' + cls.class_name + '에 다니고 있습니다.';
+    if (start <= LMS.toStr(rel.start_date)) {
+      return '이동일은 지금 반 시작일(' + rel.start_date + ') 다음 날부터 고를 수 있습니다. 잘못 넣은 배정이면 배정 삭제 후 다시 배정해 주세요.';
+    }
+    var later = lessonOnOrAfter_(rel.student_id, rel.class_id, start);
+    if (later) return '이동일 이후(' + later + ') 지금 반에 수업 기록이 있습니다. 이동일을 그 뒤로 잡아 주세요.';
+    return '';
+  }
+
+  function applyMove_(rel, toClassId, start) {
+    rel.end_date = LMS.addDays(start, -1);
+    rel.status = '종료';
+    rel.updated_at = now();
+    saveTable('StudentClasses', table('StudentClasses'));
+    return assignStudentToClass({ student_id: rel.student_id, class_id: toClassId, start_date: start }, true);
+  }
+
   function closeStudentClass(data) {
     return withLock(function () {
+      data = data || {};
       var rels = table('StudentClasses');
-      var row = null;
-      if (data && data.id) {
-        row = LMS.findById(rels, 'id', data.id);
-      } else if (data && data.student_id && data.class_id) {
-        row = rels.filter(function (r) {
-          return LMS.toStr(r.student_id) === LMS.toStr(data.student_id) &&
-            LMS.toStr(r.class_id) === LMS.toStr(data.class_id) &&
-            LMS.toStr(r.status) === '현재';
-        })[0];
+      var row = data.id ? LMS.findById(rels, 'id', data.id) : null;
+      if (!row && data.student_id && data.class_id) {
+        row = regularRels_(data.student_id).filter(function (r) { return LMS.toStr(r.class_id) === LMS.toStr(data.class_id); })[0];
       }
-      if (!row) throw new Error('현재 반 배정 정보를 찾을 수 없습니다.');
+      if (!row || LMS.toStr(row.status) !== '현재') throw new Error('현재 반 배정 정보를 찾을 수 없습니다.');
       var end = LMS.toStr(data.end_date) || store.today();
       if (!LMS.isIsoDate(end)) throw new Error('반 종료일 형식이 올바르지 않습니다.');
+      if (end < LMS.toStr(row.start_date)) throw new Error('마지막 수업일이 반 시작일(' + row.start_date + ')보다 빠릅니다. 잘못 넣은 배정이면 배정 삭제를 써 주세요.');
+      var later = lessonOnOrAfter_(row.student_id, row.class_id, LMS.addDays(end, 1));
+      if (later) throw new Error('마지막 수업일 뒤(' + later + ')에 이 반 수업 기록이 있습니다. 날짜를 그 뒤로 잡아 주세요.');
       row.end_date = end;
       row.status = '종료';
       row.updated_at = now();
@@ -423,32 +488,77 @@ LMS.createService = function (store) {
     });
   }
 
+  /** Whether a regular assignment left no trace (no lessons or homework checks) and can be deleted. */
+  function relRemovable_(rel) {
+    if (!rel || LMS.toStr(rel.status) === '임시') return false;
+    var sid = LMS.toStr(rel.student_id);
+    var cid = LMS.toStr(rel.class_id);
+    var hasLesson = table('Lessons').some(function (l) {
+      return LMS.toStr(l.student_id) === sid && LMS.toStr(l.class_id) === cid;
+    });
+    if (hasLesson) return false;
+    var items = {};
+    table('HomeworkItems').forEach(function (it) { if (LMS.toStr(it.class_id) === cid) items[LMS.toStr(it.item_id)] = true; });
+    return !table('HomeworkChecks').some(function (c) { return LMS.toStr(c.student_id) === sid && items[LMS.toStr(c.item_id)]; });
+  }
+
+  /** Delete an assignment made by mistake. Only when the student has no records in that class. */
+  function removeStudentClass(data) {
+    return withLock(function () {
+      var rels = table('StudentClasses');
+      var row = LMS.findById(rels, 'id', data && data.id);
+      if (!row) throw new Error('반 배정 정보를 찾을 수 없습니다.');
+      if (LMS.toStr(row.status) === '임시') throw new Error('시험대비 임시 배정은 시험 화면에서 바꿔 주세요.');
+      if (!relRemovable_(row)) throw new Error('이 반에 수업 기록이나 숙제 체크가 있어 삭제할 수 없습니다. ‘반에서 빼기’를 써 주세요.');
+      saveTable('StudentClasses', rels.filter(function (r) { return r !== row; }));
+      return { deleted: true, id: row.id };
+    });
+  }
+
+  /** Move one student: from_rel_id / from_class_id picks the class they leave (required with two). */
   function moveStudent(data) {
     return withLock(function () {
+      data = data || {};
       var studentId = LMS.toStr(data.student_id);
       var newClassId = LMS.toStr(data.class_id);
       requireStudent(studentId);
       requireClass(newClassId);
       var start = LMS.toStr(data.start_date) || store.today();
-      if (!LMS.isIsoDate(start)) throw new Error('반 시작일 형식이 올바르지 않습니다.');
-      var rels = table('StudentClasses');
-      var currentId = LMS.toStr(data.current_rel_id);
-      rels.forEach(function (r) {
-        var match = currentId
-          ? LMS.toStr(r.id) === currentId
-          : (LMS.toStr(r.student_id) === studentId && LMS.toStr(r.status) === '현재');
-        if (match && LMS.toStr(r.status) === '현재') {
-          r.end_date = LMS.addDays(start, -1);
-          r.status = '종료';
-          r.updated_at = now();
-        }
+      var rel = pickRel_(studentId, LMS.toStr(data.from_rel_id || data.current_rel_id), LMS.toStr(data.from_class_id));
+      var problem = moveProblem_(rel, newClassId, start);
+      if (problem) throw new Error(problem);
+      return applyMove_(rel, newClassId, start);
+    });
+  }
+
+  /**
+   * Move several students of one class together. Every student is checked first; if any cannot
+   * move, nothing changes and the reasons come back per student.
+   */
+  function moveStudents(data) {
+    return withLock(function () {
+      data = data || {};
+      var fromId = LMS.toStr(data.from_class_id);
+      var toId = LMS.toStr(data.to_class_id);
+      requireClass(fromId);
+      requireClass(toId);
+      var start = LMS.toStr(data.date) || store.today();
+      var ids = LMS.uniqueIds(data.student_ids);
+      if (!ids.length) throw new Error('옮길 학생을 골라 주세요.');
+      var students = table('Students');
+      var plan = [];
+      var problems = [];
+      ids.forEach(function (sid) {
+        var st = LMS.findById(students, 'student_id', sid);
+        var name = st ? st.name : sid;
+        var rel = regularRels_(sid).filter(function (r) { return LMS.toStr(r.class_id) === fromId; })[0];
+        var problem = rel ? moveProblem_(rel, toId, start) : '이 반의 정규 배정이 아닙니다.';
+        if (problem) problems.push(name + ': ' + problem);
+        else plan.push(rel);
       });
-      saveTable('StudentClasses', rels);
-      return assignStudentToClass({
-        student_id: studentId,
-        class_id: newClassId,
-        start_date: start
-      }, true);
+      if (problems.length) throw new Error('옮기지 않았습니다.\n' + problems.join('\n'));
+      var moved = plan.map(function (rel) { return applyMove_(rel, toId, start); });
+      return { moved_count: moved.length };
     });
   }
 
@@ -2947,9 +3057,10 @@ LMS.createService = function (store) {
       today: today,
       search: {
         students: table('Students').map(function (s) {
-          var classNames = rels.filter(function (r) {
+          var mine = rels.filter(function (r) {
             return LMS.toStr(r.student_id) === LMS.toStr(s.student_id) && LMS.relActiveOn(r, today);
-          }).map(function (r) {
+          });
+          var classNames = mine.map(function (r) {
             var cls = LMS.findById(classes, 'class_id', r.class_id);
             return cls ? cls.class_name : '';
           }).filter(Boolean);
@@ -2961,7 +3072,9 @@ LMS.createService = function (store) {
             school: LMS.toStr(s.school),
             status: LMS.toStr(s.status),
             phones: [digits(s.student_phone).slice(-4), digits(s.parent_phone).slice(-4)].filter(Boolean),
-            classes: classNames
+            classes: classNames,
+            // Regular classes only, for "어느 반에서 옮길지" in the assign dialog.
+            class_ids: mine.filter(function (r) { return LMS.toStr(r.status) === '현재'; }).map(function (r) { return LMS.toStr(r.class_id); })
           };
         }),
         classes: classes.map(function (c) {
@@ -3012,6 +3125,7 @@ LMS.createService = function (store) {
     getDayAgenda: getDayAgenda,
     getWeeklyHomeworkDashboard: getWeeklyHomeworkDashboard,
     regularClassIdsOf: regularClassIdsOf_,
+    relRemovable: relRemovable_,
     generateDailyReports: generateDailyReports,
     // The planner is built just below; views call this only at request time.
     currentUnit: function (classId) { return planner.getCurrentUnit ? planner.getCurrentUnit(classId) : null; }
@@ -3048,6 +3162,8 @@ LMS.createService = function (store) {
     assignStudentToClass: assignStudentToClass,
     closeStudentClass: closeStudentClass,
     moveStudent: moveStudent,
+    moveStudents: moveStudents,
+    removeStudentClass: removeStudentClass,
     getLessons: getLessons,
     getStudentLessons: getStudentLessons,
     getLesson: getLesson,

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Tabs, { useTab } from '@/components/ui/Tabs';
@@ -10,6 +10,40 @@ import ClassForm from '@/components/domain/class/ClassForm';
 import { OverviewTab, ProgressTab, HomeworkTab, TestsTab, StudentsTab, StatsTab } from '@/components/domain/class/ClassTabs';
 import PlansTab from '@/components/domain/class/PlansTab';
 import { api, useApi } from '@/lib/client-api';
+import { useBoot } from '@/components/shell/AppShell';
+
+const GROUPS = [
+  { key: 'regular', label: '운영 중 · 정규', test: (c) => c.status === '운영' && c.class_type !== '시험대비' },
+  { key: 'exam', label: '운영 중 · 시험대비', test: (c) => c.status === '운영' && c.class_type === '시험대비' },
+  { key: 'closed', label: '종료', test: (c) => c.status !== '운영' }
+];
+
+/** Jump to another class without going back to the list; the open tab stays the same. */
+function ClassSwitcher({ currentId, tab }) {
+  const boot = useBoot();
+  const router = useRouter();
+  const all = (boot.search.classes || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const groups = GROUPS.map((g) => ({ ...g, items: all.filter(g.test) })).filter((g) => g.items.length);
+  const mine = groups.find((g) => g.items.some((c) => c.id === currentId));
+  if (!mine || all.length < 2) return null;
+  const i = mine.items.findIndex((c) => c.id === currentId);
+  const go = (id) => { if (id && id !== currentId) router.push(`/classes/${id}?tab=${tab}`); };
+  const prev = mine.items[i - 1];
+  const next = mine.items[i + 1];
+  return (
+    <div className="cluster class-switcher">
+      <button type="button" className="btn secondary sm" disabled={!prev} onClick={() => go(prev && prev.id)} aria-label={prev ? `이전 반 ${prev.name}` : '이전 반 없음'}>◀</button>
+      <select value={currentId} onChange={(e) => go(e.target.value)} aria-label="다른 반으로 이동" style={{ width: 'auto' }}>
+        {groups.map((g) => (
+          <optgroup key={g.key} label={g.label}>
+            {g.items.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </optgroup>
+        ))}
+      </select>
+      <button type="button" className="btn secondary sm" disabled={!next} onClick={() => go(next && next.id)} aria-label={next ? `다음 반 ${next.name}` : '다음 반 없음'}>▶</button>
+    </div>
+  );
+}
 
 const TABS = [
   { key: 'overview', label: '개요' },
@@ -40,6 +74,7 @@ function Workspace() {
               sub={sub || '시간표가 없습니다. 정보 수정에서 요일과 시간을 입력하세요.'}
               actions={(
                 <>
+                  <ClassSwitcher currentId={cls.class_id} tab={tab} />
                   <Link className="btn" href={`/today?class=${cls.class_id}`}>수업 기록하기</Link>
                   <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
                 </>
@@ -64,9 +99,11 @@ function Workspace() {
 }
 
 export default function ClassPage() {
+  const { id } = useParams();
+  // A fresh workspace per class: switching classes resets selections, open dialogs and the plan month.
   return (
     <Suspense fallback={null}>
-      <Workspace />
+      <Workspace key={id} />
     </Suspense>
   );
 }

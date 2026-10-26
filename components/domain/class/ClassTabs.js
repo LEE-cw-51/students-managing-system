@@ -9,6 +9,7 @@ import MiniBars from '@/components/ui/MiniBars';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import SessionEditor from './SessionEditor';
+import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
@@ -346,24 +347,37 @@ export function TestsTab({ classId }) {
 function AssignModal({ classId, members, onClose, onDone }) {
   const boot = useBoot();
   const toast = useToast();
-  const inClass = new Set(members.current.map((m) => m.student_id));
-  const candidates = (boot.search.students || []).filter((s) => s.status === '재원' && !inClass.has(s.id));
+  const inClass = new Set([...members.current, ...members.upcoming].map((m) => m.student_id));
+  // Students without a class come first: they are usually the ones waiting for one.
+  const candidates = (boot.search.students || []).filter((s) => s.status === '재원' && !inClass.has(s.id))
+    .sort((a, b) => (a.classes.length ? 1 : 0) - (b.classes.length ? 1 : 0) || a.name.localeCompare(b.name, 'ko'));
+  const classNames = Object.fromEntries((boot.search.classes || []).map((c) => [c.id, c.name]));
   const [studentId, setStudentId] = useState('');
   const [mode, setMode] = useState('add');
+  const [fromClass, setFromClass] = useState('');
   const [date, setDate] = useState(boot.today);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const picked = candidates.find((s) => s.id === studentId);
+  const pickedFrom = picked ? (picked.class_ids || []) : [];
   const visible = candidates.filter((s) => !filter || s.name.includes(filter) || s.school.includes(filter));
+
+  const pick = (id) => {
+    setStudentId(id);
+    const s = candidates.find((x) => x.id === id);
+    setFromClass(s && (s.class_ids || []).length === 1 ? s.class_ids[0] : '');
+    if (!s || !(s.class_ids || []).length) setMode('add');
+  };
 
   const submit = async (e) => {
     e.preventDefault();
     if (!studentId) return setError('학생을 선택해 주세요.');
+    if (mode === 'move' && !fromClass) return setError('어느 반에서 옮길지 골라 주세요.');
     setSaving(true);
     setError('');
     try {
-      if (mode === 'move') await api('moveStudent', { student_id: studentId, class_id: classId, start_date: date });
+      if (mode === 'move') await api('moveStudent', { student_id: studentId, class_id: classId, start_date: date, from_class_id: fromClass });
       else await api('assignStudentToClass', { student_id: studentId, class_id: classId, start_date: date });
       toast('학생을 배정했습니다.');
       boot.refresh();
@@ -383,24 +397,32 @@ function AssignModal({ classId, members, onClose, onDone }) {
           <table className="data-table">
             <tbody>
               {visible.length ? visible.map((s) => (
-                <tr key={s.id} className="clickable" onClick={() => setStudentId(s.id)} aria-selected={studentId === s.id}
+                <tr key={s.id} className="clickable" onClick={() => pick(s.id)} aria-selected={studentId === s.id}
                   style={studentId === s.id ? { background: 'var(--navy-soft)' } : undefined}>
-                  <td><input type="radio" name="pick" checked={studentId === s.id} onChange={() => setStudentId(s.id)} aria-label={s.name} style={{ width: 'auto', minHeight: 0 }} /></td>
+                  <td><input type="radio" name="pick" checked={studentId === s.id} onChange={() => pick(s.id)} aria-label={s.name} style={{ width: 'auto', minHeight: 0 }} /></td>
                   <td><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span></td>
-                  <td className="muted">{s.classes.join(', ') || '반 없음'}</td>
+                  <td>{s.classes.length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</td>
                 </tr>
               )) : <tr><td className="muted">배정할 수 있는 재원생이 없습니다.</td></tr>}
             </tbody>
           </table>
         </div>
-        {picked && picked.classes.length ? (
+        {pickedFrom.length ? (
           <div className="segmented" role="group" aria-label="배정 방식">
             <button type="button" aria-pressed={mode === 'add'} onClick={() => setMode('add')}>추가 수강 (기존 반 유지)</button>
             <button type="button" aria-pressed={mode === 'move'} onClick={() => setMode('move')}>반 이동 (기존 반 종료)</button>
           </div>
         ) : null}
+        {mode === 'move' && pickedFrom.length > 1 ? (
+          <Field label="어느 반에서 옮기나요?">{(id) => (
+            <select id={id} value={fromClass} onChange={(e) => setFromClass(e.target.value)}>
+              <option value="">반 선택</option>
+              {pickedFrom.map((cid) => <option key={cid} value={cid}>{classNames[cid] || cid}</option>)}
+            </select>
+          )}</Field>
+        ) : null}
         <Field label={mode === 'move' ? '이동일' : '시작일'}>{(id) => <input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
-        {error ? <div className="error-box" role="alert">{error}</div> : null}
+        {error ? <div className="error-box prewrap" role="alert">{error}</div> : null}
         <div className="form-actions">
           <button type="button" className="btn secondary" onClick={onClose}>취소</button>
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '배정'}</button>
@@ -410,73 +432,116 @@ function AssignModal({ classId, members, onClose, onDone }) {
   );
 }
 
-function EndModal({ member, onClose, onDone }) {
+/** "선택한 N명 → 반 · 이동일 → 이동" for the checked students of this class. */
+function BulkMoveBar({ classId, ids, onDone, onClear }) {
   const boot = useBoot();
   const toast = useToast();
+  const [target, setTarget] = useState('');
   const [date, setDate] = useState(boot.today);
   const [error, setError] = useState('');
-  const submit = async (e) => {
-    e.preventDefault();
+  const [saving, setSaving] = useState(false);
+  const targets = openRegularClasses(boot, [classId]);
+  const move = async () => {
+    if (!target) return setError('옮겨 갈 반을 골라 주세요.');
+    setSaving(true);
+    setError('');
     try {
-      await api('closeStudentClass', { id: member.rel_id, end_date: date });
-      toast(`${member.name} 학생을 반에서 제외했습니다.`);
+      const res = await api('moveStudents', { from_class_id: classId, to_class_id: target, student_ids: ids, date });
+      toast(`${res.moved_count}명을 ${targets.find((c) => c.id === target).name}으로 옮겼습니다.`);
       boot.refresh();
       onDone();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
     }
   };
   return (
-    <Modal title={`${member.name} 반 제외`} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <p style={{ margin: 0 }}>기록은 그대로 남고, 마지막 수업일 이후로 이 반 명단에서 빠집니다.</p>
-        <Field label="마지막 수업일">{(id) => <input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
-        {error ? <div className="error-box" role="alert">{error}</div> : null}
-        <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
-          <button type="submit" className="btn danger">반에서 제외</button>
-        </div>
-      </form>
-    </Modal>
+    <div className="card bulk-bar">
+      <div className="cluster">
+        <strong>선택한 {ids.length}명</strong>
+        <span className="muted">→</span>
+        <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="옮겨 갈 반" style={{ width: 'auto' }}>
+          <option value="">옮겨 갈 반</option>
+          {targets.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="이동일" style={{ width: 'auto' }} />
+        <button type="button" className="btn sm" onClick={move} disabled={saving}>{saving ? '옮기는 중…' : '이동'}</button>
+        <button type="button" className="btn ghost sm" onClick={onClear}>선택 해제</button>
+      </div>
+      {error ? <div className="error-box prewrap" role="alert" style={{ marginTop: 8 }}>{error}</div> : null}
+    </div>
   );
+}
+
+function MemberRows({ rows, selectable, selected, onToggle, onChange }) {
+  return rows.map((r) => {
+    const regular = r.assignment_type !== '임시';
+    return (
+      <tr key={r.rel_id}>
+        {selectable ? (
+          <td style={{ width: 32 }}>
+            {regular ? <input type="checkbox" checked={selected.has(r.student_id)} onChange={() => onToggle(r.student_id)} aria-label={`${r.name} 선택`} style={{ width: 'auto', minHeight: 0 }} /> : null}
+          </td>
+        ) : null}
+        <td className="primary"><Link href={`/students/${r.student_id}`}>{r.name}</Link>
+          {r.other_classes && r.other_classes.length ? <div className="muted">함께 다니는 반: {r.other_classes.join(', ')}</div> : null}</td>
+        <td data-label="학교 · 학년">{[r.school, r.grade].filter(Boolean).join(' · ') || '-'}</td>
+        <td data-label="학부모">{r.parent_phone || '-'}</td>
+        <td data-label="시작일">{r.start_date || '-'}</td>
+        <td data-label="구분">
+          {r.assignment_type === '임시' ? <span className="tag amber">임시 ← {r.source_class_name}</span> : <span className="tag muted">정규</span>}
+          {r.away ? <span className="tag amber" style={{ marginLeft: 4 }}>{r.away.class_name} 수업 중</span> : null}
+        </td>
+        <td>{regular ? <button type="button" className="btn ghost sm" onClick={() => onChange(r)}>반 변경</button> : <span className="hint">시험 화면에서 변경</span>}</td>
+      </tr>
+    );
+  });
 }
 
 export function StudentsTab({ classId, onChanged }) {
   const state = useApi(() => api('getClassMembers', classId), [classId]);
   const [assigning, setAssigning] = useState(false);
-  const [ending, setEnding] = useState(null);
+  const [changing, setChanging] = useState(null);
   const [showPast, setShowPast] = useState(false);
-  const done = () => { setAssigning(false); setEnding(null); state.reload(); onChanged(); };
+  const [selected, setSelected] = useState(() => new Set());
+  const done = () => { setAssigning(false); setChanging(null); setSelected(new Set()); state.reload(); onChanged(); };
+  const toggle = (id) => setSelected((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const head = (withCheck) => (
+    <thead><tr>{withCheck ? <th aria-label="선택" /> : null}<th>이름</th><th>학교 · 학년</th><th>학부모 연락처</th><th>시작일</th><th>구분</th><th /></tr></thead>
+  );
   return (
     <Async state={state}>
       {(m) => (
         <div className="stack">
           <div className="split">
-            <span className="muted">현재 {m.current.length}명</span>
+            <span className="muted">현재 {m.current.length}명{m.upcoming.length ? ` · 시작 예정 ${m.upcoming.length}명` : ''}{m.current.length ? ' · 체크해서 여러 명을 한 번에 옮길 수 있습니다' : ''}</span>
             <button type="button" className="btn" onClick={() => setAssigning(true)}>학생 배정</button>
           </div>
+          {selected.size ? <BulkMoveBar classId={classId} ids={[...selected]} onDone={done} onClear={() => setSelected(new Set())} /> : null}
           {m.current.length ? (
             <div className="table-wrap">
               <table className="data-table stack-mobile">
-                <thead><tr><th>이름</th><th>학교 · 학년</th><th>학부모 연락처</th><th>시작일</th><th>구분</th><th /></tr></thead>
-                <tbody>
-                  {m.current.map((r) => (
-                    <tr key={r.rel_id}>
-                      <td className="primary"><Link href={`/students/${r.student_id}`}>{r.name}</Link></td>
-                      <td data-label="학교 · 학년">{[r.school, r.grade].filter(Boolean).join(' · ') || '-'}</td>
-                      <td data-label="학부모">{r.parent_phone || '-'}</td>
-                      <td data-label="시작일">{r.start_date || '-'}</td>
-                      <td data-label="구분">
-                        {r.assignment_type === '임시' ? <span className="tag amber">임시 ← {r.source_class_name}</span> : <span className="tag muted">정규</span>}
-                        {r.away ? <span className="tag amber" style={{ marginLeft: 4 }}>{r.away.class_name} 수업 중</span> : null}
-                      </td>
-                      <td>{r.assignment_type !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setEnding(r)}>제외</button> : null}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                {head(true)}
+                <tbody><MemberRows rows={m.current} selectable selected={selected} onToggle={toggle} onChange={setChanging} /></tbody>
               </table>
             </div>
           ) : <div className="card"><EmptyState title="배정된 학생이 없습니다" action={<button type="button" className="btn" onClick={() => setAssigning(true)}>학생 배정</button>} /></div>}
+          {m.upcoming.length ? (
+            <div>
+              <h3 style={{ margin: '4px 0 8px' }}>시작 예정</h3>
+              <div className="table-wrap">
+                <table className="data-table stack-mobile">
+                  {head(false)}
+                  <tbody><MemberRows rows={m.upcoming} selected={selected} onToggle={toggle} onChange={setChanging} /></tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
           {m.past.length ? (
             <div>
               <button type="button" className="link-btn" onClick={() => setShowPast((v) => !v)} aria-expanded={showPast}>
@@ -501,7 +566,11 @@ export function StudentsTab({ classId, onChanged }) {
             </div>
           ) : null}
           {assigning ? <AssignModal classId={classId} members={m} onClose={() => setAssigning(false)} onDone={done} /> : null}
-          {ending ? <EndModal member={ending} onClose={() => setEnding(null)} onDone={done} /> : null}
+          {changing ? (
+            <ClassChangeDialog studentId={changing.student_id} studentName={changing.name}
+              rel={{ rel_id: changing.rel_id, class_id: classId, class_name: m.class_name || '이 반', start_date: changing.start_date, removable: changing.removable }}
+              onClose={() => setChanging(null)} onDone={done} />
+          ) : null}
         </div>
       )}
     </Async>

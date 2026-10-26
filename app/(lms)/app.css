@@ -478,3 +478,9 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 }
 .plan-check { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 6px; }
 .plan-check .hint { flex-basis: 100%; }
+.bulk-bar { position: sticky; top: 8px; z-index: 5; padding: 12px 14px; border: 2px solid var(--navy); }
+.class-switcher select { min-width: 140px; }
+@media (max-width: 640px) {
+  .class-switcher { flex-basis: 100%; }
+  .class-switcher select { flex: 1; }
+}

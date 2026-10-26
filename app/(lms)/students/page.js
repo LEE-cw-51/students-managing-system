@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useDeferredValue, useMemo, useState } from 'react';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import CounselingLog from '@/components/domain/student/CounselingLog';
@@ -50,7 +50,9 @@ function StudentList({ onCreate }) {
   const boot = useBoot();
   const [status, setStatus] = useState('재원');
   const [grade, setGrade] = useState('');
-  const [classId, setClassId] = useState('');
+  const params = useSearchParams();
+  // ?class=__none__ opens the 미배정 list (linked from the today screen).
+  const [classId, setClassId] = useState(() => params.get('class') || '');
   const [query, setQuery] = useState('');
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const startCreate = onCreate;
@@ -79,6 +81,7 @@ function StudentList({ onCreate }) {
           </select>
           <select value={classId} onChange={(e) => setClassId(e.target.value)} aria-label="반" style={{ width: 'auto' }}>
             <option value="">전체 반</option>
+            <option value="__none__">미배정 (반 없는 재원생)</option>
             {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <button type="button" className={'btn sm ' + (onlyFlagged ? '' : 'secondary')} aria-pressed={onlyFlagged} onClick={() => setOnlyFlagged((v) => !v)}>
@@ -107,7 +110,11 @@ function StudentList({ onCreate }) {
                     <td data-label="학년 · 학교">{[r.grade, r.school].filter(Boolean).join(' · ') || '-'}{!r.school && r.status === '재원' ? <span className="tag warn" style={{ marginLeft: 4 }}>학교 미입력</span> : null}</td>
                     <td data-label="반">{r.classes.length ? r.classes.map((c) => (
                       <span key={c.rel_id} className={'tag ' + (c.assignment_type === '임시' ? 'amber' : 'muted')} style={{ marginRight: 4 }}>{c.class_name}</span>
-                    )) : <span className="muted">없음</span>}</td>
+                    )) : null}
+                    {r.upcoming && r.upcoming.length ? r.upcoming.map((u) => (
+                      <span key={u.rel_id} className="tag" style={{ marginRight: 4 }}>{u.class_name} {shortDate(u.start_date)}부터</span>
+                    )) : null}
+                    {r.unassigned ? <span className="tag warn">미배정</span> : !r.classes.length && !(r.upcoming || []).length ? <span className="muted">없음</span> : null}</td>
                     <td data-label="최근 수업">{r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : <span className="muted">-</span>}</td>
                     <td data-label="다음 시험">{r.next_exam ? <>{shortDate(r.next_exam.date)} <span className={'tag ' + (r.next_exam.d_day <= 7 ? 'danger' : r.next_exam.d_day <= 21 ? 'amber' : '')}>{dDayLabel(r.next_exam.d_day)}</span></> : <span className="muted">-</span>}</td>
                     <td data-label="학부모">{r.parent_phone ? <a href={`tel:${r.parent_phone}`} onClick={(e) => e.stopPropagation()}>{r.parent_phone}</a> : <span className="muted">-</span>}</td>
