@@ -382,7 +382,7 @@ export function HomeworkTab({ studentId }) {
                               const busy = savingId === it.item_id;
                               return (
                                 <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                  <span>{it.title}</span>
+                                  <span>{it.title}{it.scope === 'student' ? ' · 개인' : ''}</span>
                                   <select
                                     aria-label={`${it.title} 완료 여부`}
                                     value={it.status === '미확인' ? '' : it.status}

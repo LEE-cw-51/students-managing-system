@@ -45,40 +45,75 @@ LMS.createViews = function (ctx) {
       byDate[d].push(it);
     });
     Object.keys(byDate).forEach(function (d) {
-      byDate[d].sort(function (a, b) { return Number(a.sort_order || 0) - Number(b.sort_order || 0); });
+      byDate[d].sort(function (a, b) {
+        var so = Number(a.sort_order || 0) - Number(b.sort_order || 0);
+        if (so) return so;
+        var aPers = LMS.toStr(a.student_id) ? 1 : 0;
+        var bPers = LMS.toStr(b.student_id) ? 1 : 0;
+        if (aPers !== bPers) return aPers - bPers;
+        return LMS.toStr(a.item_id).localeCompare(LMS.toStr(b.item_id));
+      });
     });
     return { byDate: byDate, checkByKey: checkByKey };
   }
 
+  function replaceFlagsByLesson_(classId, from, to) {
+    var flags = {};
+    table('Lessons').forEach(function (row) {
+      if (classId && LMS.toStr(row.class_id) !== LMS.toStr(classId)) return;
+      if (!LMS.inRange(row.lesson_date, from, to)) return;
+      flags[LMS.toStr(row.lesson_date) + '|' + LMS.toStr(row.class_id) + '|' + LMS.toStr(row.student_id)] =
+        LMS.normalizeHomeworkReplaceClass(row.homework_replace_class);
+    });
+    return flags;
+  }
+
   /**
    * Checked homework cells for 숙제 완료율: items given in [from, to] (optionally one class) joined
-   * with their check rows, kept only when the student was in that class on the lesson date.
+   * with their check rows, kept only when the student was in that class on the lesson date and the
+   * item applies to that student (class item unless replace, or that student's personal item).
    * q: { classId?, studentId?, from, to }
    */
   function homeworkCells_(q) {
     var classId = LMS.toStr(q.classId);
     var studentId = LMS.toStr(q.studentId);
-    var items = {};
+    var itemsByDateClass = {};
+    var itemById = {};
     table('HomeworkItems').forEach(function (it) {
       if (classId && LMS.toStr(it.class_id) !== classId) return;
-      if (LMS.inRange(it.lesson_date, q.from, q.to)) items[LMS.toStr(it.item_id)] = it;
+      if (!LMS.inRange(it.lesson_date, q.from, q.to)) return;
+      itemById[LMS.toStr(it.item_id)] = it;
+      var dk = LMS.toStr(it.lesson_date) + '|' + LMS.toStr(it.class_id);
+      if (!itemsByDateClass[dk]) itemsByDateClass[dk] = [];
+      itemsByDateClass[dk].push(it);
     });
+    var replaceFlags = replaceFlagsByLesson_(classId, q.from, q.to);
     var byKey = {};
     var member = {};
+    var effectiveCache = {};
     table('HomeworkChecks').forEach(function (c) {
       var sid = LMS.toStr(c.student_id);
-      var it = items[LMS.toStr(c.item_id)];
+      var itemId = LMS.toStr(c.item_id);
+      var it = itemById[itemId];
       if (!it || (studentId && sid !== studentId)) return;
-      var memberKey = sid + '|' + LMS.toStr(it.class_id) + '|' + LMS.toStr(it.lesson_date);
+      var date = LMS.toStr(it.lesson_date);
+      var cid = LMS.toStr(it.class_id);
+      var memberKey = sid + '|' + cid + '|' + date;
       if (!Object.prototype.hasOwnProperty.call(member, memberKey)) {
-        member[memberKey] = ctx.assignments.inClassOn(sid, it.class_id, it.lesson_date);
+        member[memberKey] = ctx.assignments.inClassOn(sid, cid, date);
       }
       if (!member[memberKey]) return;
-      byKey[LMS.toStr(it.item_id) + '|' + sid] = {
-        item_id: LMS.toStr(it.item_id),
+      var effKey = date + '|' + cid + '|' + sid;
+      if (!Object.prototype.hasOwnProperty.call(effectiveCache, effKey)) {
+        var replace = replaceFlags[effKey] || '';
+        effectiveCache[effKey] = LMS.homeworkItemsForStudent(itemsByDateClass[date + '|' + cid] || [], sid, replace);
+      }
+      if (!effectiveCache[effKey].some(function (row) { return LMS.toStr(row.item_id) === itemId; })) return;
+      byKey[itemId + '|' + sid] = {
+        item_id: itemId,
         student_id: sid,
-        class_id: LMS.toStr(it.class_id),
-        lesson_date: LMS.toStr(it.lesson_date),
+        class_id: cid,
+        lesson_date: date,
         status: LMS.toStr(c.status)
       };
     });
@@ -276,6 +311,7 @@ LMS.createViews = function (ctx) {
     var end = LMS.toStr(range.end) || today;
     var start = LMS.toStr(range.start) || LMS.addDays(end, -42);
     var hw = homeworkByDate(classId, start, end);
+    var replaceFlags = replaceFlagsByLesson_(classId, start, end);
     var students = {};
     ctx.assignments.recordTargets(classId, end).students.forEach(function (s) { students[s.student_id] = s; });
     var allStudents = table('Students');
@@ -285,12 +321,15 @@ LMS.createViews = function (ctx) {
     });
     var rows = Object.keys(hw.byDate).sort().reverse().map(function (d) {
       var items = hw.byDate[d];
+      var classItems = items.filter(LMS.isClassHomeworkItem);
       var roster = ctx.assignments.recordTargets(classId, d).students;
       roster.forEach(function (s) { if (!students[s.student_id]) students[s.student_id] = s; });
       var cells = {};
       roster.forEach(function (s) {
-        var cell = { done: 0, total: items.length, checked: 0, missing: [] };
-        items.forEach(function (it) {
+        var replace = replaceFlags[d + '|' + LMS.toStr(classId) + '|' + LMS.toStr(s.student_id)] || '';
+        var effective = LMS.homeworkItemsForStudent(items, s.student_id, replace);
+        var cell = { done: 0, total: effective.length, checked: 0, missing: [], replace_class: !!replace };
+        effective.forEach(function (it) {
           var c = hw.checkByKey[LMS.toStr(it.item_id) + '|' + LMS.toStr(s.student_id)];
           if (c) cell.checked += 1;
           if (c && LMS.toStr(c.status) === '완료') cell.done += 1;
@@ -302,7 +341,17 @@ LMS.createViews = function (ctx) {
       return {
         date: d,
         weekday: LMS.weekdayName(d),
-        items: items.map(function (it) { return { item_id: it.item_id, title: it.title }; }),
+        items: classItems.map(function (it) {
+          return { item_id: it.item_id, title: it.title, scope: 'class', student_id: '' };
+        }),
+        personal_items: items.filter(function (it) { return !LMS.isClassHomeworkItem(it); }).map(function (it) {
+          return {
+            item_id: it.item_id,
+            title: it.title,
+            scope: 'student',
+            student_id: LMS.toStr(it.student_id)
+          };
+        }),
         cells: cells,
         checked: homework.checked > 0,
         rate: homework.rate
@@ -857,35 +906,54 @@ LMS.createViews = function (ctx) {
     table('HomeworkChecks').forEach(function (c) {
       if (LMS.toStr(c.student_id) === LMS.toStr(studentId)) checks[LMS.toStr(c.item_id)] = c;
     });
+    var replaceFlags = {};
+    table('Lessons').forEach(function (row) {
+      if (LMS.toStr(row.student_id) !== LMS.toStr(studentId)) return;
+      if (!LMS.inRange(row.lesson_date, start, end)) return;
+      replaceFlags[LMS.toStr(row.lesson_date) + '|' + LMS.toStr(row.class_id)] =
+        LMS.normalizeHomeworkReplaceClass(row.homework_replace_class);
+    });
     var groups = {};
+    var itemsByKey = {};
     table('HomeworkItems').forEach(function (it) {
       if (!LMS.inRange(it.lesson_date, start, end)) return;
+      var owner = LMS.toStr(it.student_id);
+      if (owner && owner !== LMS.toStr(studentId)) return;
       var member = ctx.assignments.inClassOn(studentId, it.class_id, it.lesson_date);
       if (!member && !checks[LMS.toStr(it.item_id)]) return;
       var key = it.lesson_date + '|' + it.class_id;
-      if (!groups[key]) {
-        var c = LMS.findById(classes, 'class_id', it.class_id);
-        groups[key] = {
-          date: it.lesson_date,
-          class_id: it.class_id,
-          class_name: c ? c.class_name : '',
-          check_date: c ? ctx.checkingLessonDate(c, it.lesson_date) : '',
-          items: []
-        };
-      }
-      var check = checks[LMS.toStr(it.item_id)];
-      groups[key].items.push({
-        item_id: LMS.toStr(it.item_id),
-        title: it.title,
-        sort_order: Number(it.sort_order || 0),
-        status: check ? LMS.toStr(check.status) : '미확인'
-      });
+      if (!itemsByKey[key]) itemsByKey[key] = [];
+      itemsByKey[key].push(it);
     });
-    var rows = Object.keys(groups).map(function (k) {
-      var g = groups[k];
-      g.items.sort(function (a, b) { return a.sort_order - b.sort_order; });
-      return g;
-    }).sort(function (a, b) { return LMS.toStr(b.date).localeCompare(LMS.toStr(a.date)); });
+    Object.keys(itemsByKey).forEach(function (key) {
+      var list = itemsByKey[key];
+      var date = list[0].lesson_date;
+      var classId = list[0].class_id;
+      var replace = replaceFlags[key] || '';
+      var effective = LMS.homeworkItemsForStudent(list, studentId, replace);
+      if (!effective.length) return;
+      var c = LMS.findById(classes, 'class_id', classId);
+      groups[key] = {
+        date: date,
+        class_id: classId,
+        class_name: c ? c.class_name : '',
+        check_date: c ? ctx.checkingLessonDate(c, date) : '',
+        homework_replace_class: replace,
+        items: effective.map(function (it) {
+          var check = checks[LMS.toStr(it.item_id)];
+          return {
+            item_id: LMS.toStr(it.item_id),
+            title: it.title,
+            sort_order: Number(it.sort_order || 0),
+            scope: LMS.isClassHomeworkItem(it) ? 'class' : 'student',
+            status: check ? LMS.toStr(check.status) : '미확인'
+          };
+        })
+      };
+      groups[key].items.sort(function (a, b) { return a.sort_order - b.sort_order; });
+    });
+    var rows = Object.keys(groups).map(function (k) { return groups[k]; })
+      .sort(function (a, b) { return LMS.toStr(b.date).localeCompare(LMS.toStr(a.date)); });
     var missing = [];
     rows.forEach(function (r) {
       r.items.forEach(function (it) {

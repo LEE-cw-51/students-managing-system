@@ -47,7 +47,15 @@ describe('schema migration v2', () => {
     assert.equal(sessions[0].test_difficulty, '중');
     assert.equal(sessions[0].class_notice, '다음 주 휴강');
     assert.match(sessions[0].session_id, /^SES_/);
-    assert.equal(JSON.stringify(store.readTable('Lessons')), before, 'lessons untouched');
+    const lessonsAfter = store.readTable('Lessons');
+    assert.equal(lessonsAfter.length, JSON.parse(before).length, 'lesson count untouched');
+    lessonsAfter.forEach((row) => {
+      assert.equal(row.student_notice, '');
+      assert.equal(row.homework_replace_class, '');
+    });
+    store.readTable('HomeworkItems').forEach((row) => {
+      assert.equal(row.student_id, '');
+    });
 
     const snapshot = JSON.stringify(Object.keys(LMS.TABLES).map((t) => store.readTable(t)));
     assert.equal(LMS.createService(store).ensureSchema(), false);

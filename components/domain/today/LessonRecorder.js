@@ -26,12 +26,29 @@ function Chips({ value, options, onChange, label, disabled }) {
   );
 }
 
+function priorItemsForStudent(prior, studentId) {
+  if (!prior) return [];
+  const personal = (prior.personal_items_by_student && prior.personal_items_by_student[studentId]) || [];
+  const classItems = (prior.items || []).filter((it) => it.item_id);
+  const replace = !!(prior.replace_by_student && prior.replace_by_student[studentId]);
+  const list = replace ? personal : classItems.concat(personal);
+  return list.filter((it) => it.item_id);
+}
+
+function anyPriorReady(d) {
+  const prior = d.prior_homework;
+  if (!prior) return false;
+  return d.students.some((s) => priorItemsForStudent(prior, s.student_id).length > 0);
+}
+
 /** Build the editable form state from getTodayClassSession. */
 function initialForm(d) {
   const ses = d.session || {};
   const anyTest = d.students.some((s) => s.lesson && s.lesson.test_status === '실시');
   const prior = d.prior_homework;
-  const priorReady = !!(prior && prior.items && prior.items.some((it) => it.item_id));
+  const priorReady = anyPriorReady(d);
+  const todayPersonal = (d.today_homework && d.today_homework.personal_items_by_student) || {};
+  const todayReplace = (d.today_homework && d.today_homework.replace_by_student) || {};
   return {
     session: {
       // No record yet → start from today's plan so the usual case is just a confirm.
@@ -44,10 +61,13 @@ function initialForm(d) {
       class_notice: ses.class_notice || d.class_notice || ''
     },
     // Nothing checked yet → start everyone at 완료 so only the exceptions need a click.
-    checks: priorReady ? Object.fromEntries(d.students.map((s) => [s.student_id, prior.has_checks
-      ? { ...(prior.checks_by_student[s.student_id] || {}) }
-      : Object.fromEntries(prior.items.filter((it) => it.item_id).map((it) => [it.item_id, '완료']))])) : {},
-    homework: (d.today_homework.items || []).map((it) => ({ item_id: it.item_id || '', title: it.title })),
+    checks: priorReady ? Object.fromEntries(d.students.map((s) => {
+      const items = priorItemsForStudent(prior, s.student_id);
+      return [s.student_id, prior.has_checks
+        ? { ...(prior.checks_by_student[s.student_id] || {}) }
+        : Object.fromEntries(items.map((it) => [it.item_id, '완료']))];
+    })) : {},
+    homework: ((d.today_homework && d.today_homework.items) || []).map((it) => ({ item_id: it.item_id || '', title: it.title })),
     plan_done: d.daily_plan ? d.daily_plan.done_status || '' : '',
     students: Object.fromEntries(d.students.map((s) => {
       const l = s.lesson || {};
@@ -57,7 +77,13 @@ function initialForm(d) {
         concentration: l.concentration && l.concentration !== 'ABSENT' ? l.concentration : '',
         // With prior homework the grade follows the checks unless the teacher picks one.
         assignment_manual: priorReady ? '' : (l.assignment_completion || ''),
-        special_note: l.special_note || ''
+        special_note: l.special_note || '',
+        student_notice: l.student_notice || '',
+        homework_replace_class: !!(todayReplace[s.student_id] || l.homework_replace_class === 'Y'),
+        personal_homework: (todayPersonal[s.student_id] || []).map((it) => ({
+          item_id: it.item_id || '',
+          title: it.title || ''
+        }))
       }];
     }))
   };
@@ -104,21 +130,29 @@ function Editor({ data, onSaved, onGoDate }) {
 
   const cls = data.class;
   const prior = data.prior_homework;
-  const priorItems = (prior && prior.items ? prior.items : []).filter((it) => it.item_id);
+  const priorClassItems = (prior && prior.items ? prior.items : []).filter((it) => it.item_id);
+  const hasPriorHomework = anyPriorReady(data);
   const setSession = (key, v) => setForm((f) => ({ ...f, session: { ...f.session, [key]: v } }));
   const setStudent = (id, key, v) => setForm((f) => ({ ...f, students: { ...f.students, [id]: { ...f.students[id], [key]: v } } }));
   const setCheck = (sid, itemId, done) => setForm((f) => ({ ...f, checks: { ...f.checks, [sid]: { ...f.checks[sid], [itemId]: done ? '완료' : '미완료' } } }));
   const setAllChecks = (sid, done) => setForm((f) => ({
     ...f,
-    checks: Object.fromEntries(Object.entries(f.checks).map(([id, m]) => [id, (sid === null || sid === id) ? Object.fromEntries(priorItems.map((it) => [it.item_id, done ? '완료' : '미완료'])) : m]))
+    checks: Object.fromEntries(Object.entries(f.checks).map(([id, m]) => {
+      if (sid !== null && sid !== id) return [id, m];
+      const items = priorItemsForStudent(prior, id);
+      return [id, Object.fromEntries(items.map((it) => [it.item_id, done ? '완료' : '미완료']))];
+    }))
   }));
 
   const autoGrade = useCallback((sid) => {
-    if (!priorItems.length) return '';
+    const items = priorItemsForStudent(prior, sid);
+    if (!items.length) return '';
     const m = form.checks[sid] || {};
-    const done = priorItems.filter((it) => m[it.item_id] === '완료').length;
-    return LMS.assignmentGradeFromChecks(done, priorItems.length);
-  }, [form.checks, priorItems]);
+    const done = items.filter((it) => m[it.item_id] === '완료').length;
+    return LMS.assignmentGradeFromChecks(done, items.length);
+  }, [form.checks, prior]);
+
+  const setPersonalHomework = (sid, list) => setStudent(sid, 'personal_homework', list);
 
   const homework = form.homework;
   const setHomework = (list) => setForm((f) => ({ ...f, homework: list }));
@@ -149,9 +183,13 @@ function Editor({ data, onSaved, onGoDate }) {
           progress: s.progress, content: s.content, class_notice: s.class_notice,
           test_title: s.test_on ? s.test_title : '', test_max_score: s.test_on ? s.test_max_score : '', test_difficulty: s.test_on ? s.test_difficulty : ''
         },
-        prior: priorItems.length ? {
+        prior: hasPriorHomework ? {
           assigned_date: prior.assigned_date,
-          checks: data.students.flatMap((st) => priorItems.map((it) => ({ item_id: it.item_id, student_id: st.student_id, status: (form.checks[st.student_id] || {})[it.item_id] === '완료' ? '완료' : '미완료' })))
+          checks: data.students.flatMap((st) => priorItemsForStudent(prior, st.student_id).map((it) => ({
+            item_id: it.item_id,
+            student_id: st.student_id,
+            status: (form.checks[st.student_id] || {})[it.item_id] === '완료' ? '완료' : '미완료'
+          })))
         } : null,
         homework_items: homework.filter((h) => h.title.trim()).map((h) => ({ item_id: h.item_id, title: h.title.trim() })),
         ...(data.daily_plan ? { plan_done_status: form.plan_done } : {}),
@@ -165,7 +203,13 @@ function Editor({ data, onSaved, onGoDate }) {
             test_score: tested ? v.test_score : '',
             concentration: v.concentration,
             assignment_completion: v.assignment_manual,
-            special_note: v.special_note
+            special_note: v.special_note,
+            student_notice: v.student_notice,
+            homework_replace_class: v.homework_replace_class ? 'Y' : '',
+            personal_homework: (v.personal_homework || []).filter((h) => h.title.trim()).map((h) => ({
+              item_id: h.item_id,
+              title: h.title.trim()
+            }))
           };
         })
       });
@@ -247,29 +291,62 @@ function Editor({ data, onSaved, onGoDate }) {
       <section className="card">
         <div className="card-head">
           <h2>② 지난 숙제 확인</h2>
-          {priorItems.length ? <span className="cluster"><span className="muted">{shortDate(prior.assigned_date)}에 낸 숙제</span><button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, true)}>전체 완료</button></span> : null}
+          {hasPriorHomework ? <span className="cluster"><span className="muted">{shortDate(prior.assigned_date)}에 낸 숙제</span><button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, true)}>전체 완료</button></span> : null}
         </div>
-        {priorItems.length && !prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 ‘완료’로 채워 두었습니다. 안 한 숙제만 체크를 해제하세요.</p> : null}
-        {priorItems.length ? (
+        {hasPriorHomework && !prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 ‘완료’로 채워 두었습니다. 안 한 숙제만 체크를 해제하세요.</p> : null}
+        {hasPriorHomework ? (
           <div className="table-wrap">
             <table className="data-table check-table">
-              <thead><tr><th>학생</th>{priorItems.map((it) => <th key={it.item_id} className="center">{it.title}</th>)}<th className="center">과제 등급</th><th /></tr></thead>
+              <thead>
+                <tr>
+                  <th>학생</th>
+                  {priorClassItems.map((it) => <th key={it.item_id} className="center">{it.title}</th>)}
+                  <th>개인 숙제</th>
+                  <th className="center">과제 등급</th>
+                  <th />
+                </tr>
+              </thead>
               <tbody>
-                {data.students.map((st) => (
-                  <tr key={st.student_id}>
-                    <td><strong>{st.name}</strong></td>
-                    {priorItems.map((it) => {
-                      const done = (form.checks[st.student_id] || {})[it.item_id] === '완료';
-                      return (
-                        <td key={it.item_id} className="center">
-                          <input type="checkbox" className="big-check" checked={done} aria-label={`${st.name} ${it.title}`} onChange={(e) => setCheck(st.student_id, it.item_id, e.target.checked)} />
-                        </td>
-                      );
-                    })}
-                    <td className="center"><strong>{form.students[st.student_id].assignment_manual || autoGrade(st.student_id) || '-'}</strong></td>
-                    <td><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, true)}>모두 완료</button></td>
-                  </tr>
-                ))}
+                {data.students.map((st) => {
+                  const replace = !!(prior.replace_by_student && prior.replace_by_student[st.student_id]);
+                  const personal = ((prior.personal_items_by_student && prior.personal_items_by_student[st.student_id]) || []).filter((it) => it.item_id);
+                  return (
+                    <tr key={st.student_id}>
+                      <td>
+                        <strong>{st.name}</strong>
+                        {replace ? <span className="tag muted" style={{ marginLeft: 6 }}>반 숙제 제외</span> : null}
+                      </td>
+                      {priorClassItems.map((it) => {
+                        if (replace) {
+                          return <td key={it.item_id} className="center muted">—</td>;
+                        }
+                        const done = (form.checks[st.student_id] || {})[it.item_id] === '완료';
+                        return (
+                          <td key={it.item_id} className="center">
+                            <input type="checkbox" className="big-check" checked={done} aria-label={`${st.name} ${it.title}`} onChange={(e) => setCheck(st.student_id, it.item_id, e.target.checked)} />
+                          </td>
+                        );
+                      })}
+                      <td>
+                        {personal.length ? (
+                          <div className="stack-sm">
+                            {personal.map((it) => {
+                              const done = (form.checks[st.student_id] || {})[it.item_id] === '완료';
+                              return (
+                                <label key={it.item_id} className="check-label" style={{ margin: 0 }}>
+                                  <input type="checkbox" className="big-check" checked={done} aria-label={`${st.name} ${it.title}`} onChange={(e) => setCheck(st.student_id, it.item_id, e.target.checked)} />
+                                  <span>{it.title} <span className="tag muted">개인</span></span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td className="center"><strong>{form.students[st.student_id].assignment_manual || autoGrade(st.student_id) || '-'}</strong></td>
+                      <td><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, true)}>모두 완료</button></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -336,8 +413,53 @@ function Editor({ data, onSaved, onGoDate }) {
                     <span className="sr-label">과제{!v.assignment_manual && grade ? ' (자동)' : ''}</span>
                     <Chips value={grade} options={ASSIGN} label={`${st.name} 과제 이행`} onChange={(x) => setStudent(st.student_id, 'assignment_manual', x)} />
                   </div>
+                  <div className="sr-note" style={{ flexBasis: '100%' }}>
+                    <input value={v.student_notice} aria-label={`${st.name} 개별 공지`} placeholder="개별 공지 (피드백과 별도)" onChange={(e) => setStudent(st.student_id, 'student_notice', e.target.value)} />
+                  </div>
                   <div className="sr-note">
                     <input value={v.special_note} aria-label={`${st.name} 특이사항`} placeholder="특이사항 · 학생 피드백" onChange={(e) => setStudent(st.student_id, 'special_note', e.target.value)} />
+                  </div>
+                  <div className="sr-note" style={{ flexBasis: '100%' }}>
+                    <div className="cluster" style={{ marginBottom: 6 }}>
+                      <span className="sr-label">개인 숙제</span>
+                      <label className="check-label" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!v.homework_replace_class}
+                          onChange={(e) => setStudent(st.student_id, 'homework_replace_class', e.target.checked)}
+                        />
+                        반 숙제 제외
+                      </label>
+                      <button
+                        type="button"
+                        className="btn secondary sm"
+                        onClick={() => setPersonalHomework(st.student_id, [...(v.personal_homework || []), { item_id: '', title: '' }])}
+                      >
+                        + 추가
+                      </button>
+                    </div>
+                    {(v.personal_homework || []).length ? (
+                      <div className="stack-sm">
+                        {(v.personal_homework || []).map((h, i) => (
+                          <div key={i} className="cluster" style={{ flexWrap: 'nowrap' }}>
+                            <input
+                              value={h.title}
+                              aria-label={`${st.name} 개인 숙제 ${i + 1}`}
+                              placeholder="예: 보충 워크북 3쪽"
+                              onChange={(e) => setPersonalHomework(st.student_id, v.personal_homework.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
+                            />
+                            <button
+                              type="button"
+                              className="btn ghost sm"
+                              aria-label={`${st.name} 개인 숙제 ${i + 1} 삭제`}
+                              onClick={() => setPersonalHomework(st.student_id, v.personal_homework.filter((_, j) => j !== i))}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <span className="muted">반 공통 숙제만 냅니다.</span>}
                   </div>
                 </div>
               );

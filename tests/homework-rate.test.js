@@ -88,7 +88,7 @@ describe('숙제 완료율 across screens', () => {
     const row = logRow(api, a.class_id, '2026-09-21');
     assert.equal(row.rate, 100);
     assert.equal(row.checked, true);
-    assert.deepEqual(row.cells[s.student_id], { done: 1, total: 2, checked: 1, missing: [] });
+    assert.deepEqual(row.cells[s.student_id], { done: 1, total: 2, checked: 1, missing: [], replace_class: false });
     assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 100);
     assert.equal(trendRate(api, a.class_id), 100);
   });
