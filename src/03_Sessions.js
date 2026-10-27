@@ -65,7 +65,7 @@ LMS.createSessionSync = function (ctx) {
     return row;
   }
 
-  /** The checklist items of a date in display order. */
+  /** All checklist items of a date (class + personal) in display order. */
   function homeworkItems(date, classId) {
     return table('HomeworkItems').filter(function (row) {
       return LMS.toStr(row.lesson_date) === LMS.toStr(date) &&
@@ -73,8 +73,15 @@ LMS.createSessionSync = function (ctx) {
     }).sort(function (a, b) {
       var so = (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
       if (so) return so;
+      var aPers = LMS.toStr(a.student_id) ? 1 : 0;
+      var bPers = LMS.toStr(b.student_id) ? 1 : 0;
+      if (aPers !== bPers) return aPers - bPers;
       return LMS.toStr(a.item_id).localeCompare(LMS.toStr(b.item_id));
     });
+  }
+
+  function classHomeworkItems(date, classId) {
+    return homeworkItems(date, classId).filter(LMS.isClassHomeworkItem);
   }
 
   function lessonsOn(date, classId) {
@@ -85,11 +92,16 @@ LMS.createSessionSync = function (ctx) {
     });
   }
 
-  /** The class homework text of a date: its checklist items, else the text most student rows carry (legacy). */
+  /** The class homework text of a date: shared checklist items, else the text most student rows carry (legacy). */
   function homeworkText(date, classId) {
-    var items = homeworkItems(date, classId);
+    var items = classHomeworkItems(date, classId);
     if (items.length) return LMS.joinHomeworkTitles(items);
     return LMS.modeValue(lessonsOn(date, classId).map(function (l) { return LMS.toStr(l.homework); }));
+  }
+
+  function effectiveHomeworkText(date, classId, studentId, replaceClass) {
+    var items = LMS.homeworkItemsForStudent(homeworkItems(date, classId), studentId, replaceClass);
+    return LMS.joinHomeworkTitles(items);
   }
 
   function tested(row) {
@@ -106,11 +118,14 @@ LMS.createSessionSync = function (ctx) {
   function copyToLessons(date, classId, options) {
     options = options || {};
     var session = find(date, classId);
-    var homework = null;
-    if (homeworkItems(date, classId).length) homework = homeworkText(date, classId);
-    else if (options.homework !== undefined) homework = LMS.toStr(options.homework);
-    else if (!options.realign) homework = homeworkText(date, classId);
-    if (!session && homework === null) return;
+    var allItems = homeworkItems(date, classId);
+    var hasChecklist = allItems.length > 0;
+    var fallbackHomework = null;
+    if (!hasChecklist) {
+      if (options.homework !== undefined) fallbackHomework = LMS.toStr(options.homework);
+      else if (!options.realign) fallbackHomework = homeworkText(date, classId);
+    }
+    if (!session && !hasChecklist && fallbackHomework === null) return;
     var lessons = table('Lessons');
     var prevMax = options.prevMax;
     var changed = false;
@@ -131,7 +146,11 @@ LMS.createSessionSync = function (ctx) {
           next.test_max_score = '';
         }
       }
-      if (homework !== null) next.homework = homework;
+      if (hasChecklist) {
+        next.homework = effectiveHomeworkText(date, classId, row.student_id, row.homework_replace_class);
+      } else if (fallbackHomework !== null) {
+        next.homework = fallbackHomework;
+      }
       Object.keys(next).forEach(function (k) {
         if (LMS.toStr(row[k]) !== LMS.toStr(next[k])) {
           row[k] = next[k];
@@ -219,22 +238,29 @@ LMS.createSessionSync = function (ctx) {
       }
       var homework = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.homework); }));
       var titles = LMS.splitHomeworkLines(homework);
-      if (titles.length && homeworkItems(g.date, g.classId).length &&
+      var classItems = classHomeworkItems(g.date, g.classId);
+      // Legacy forms can rewrite an existing class checklist. Skip when personal items exist so a
+      // student-specific homework line never becomes the class list. Do not invent a checklist
+      // from lesson text alone (that stays the legacy path until checks materialize it).
+      if (titles.length && classItems.length &&
           LMS.joinHomeworkTitles(titles.map(function (t) { return { title: t }; })) !== homeworkText(g.date, g.classId)) {
-        ctx.saveHomework(g.date, g.classId, titles);
+        var hasPersonal = homeworkItems(g.date, g.classId).some(function (it) {
+          return !LMS.isClassHomeworkItem(it);
+        });
+        if (!hasPersonal) ctx.saveHomework(g.date, g.classId, titles);
       }
       copyToLessons(g.date, g.classId, homework ? { homework: homework } : {});
     });
   }
 
-  /** After the date's checklist changed: every student lesson carries the checklist text. */
+  /** After the date's checklist changed: each student lesson carries their effective homework text. */
   function afterHomeworkChanged(date, classId) {
     var lessons = table('Lessons');
     var changed = false;
-    var text = LMS.joinHomeworkTitles(homeworkItems(date, classId));
     lessons.forEach(function (row) {
       if (LMS.toStr(row.lesson_date) !== LMS.toStr(date)) return;
       if (LMS.toStr(row.class_id) !== LMS.toStr(classId)) return;
+      var text = effectiveHomeworkText(date, classId, row.student_id, row.homework_replace_class);
       if (LMS.toStr(row.homework) === text) return;
       row.homework = text;
       row.updated_at = ctx.now();
@@ -251,6 +277,8 @@ LMS.createSessionSync = function (ctx) {
   return {
     find: find,
     homeworkItems: homeworkItems,
+    classHomeworkItems: classHomeworkItems,
+    effectiveHomeworkText: effectiveHomeworkText,
     saveSession: saveSession,
     saveNotice: saveNotice,
     afterLessonsSaved: afterLessonsSaved,

@@ -46,7 +46,8 @@ LMS.TABLES = {
     'lesson_id', 'lesson_date', 'student_id', 'class_id', 'attendance',
     'test_status', 'test_score', 'test_max_score', 'test_difficulty',
     'assignment_completion', 'concentration', 'progress', 'homework',
-    'special_note', 'created_at', 'updated_at'
+    'special_note', 'student_notice', 'homework_replace_class',
+    'created_at', 'updated_at'
   ],
   ClassSessionNotices: [
     'id', 'lesson_date', 'class_id', 'class_notice', 'created_at', 'updated_at'
@@ -92,7 +93,7 @@ LMS.TABLES = {
   ],
   HomeworkItems: [
     'item_id', 'lesson_date', 'class_id', 'title', 'sort_order',
-    'created_at', 'updated_at'
+    'student_id', 'created_at', 'updated_at'
   ],
   HomeworkChecks: [
     'check_id', 'item_id', 'student_id', 'status',
@@ -116,7 +117,7 @@ LMS.CLASS_TYPES = ['정규', '시험대비'];
 LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
 LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
 LMS.SCHOOL_EXAM_TYPES = ['중간', '기말', '기타'];
-LMS.SCHEMA_VERSION = 4;
+LMS.SCHEMA_VERSION = 5;
 LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
 LMS.DIFFICULTY = ['상', '중', '하'];
@@ -564,6 +565,34 @@ LMS.joinHomeworkTitles = function (items) {
   return (items || []).map(function (item) {
     return LMS.toStr(item && item.title);
   }).filter(Boolean).join('\n');
+};
+
+/** Class-shared checklist item (no student_id). */
+LMS.isClassHomeworkItem = function (it) {
+  return !LMS.toStr(it && it.student_id);
+};
+
+/** Lessons.homework_replace_class is stored as 'Y' when the student skips class items. */
+LMS.isHomeworkReplaceClass = function (value) {
+  return LMS.toStr(value) === 'Y' || value === true;
+};
+
+/**
+ * Effective homework items for one student: class items (unless replace) plus that student's
+ * personal items. Other students' personal items are excluded.
+ */
+LMS.homeworkItemsForStudent = function (items, studentId, replaceClass) {
+  var sid = LMS.toStr(studentId);
+  var replace = LMS.isHomeworkReplaceClass(replaceClass);
+  return (items || []).filter(function (it) {
+    var owner = LMS.toStr(it && it.student_id);
+    if (!owner) return !replace;
+    return owner === sid;
+  });
+};
+
+LMS.normalizeHomeworkReplaceClass = function (value) {
+  return LMS.isHomeworkReplaceClass(value) ? 'Y' : '';
 };
 
 /** Map checklist completion ratio to A/B/C (90%+ A, 70%+ B, else C). */
@@ -1194,9 +1223,14 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
   lines.push(hwLines);
 
   var section = 5;
+  var studentNotice = LMS.toStr(lesson.student_notice);
   var feedback = LMS.toStr(lesson.special_note);
   if (classNotice) {
     lines.push(section + '. 공지사항: ' + classNotice);
+    section += 1;
+  }
+  if (studentNotice) {
+    lines.push(section + '. 개별 공지: ' + studentNotice);
     section += 1;
   }
   if (feedback) {
@@ -1698,7 +1732,9 @@ LMS.validateLessonInput = function (data) {
     concentration: concentration,
     progress: LMS.toStr(data.progress),
     homework: LMS.toStr(data.homework),
-    special_note: LMS.toStr(data.special_note)
+    special_note: LMS.toStr(data.special_note),
+    student_notice: LMS.toStr(data.student_notice),
+    homework_replace_class: LMS.normalizeHomeworkReplaceClass(data.homework_replace_class)
   };
 };
 
