@@ -38,8 +38,7 @@ async function main() {
     now() { return '2026-09-14T10:00:00'; },
     today() { return '2026-09-14'; },
     currentUserEmail() { return 'teacher@local'; },
-    withLock(fn) { return fn(); },
-    invalidateCache() {}
+    transaction(fn) { return fn(); }
   };
   if (store.readTable('Students').length) {
     console.log('already seeded', store.readTable('Students').length, 'students');

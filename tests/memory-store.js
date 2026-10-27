@@ -13,7 +13,7 @@ function emptyTables() {
 }
 
 function cloneRows(rows) {
-  return (rows || []).map((row) => Object.assign({}, row));
+  return JSON.parse(JSON.stringify(rows || []));
 }
 
 function createMemoryStore(options) {
@@ -30,7 +30,15 @@ function createMemoryStore(options) {
     }
   }
 
+  let depth = 0;
+  let dirty = false;
+  let rollbackHooks = [];
+
   function persist() {
+    if (depth > 0) {
+      dirty = true;
+      return;
+    }
     if (file && fs) fs.writeFileSync(file, JSON.stringify(tables, null, 2));
   }
 
@@ -42,6 +50,37 @@ function createMemoryStore(options) {
       tables[name] = cloneRows(rows);
       persist();
     },
+    /**
+     * Only the outermost call is a unit: a throw restores every table and runs each onRollback
+     * given during it; success writes the file once.
+     */
+    transaction(fn, onRollback) {
+      if (onRollback) rollbackHooks.push(onRollback);
+      if (depth > 0) return fn();
+      // Stored rows are never mutated in place, so keeping the table arrays is a full snapshot.
+      const snapshot = Object.assign({}, tables);
+      depth = 1;
+      dirty = false;
+      let result;
+      try {
+        result = fn();
+      } catch (e) {
+        const hooks = rollbackHooks;
+        depth = 0;
+        dirty = false;
+        rollbackHooks = [];
+        tables = snapshot;
+        hooks.forEach((hook) => hook());
+        throw e;
+      }
+      depth = 0;
+      rollbackHooks = [];
+      if (dirty) {
+        dirty = false;
+        persist();
+      }
+      return result;
+    },
     now() {
       return options.now || '2026-09-14T10:00:00';
     },
@@ -51,11 +90,6 @@ function createMemoryStore(options) {
     currentUserEmail() {
       return options.email || 'teacher@example.com';
     },
-    withLock(fn) {
-      return fn();
-    },
-    invalidateCache() {},
-    _tables: tables,
     reset() {
       tables = emptyTables();
       persist();
