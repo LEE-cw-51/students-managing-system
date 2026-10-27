@@ -679,7 +679,7 @@ LMS.createPlanner = function (ctx) {
     if (!computed.editable.length) throw new Error('이 달에는 계획을 바꿀 수 있는 남은 수업일이 없습니다.');
     var now = today();
     var since = LMS.addDays(now, -28);
-    var roster = ctx.rosterOn(classId, now).filter(function (s) { return LMS.toStr(s.status) === '재원'; })
+    var roster = ctx.assignments.recordTargets(classId, now).students
       .sort(function (a, b) { return LMS.toStr(a.student_id).localeCompare(LMS.toStr(b.student_id)); });
     var aliases = {};
     var lessons = table('Lessons').filter(function (l) {
@@ -827,7 +827,7 @@ LMS.createPlanner = function (ctx) {
       if (filled) warnings.push('AI가 빠뜨린 수업일 ' + filled + '일은 기본 분할로 채웠습니다.');
       var monthPlan = computed.proposal.month ? Object.assign({}, computed.proposal.month, cleanPlanText(result.month, computed.proposal.month)) : null;
       var roster = {};
-      ctx.rosterOn(classId, today()).forEach(function (s) { roster[LMS.toStr(s.student_id)] = true; });
+      ctx.assignments.recordTargets(classId, today()).students.forEach(function (s) { roster[LMS.toStr(s.student_id)] = true; });
       var perStudent = {};
       var suggestions = [];
       var badStudents = 0;

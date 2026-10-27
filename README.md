@@ -143,6 +143,7 @@ components/     공통 UI(components/ui) · 화면별 부품(components/domain)
 lib/            세션 · Postgres 저장소 · AI 클라이언트 · 화면용 API 클라이언트
 src/00_Core.js  도메인 상수 · 순수 계산 · 보고서 문장 (브라우저에서도 import)
 src/01_Service.js  저장소에 의존하지 않는 업무 API
+src/02_Assignments.js  반 배정 조회: 다니는 반 · 반 구성원 · 수업 기록 대상 (서버 전용, GLOSSARY.md 용어)
 src/05_Views.js 화면용 조회 API (반·학생·오늘·시험·보고서)
 src/06_Plans.js 강의 계획: 단원 분할·초안·고치기·확정·휴강
 scripts/        시드 · 개발용 데모 데이터

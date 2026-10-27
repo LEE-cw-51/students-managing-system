@@ -397,7 +397,7 @@ LMS.suspendedClassIds = function (period) {
 };
 
 /** Exam period that suspends this regular class on the date, if any. */
-/** Last suspended day for a class in a period (its moved students' latest return), or '' for the period end. */
+/** Last suspended day for a class in a period (the earliest end among its moved students' placements), or '' for the period end. */
 LMS.classResumeDate = function (period, classId) {
   var map = period ? period.class_resume_dates : null;
   if (typeof map === 'string') {
@@ -415,7 +415,7 @@ LMS.classSuspensionOn = function (cls, isoDate, examPeriods) {
   var list = examPeriods || [];
   for (var i = 0; i < list.length; i++) {
     if (!LMS.examPeriodCovers(list[i], isoDate) || LMS.suspendedClassIds(list[i]).indexOf(id) === -1) continue;
-    // The class resumes the day after all of its moved students are back.
+    // The class resumes the day after its first moved student is back.
     var last = LMS.classResumeDate(list[i], id);
     if (last && isoDate > last) continue;
     return list[i];

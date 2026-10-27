@@ -129,3 +129,75 @@ describe('applying groups', () => {
     assert.ok(!t.api.getExamPeriods().some((p) => p.exam_period_id === fresh.exam_period_id));
   });
 });
+
+describe('resume dates follow regular assignment changes', () => {
+  // A반 (월/수) and B반 (화/목) suspended 11-02 ~ 11-30. 가 (A반) is placed until 11-10, 나 (B반) until 11-20.
+  // `extra` adds 가 to B반 from that date before the placement is made.
+  function small(extra) {
+    const api = LMS.createService(createMemoryStore({ today: TODAY, now: TODAY + 'T09:00:00' }));
+    api.ensureSchema();
+    const mk = (name, weekday) => api.createClass({ school_year: '2026', semester: '2', grade: '중2', class_name: name, weekday, start_time: '18:00', end_time: '20:00', status: '운영' });
+    const a = mk('A반', '월/수').class_id;
+    const b = mk('B반', '화/목').class_id;
+    const st = (name, classId) => api.createStudent({ name, grade: '중2', school: '한빛중', enrollment_date: '2026-09-01', status: '재원', class_id: classId });
+    const ga = st('가', a);
+    const na = st('나', b);
+    if (extra) api.assignStudentToClass({ student_id: ga.student_id, class_id: b, start_date: extra });
+    const period = api.saveExamPeriod({ title: '기말', start_date: '2026-11-02', end_date: '2026-11-30' });
+    api.applyExamGroups(period.exam_period_id, {
+      groups: [{ class_name: '대비반', schedule: [{ day: '금', start: '18:00', end: '20:00' }], students: [
+        { student_id: ga.student_id, source_class_id: a, end_date: '2026-11-10' },
+        { student_id: na.student_id, source_class_id: b, end_date: '2026-11-20' }
+      ] }],
+      suspended_class_ids: [a, b]
+    });
+    const id = period.exam_period_id;
+    const resume = () => LMS.findById(api.getExamPeriods(), 'exam_period_id', id).class_resume_dates;
+    const rel = (sid, cid) => api.getStudent(sid).class_history.find((h) => h.class_id === cid);
+    return { api, a, b, ga, na, resume, rel, periods: () => api.getExamPeriods() };
+  }
+
+  it('assigning a student to a suspended class during the period', () => {
+    const t = small();
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' });
+    t.api.assignStudentToClass({ student_id: t.ga.student_id, class_id: t.b, start_date: '2026-11-01' });
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-10' });
+    assert.equal(LMS.classMeetsOnDate(t.api.getClass(t.b), '2026-11-12', t.periods()), true, 'B반 back once 가 returns');
+  });
+
+  it('closing the source assignment points the placement at the other class', () => {
+    const t = small('2026-10-01');
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-10' });
+    t.api.closeStudentClass({ id: t.rel(t.ga.student_id, t.a).id, end_date: '2026-10-31' });
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-30', [t.b]: '2026-11-10' });
+    assert.ok(t.api.getClassRoster(t.b, '2026-11-05').every((s) => s.student_id !== t.ga.student_id), '가 is away from B반');
+  });
+
+  it('closing a sole assignment keeps the placement source', () => {
+    const t = small();
+    t.api.closeStudentClass({ id: t.rel(t.na.student_id, t.b).id, end_date: '2026-10-31' });
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' });
+  });
+
+  it('removing a mistaken assignment', () => {
+    const t = small('2026-10-01');
+    t.api.removeStudentClass({ id: t.rel(t.ga.student_id, t.b).id });
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' });
+    const t2 = small('2026-10-01');
+    t2.api.removeStudentClass({ id: t2.rel(t2.ga.student_id, t2.a).id });
+    assert.deepEqual(t2.resume(), { [t2.a]: '2026-11-30', [t2.b]: '2026-11-10' });
+  });
+
+  it('withdrawing a student', () => {
+    const t = small('2026-10-01');
+    t.api.archiveStudent(t.ga.student_id);
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' }, 'B반 no longer waits for 가');
+  });
+
+  it('closing a class', () => {
+    const t = small('2026-10-01');
+    t.api.closeClass(t.a);
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-30', [t.b]: '2026-11-10' });
+    assert.ok(t.api.getClassRoster(t.b, '2026-11-05').every((s) => s.student_id !== t.ga.student_id), '가 is away from B반');
+  });
+});
