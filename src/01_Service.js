@@ -2714,7 +2714,8 @@ LMS.createService = function (store) {
     requireClass: requireClass,
     assignments: assignments,
     examPeriods: examPeriods_,
-    saveTask: saveTask
+    saveTask: saveTask,
+    homeworkCells: views.homeworkCells_
   }) : {};
 
   return transactional(Object.assign({

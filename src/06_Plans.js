@@ -656,10 +656,6 @@ LMS.createPlanner = function (ctx) {
 
   // ----- AI context and draft -----
 
-  function rate(done, total) {
-    return total ? Math.round((done / total) * 100) : null;
-  }
-
   /**
    * Input for the AI planner. Students are sent as S1, S2… (alias map stays on the server);
    * no phone numbers, memos or counseling text leave the server.
@@ -679,12 +675,7 @@ LMS.createPlanner = function (ctx) {
     var lessons = table('Lessons').filter(function (l) {
       return LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.inRange(l.lesson_date, since, now);
     });
-    var items = table('HomeworkItems').filter(function (it) {
-      return LMS.toStr(it.class_id) === LMS.toStr(classId) && LMS.inRange(it.lesson_date, since, now);
-    });
-    var itemIds = {};
-    items.forEach(function (it) { itemIds[LMS.toStr(it.item_id)] = true; });
-    var checks = table('HomeworkChecks').filter(function (c) { return itemIds[LMS.toStr(c.item_id)]; });
+    var homeworkCells = ctx.homeworkCells({ classId: classId, from: since, to: now });
     var examsByKey = {};
     table('SchoolExams').forEach(function (e) {
       if (e.exam_date && LMS.inRange(e.exam_date, now, LMS.addDays(now, 60))) {
@@ -692,8 +683,6 @@ LMS.createPlanner = function (ctx) {
         if (!examsByKey[k] || examsByKey[k].exam_date > e.exam_date) examsByKey[k] = e;
       }
     });
-    var classDone = 0;
-    var classTotal = 0;
     var classPresent = 0;
     var exams = {};
     var students = roster.map(function (s, i) {
@@ -702,10 +691,7 @@ LMS.createPlanner = function (ctx) {
       var own = lessons.filter(function (l) { return LMS.toStr(l.student_id) === LMS.toStr(s.student_id); })
         .sort(function (a, b) { return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date)); });
       var present = own.filter(function (l) { return LMS.toStr(l.attendance) !== '결석'; }).length;
-      var mine = checks.filter(function (c) { return LMS.toStr(c.student_id) === LMS.toStr(s.student_id); });
-      var done = mine.filter(function (c) { return LMS.toStr(c.status) === '완료'; }).length;
-      classDone += done;
-      classTotal += mine.length;
+      var mine = homeworkCells.filter(function (c) { return c.student_id === LMS.toStr(s.student_id); });
       classPresent += present;
       var exam = examsByKey[LMS.schoolGroupKey(s.school, s.grade)];
       if (exam) exams[exam.school_exam_id] = exam;
@@ -715,8 +701,8 @@ LMS.createPlanner = function (ctx) {
       return {
         ref: alias,
         grade: LMS.toStr(s.grade),
-        attendance_rate: rate(present, own.length),
-        homework_rate: rate(done, mine.length),
+        attendance_rate: own.length ? Math.round((present / own.length) * 100) : null,
+        homework_rate: LMS.homeworkRate(mine).rate,
         recent_tests: own.filter(function (l) { return LMS.toStr(l.test_status) === '실시'; }).slice(-4).map(function (l) {
           return { date: l.lesson_date, score: LMS.toNum(l.test_score), max: LMS.toNum(l.test_max_score) };
         }),
@@ -755,8 +741,8 @@ LMS.createPlanner = function (ctx) {
           };
         }).slice(-12),
         class_stats_last_4_weeks: {
-          attendance_rate: rate(classPresent, lessons.length),
-          homework_rate: rate(classDone, classTotal)
+          attendance_rate: lessons.length ? Math.round((classPresent / lessons.length) * 100) : null,
+          homework_rate: LMS.homeworkRate(homeworkCells).rate
         },
         upcoming_school_exams: Object.keys(exams).map(function (id) {
           var e = exams[id];
