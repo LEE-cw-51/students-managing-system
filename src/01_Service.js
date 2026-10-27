@@ -182,8 +182,13 @@ LMS.createService = function (store) {
       row.updated_at = now();
       saveTable('Students', rows);
       if (withdrawing) {
-        regularRels_(row.student_id).forEach(function (r) { endRelForClosing_(r); });
+        var ended = regularRels_(row.student_id).map(function (r) {
+          var change = { student_id: r.student_id, start: LMS.toStr(r.start_date), end: '' };
+          endRelForClosing_(r);
+          return change;
+        });
         saveTable('StudentClasses', table('StudentClasses'));
+        syncExamPrep_(ended);
       }
       var startSync = null;
       if (data && data.sync_class_start && prevEnrollment && LMS.toStr(row.enrollment_date) !== prevEnrollment) {
@@ -336,10 +341,15 @@ LMS.createService = function (store) {
       row.updated_at = now();
       saveTable('Classes', rows);
       if (closing && LMS.toStr(row.class_type) !== '시험대비') {
-        table('StudentClasses').filter(function (r) {
+        var ended = table('StudentClasses').filter(function (r) {
           return LMS.toStr(r.class_id) === LMS.toStr(row.class_id) && LMS.toStr(r.status) === '현재';
-        }).forEach(function (r) { endRelForClosing_(r); });
+        }).map(function (r) {
+          var change = { student_id: r.student_id, start: LMS.toStr(r.start_date), end: '' };
+          endRelForClosing_(r);
+          return change;
+        });
         saveTable('StudentClasses', table('StudentClasses'));
+        syncExamPrep_(ended);
       }
       return row;
     });
@@ -439,7 +449,12 @@ LMS.createService = function (store) {
       saveTable('StudentClasses', rels);
       return row;
     };
-    return alreadyLocked ? run() : withLock(run);
+    if (alreadyLocked) return run();
+    return withLock(function () {
+      var row = run();
+      syncExamPrep_([{ student_id: row.student_id, start: row.start_date, end: '' }]);
+      return row;
+    });
   }
 
   /** First lesson date of the student in the class on or after `from` ('' when none). */
@@ -616,6 +631,7 @@ LMS.createService = function (store) {
     saveTable('StudentClasses', table('StudentClasses'));
     var created = assignStudentToClass({ student_id: rel.student_id, class_id: toClassId, start_date: start }, true);
     moveTempSource_(rel.student_id, LMS.toStr(rel.class_id), LMS.toStr(toClassId), start);
+    syncExamPrep_([{ student_id: rel.student_id, start: LMS.toStr(rel.start_date), end: '' }]);
     return created;
   }
 
@@ -647,6 +663,36 @@ LMS.createService = function (store) {
     Object.keys(touched).forEach(recomputeResumeDates_);
   }
 
+  /**
+   * After regular assignments change ([{ student_id, start, end }] = the ranges they covered): placements
+   * whose source class the student no longer attends in that range point at one they do (as in
+   * migrateToV4_; kept when there is none), and resume dates of overlapping periods are recomputed.
+   */
+  function syncExamPrep_(changes) {
+    var rels = table('StudentClasses');
+    var classes = table('Classes');
+    var touched = {};
+    var changed = false;
+    var ts = now();
+    changes.forEach(function (c) {
+      rels.forEach(function (r) {
+        if (LMS.toStr(r.status) !== '임시' || LMS.toStr(r.student_id) !== LMS.toStr(c.student_id)) return;
+        var sources = regularClassIdsOf_(r.student_id, r.start_date, r.end_date);
+        if (!sources.length || sources.indexOf(LMS.toStr(r.source_class_id)) !== -1) return;
+        r.source_class_id = sources[0];
+        r.updated_at = ts;
+        changed = true;
+        var cls = LMS.findById(classes, 'class_id', r.class_id);
+        if (cls && cls.exam_period_id) touched[LMS.toStr(cls.exam_period_id)] = true;
+      });
+      examPeriods_().forEach(function (p) {
+        if (LMS.rangesOverlap(p.start_date, p.end_date, c.start, c.end)) touched[LMS.toStr(p.exam_period_id)] = true;
+      });
+    });
+    if (changed) saveTable('StudentClasses', rels);
+    Object.keys(touched).forEach(recomputeResumeDates_);
+  }
+
   function closeStudentClass(data) {
     return withLock(function () {
       data = data || {};
@@ -665,6 +711,7 @@ LMS.createService = function (store) {
       row.status = '종료';
       row.updated_at = now();
       saveTable('StudentClasses', rels);
+      syncExamPrep_([{ student_id: row.student_id, start: LMS.toStr(row.start_date), end: '' }]);
       return row;
     });
   }
@@ -692,6 +739,7 @@ LMS.createService = function (store) {
       if (LMS.toStr(row.status) === '임시') throw new Error('시험대비 임시 배정은 시험 화면에서 바꿔 주세요.');
       if (!relRemovable_(row)) throw new Error('이 반에 수업 기록이나 숙제 체크가 있어 삭제할 수 없습니다. ‘반에서 빼기’를 써 주세요.');
       saveTable('StudentClasses', rels.filter(function (r) { return r !== row; }));
+      syncExamPrep_([{ student_id: row.student_id, start: LMS.toStr(row.start_date), end: LMS.toStr(row.end_date) }]);
       return { deleted: true, id: row.id };
     });
   }
