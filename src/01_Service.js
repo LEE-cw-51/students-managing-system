@@ -77,13 +77,8 @@ LMS.createService = function (store) {
   }
 
   function enrichStudent(student) {
-    var rels = table('StudentClasses').filter(function (row) {
-      return LMS.toStr(row.student_id) === LMS.toStr(student.student_id);
-    }).sort(function (a, b) {
-      return LMS.toStr(b.start_date).localeCompare(LMS.toStr(a.start_date));
-    });
     var classes = table('Classes');
-    var history = rels.map(function (rel) {
+    var history = assignments.history(student.student_id).map(function (rel) {
       var cls = LMS.findById(classes, 'class_id', rel.class_id);
       return {
         id: rel.id,

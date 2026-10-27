@@ -144,6 +144,15 @@ describe('assignments module (T4)', () => {
     assert.deepEqual(asg.membersDuring('R2', '2026-01-01', '2026-09-30'), []);
     assert.deepEqual(asg.membersDuring('R1', '2026-09-11', '2026-09-30').sort(), ['s1', 's3']);
   });
+
+  it('inClassOn, history and tempPlacements', () => {
+    assert.equal(asg.inClassOn('s1', 'X', '2026-09-20'), true);
+    assert.equal(asg.inClassOn('s1', 'X', '2026-09-21'), false);
+    assert.equal(asg.inClassOn('s1', 'R2'), false, 'booked, and the dead row never counted');
+    assert.equal(asg.inClassOn('s2', 'R1', '2026-09-10'), true);
+    assert.deepEqual(asg.history('s1').map((r) => r.id), ['next', 'tmp', 'r1', 'dead']);
+    assert.deepEqual(ids(asg.tempPlacements(['X', 'R1'])), ['tmp']);
+  });
 });
 
 // A반 (월/수) suspended 11-02 ~ 11-30 (11-02 is 월). 홍길동 is in A반 from 09-01 and placed in 대비반

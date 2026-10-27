@@ -110,6 +110,25 @@ LMS.createAssignments = function (ctx) {
     return relsOfStudent(studentId).filter(function (r) { return LMS.relActiveOn(r, d); });
   }
 
+  /** Whether an assignment (regular or temporary) puts the student in the class on the date. */
+  function inClassOn(studentId, classId, date) {
+    var d = dateOr(date);
+    return relsOfStudent(studentId).some(function (r) { return same(r.class_id, classId) && LMS.relActiveOn(r, d); });
+  }
+
+  /** Every assignment row of the student, latest start first. */
+  function history(studentId) {
+    return relsOfStudent(studentId).sort(function (a, b) { return byStart(b, a); });
+  }
+
+  /** Temporary placements in any of the (exam-prep) classes. */
+  function tempPlacements(classIds) {
+    var ids = (classIds || []).map(LMS.toStr);
+    return table('StudentClasses').filter(function (r) {
+      return LMS.toStr(r.status) === '임시' && ids.indexOf(LMS.toStr(r.class_id)) !== -1;
+    });
+  }
+
   /** 시작 예정 반: open assignments that start after the date. */
   function upcoming(studentId, date) {
     var d = dateOr(date);
@@ -244,13 +263,6 @@ LMS.createAssignments = function (ctx) {
     }).map(function (c) { return LMS.toStr(c.class_id); });
   }
 
-  function periodTempRels(periodId) {
-    var ids = examClassIds(periodId);
-    return table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.status) === '임시' && ids.indexOf(LMS.toStr(r.class_id)) !== -1;
-    });
-  }
-
   /**
    * Batch start, individual return: each suspended class stays off until its first moved
    * student is back, then meets with whoever has returned (students still away are left
@@ -261,7 +273,7 @@ LMS.createAssignments = function (ctx) {
     var periods = table('ExamPeriods');
     var period = LMS.findById(periods, 'exam_period_id', periodId);
     if (!period) return;
-    var temp = periodTempRels(periodId);
+    var temp = tempPlacements(examClassIds(periodId));
     var map = {};
     LMS.suspendedClassIds(period).forEach(function (classId) {
       var last = '';
@@ -804,6 +816,9 @@ LMS.createAssignments = function (ctx) {
     awayFrom: awayFrom,
     membersDuring: membersDuring,
     attending: attending,
+    inClassOn: inClassOn,
+    history: history,
+    tempPlacements: tempPlacements,
     upcoming: upcoming,
     isUnassigned: isUnassigned,
     openRegular: openRegular,
