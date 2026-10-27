@@ -92,11 +92,16 @@ LMS.createSessionSync = function (ctx) {
     return LMS.modeValue(lessonsOn(date, classId).map(function (l) { return LMS.toStr(l.homework); }));
   }
 
+  function tested(row) {
+    return LMS.toStr(row.test_status) === '실시';
+  }
+
   /**
-   * Copy the class values of a date onto every student lesson of that date and class.
+   * Copy the class values of a date onto every student lesson of that date and class. Difficulty
+   * and max score go to tested rows only; untested rows carry neither.
    * options.prevMax: the session max before this save; options.homework: text to use when the date has
-   * no checklist; options.legacyHomework false: leave homework alone when there is no checklist;
-   * options.testedOnly: difficulty only on tested rows; options.keepMax: never touch max.
+   * no checklist; options.realign: v4 migration (homework only from a checklist, untested rows and
+   * max scores left alone).
    */
   function copyToLessons(date, classId, options) {
     options = options || {};
@@ -104,7 +109,7 @@ LMS.createSessionSync = function (ctx) {
     var homework = null;
     if (homeworkItems(date, classId).length) homework = homeworkText(date, classId);
     else if (options.homework !== undefined) homework = LMS.toStr(options.homework);
-    else if (options.legacyHomework !== false) homework = homeworkText(date, classId);
+    else if (!options.realign) homework = homeworkText(date, classId);
     if (!session && homework === null) return;
     var lessons = table('Lessons');
     var prevMax = options.prevMax;
@@ -114,14 +119,16 @@ LMS.createSessionSync = function (ctx) {
       var next = {};
       if (session) {
         next.progress = LMS.toStr(session.progress);
-        if (!options.testedOnly || LMS.toStr(row.test_status) === '실시') {
+        if (tested(row)) {
           next.test_difficulty = LMS.toStr(session.test_difficulty);
-        }
-        // Max score follows the session unless a student row carries its own different value.
-        if (!options.keepMax && !LMS.isBlank(session.test_max_score) &&
-            (LMS.isBlank(row.test_max_score) ||
-             (prevMax !== undefined && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
-          next.test_max_score = session.test_max_score;
+          // Max score follows the session (a cleared one too) unless the row carries its own value.
+          if (!options.realign && (LMS.isBlank(row.test_max_score) ||
+              (!LMS.isBlank(prevMax) && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
+            next.test_max_score = session.test_max_score;
+          }
+        } else if (!options.realign) {
+          next.test_difficulty = '';
+          next.test_max_score = '';
         }
       }
       if (homework !== null) next.homework = homework;
@@ -188,17 +195,16 @@ LMS.createSessionSync = function (ctx) {
     var groups = {};
     saved.forEach(function (row, i) {
       var key = LMS.sessionKey(row.lesson_date, row.class_id);
-      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [] };
+      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [], testedRaws: [] };
       groups[key].raws.push(rawList[i] || {});
+      if (tested(row)) groups[key].testedRaws.push(rawList[i] || {});
     });
     Object.keys(groups).forEach(function (key) {
       var g = groups[key];
       var fields = {};
       var progress = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.progress); }));
-      var difficulty = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.test_difficulty); }));
-      var max = LMS.modeValue(g.raws.filter(function (r) {
-        return LMS.toStr(r.test_status) === '실시';
-      }).map(function (r) { return LMS.toStr(r.test_max_score); }));
+      var difficulty = LMS.modeValue(g.testedRaws.map(function (r) { return LMS.toStr(r.test_difficulty); }));
+      var max = LMS.modeValue(g.testedRaws.map(function (r) { return LMS.toStr(r.test_max_score); }));
       var session = find(g.date, g.classId);
       if (progress) fields.progress = progress;
       if (difficulty) fields.test_difficulty = difficulty;
@@ -239,7 +245,7 @@ LMS.createSessionSync = function (ctx) {
 
   /** v4 migration: re-align drifted student copies with the class record, never moving max scores. */
   function realign(date, classId) {
-    copyToLessons(date, classId, { legacyHomework: false, testedOnly: true, keepMax: true });
+    copyToLessons(date, classId, { realign: true });
   }
 
   return {

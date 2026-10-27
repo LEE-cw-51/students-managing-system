@@ -543,7 +543,7 @@ LMS.createService = function (store) {
     var idPos = 0;
     var ts = now();
     var saved = [];
-    validated.forEach(function (row) {
+    validated.forEach(function (row, i) {
       var key = LMS.lessonKey(row.lesson_date, row.student_id, row.class_id);
       var existingIndex = index[key];
       if (existingIndex !== undefined) {
@@ -552,6 +552,10 @@ LMS.createService = function (store) {
           lesson_id: prev.lesson_id,
           created_at: prev.created_at,
           updated_at: ts
+        });
+        // Fields left out of the input keep their stored text; the class record re-aligns them below.
+        ['progress', 'homework'].forEach(function (k) {
+          if ((list[i] || {})[k] === undefined) merged[k] = prev[k];
         });
         lessons[existingIndex] = merged;
         saved.push(merged);
