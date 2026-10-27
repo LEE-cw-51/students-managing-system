@@ -92,7 +92,7 @@ LMS.createViews = function (ctx) {
       return true;
     }).map(function (c) {
       var schedule = LMS.classSchedule(c);
-      var roster = ctx.rosterOn(c.class_id, today);
+      var roster = ctx.assignments.members(c.class_id, today);
       return {
         class_id: c.class_id,
         class_name: c.class_name,
@@ -140,7 +140,7 @@ LMS.createViews = function (ctx) {
   function getClassOverview(classId) {
     var cls = classRow(classId);
     var today = store.today();
-    var roster = ctx.rosterOn(classId, today);
+    var roster = ctx.assignments.recordTargets(classId, today).students;
     var monthStart = today.slice(0, 8) + '01';
     var lessons = classLessons(classId, monthStart, today);
     var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
@@ -232,7 +232,7 @@ LMS.createViews = function (ctx) {
       start: start,
       end: end,
       rows: Object.keys(dates).sort().reverse().map(function (d) {
-        var roster = ctx.rosterOn(classId, d);
+        var roster = ctx.assignments.recordTargets(classId, d).students;
         var summary = sessionSummary(classId, d, roster);
         var plan = planByDate[d];
         return Object.assign(summary, {
@@ -254,11 +254,11 @@ LMS.createViews = function (ctx) {
     var start = LMS.toStr(range.start) || LMS.addDays(end, -42);
     var hw = homeworkByDate(classId, start, end);
     var students = {};
-    ctx.rosterOn(classId, end).forEach(function (s) { students[s.student_id] = s; });
+    ctx.assignments.recordTargets(classId, end).students.forEach(function (s) { students[s.student_id] = s; });
     var allStudents = table('Students');
     var rows = Object.keys(hw.byDate).sort().reverse().map(function (d) {
       var items = hw.byDate[d];
-      var roster = ctx.rosterOn(classId, d);
+      var roster = ctx.assignments.recordTargets(classId, d).students;
       roster.forEach(function (s) { if (!students[s.student_id]) students[s.student_id] = s; });
       var cells = {};
       var done = 0;
@@ -427,10 +427,8 @@ LMS.createViews = function (ctx) {
     var today = store.today();
     var students = table('Students');
     var classes = table('Classes');
-    var rels = table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.class_id) === LMS.toStr(classId);
-    });
-    var rows = rels.map(function (r) {
+    var placements = ctx.assignments.classPlacements(classId, today);
+    var row = function (r, active) {
       var s = LMS.findById(students, 'student_id', r.student_id) || {};
       var source = r.source_class_id ? LMS.findById(classes, 'class_id', r.source_class_id) : null;
       return {
@@ -446,34 +444,33 @@ LMS.createViews = function (ctx) {
         rel_status: r.status,
         assignment_type: LMS.toStr(r.assignment_type) || '정규',
         source_class_name: source ? source.class_name : '',
-        active: LMS.relActiveOn(r, today) && LMS.toStr(s.status) !== '퇴원',
+        active: active,
         removable: ctx.relRemovable ? ctx.relRemovable(r) : false,
         other_classes: activeRels_(r.student_id, today).filter(function (o) {
           return LMS.toStr(o.class_id) !== LMS.toStr(classId);
         }).map(function (o) { return o.class_name; })
       };
-    });
-    // Students of this class temporarily moved elsewhere today.
-    var away = table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.source_class_id) === LMS.toStr(classId) && LMS.toStr(r.status) === '임시' && LMS.relActiveOn(r, today);
-    }).map(function (r) {
-      var cls = LMS.findById(classes, 'class_id', r.class_id);
-      return { student_id: r.student_id, class_id: r.class_id, class_name: cls ? cls.class_name : '', end_date: r.end_date };
-    });
+    };
+    // Students of this class temporarily moved elsewhere today stay listed, marked away.
     var awayById = {};
-    away.forEach(function (a) { awayById[a.student_id] = a; });
-    rows.forEach(function (r) { r.away = awayById[r.student_id] || null; });
+    ctx.assignments.awayFrom(classId, today).forEach(function (r) {
+      var c = LMS.findById(classes, 'class_id', r.class_id);
+      awayById[r.student_id] = { student_id: r.student_id, class_id: r.class_id, class_name: c ? c.class_name : '', end_date: r.end_date };
+    });
+    var build = function (rels, active) {
+      return rels.map(function (r) {
+        var out = row(r, active);
+        out.away = awayById[r.student_id] || null;
+        return out;
+      });
+    };
     var sorter = function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); };
     return {
       class_name: cls.class_name,
-      current: rows.filter(function (r) { return r.active; }).sort(sorter),
+      current: build(placements.current, true).sort(sorter),
       // Booked to start later (e.g. a move dated next week): not attending yet, not past either.
-      upcoming: rows.filter(function (r) {
-        return !r.active && r.rel_status === '현재' && LMS.toStr(r.start_date) > today && r.student_status !== '퇴원';
-      }).sort(sorter),
-      past: rows.filter(function (r) {
-        return !r.active && !(r.rel_status === '현재' && LMS.toStr(r.start_date) > today && r.student_status !== '퇴원');
-      }).sort(function (a, b) {
+      upcoming: build(placements.upcoming, false).sort(sorter),
+      past: build(placements.past, false).sort(function (a, b) {
         return LMS.toStr(b.end_date || b.start_date).localeCompare(LMS.toStr(a.end_date || a.start_date));
       })
     };
@@ -487,9 +484,7 @@ LMS.createViews = function (ctx) {
 
   function currentClassNames_(studentId, today) {
     var classes = table('Classes');
-    return table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.student_id) === LMS.toStr(studentId) && LMS.relActiveOn(r, today);
-    }).map(function (r) {
+    return ctx.assignments.attending(studentId, today).map(function (r) {
       var c = LMS.findById(classes, 'class_id', r.class_id);
       return c ? c.class_name : '';
     }).filter(Boolean);
@@ -622,11 +617,10 @@ LMS.createViews = function (ctx) {
     });
   }
 
+  /** 다니는 반 on the date, shaped for the student screens. */
   function activeRels_(studentId, date) {
     var classes = table('Classes');
-    return table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.student_id) === LMS.toStr(studentId) && LMS.relActiveOn(r, date);
-    }).map(function (r) {
+    return ctx.assignments.attending(studentId, date).map(function (r) {
       var c = LMS.findById(classes, 'class_id', r.class_id) || {};
       var src = r.source_class_id ? LMS.findById(classes, 'class_id', r.source_class_id) : null;
       return {
@@ -644,12 +638,10 @@ LMS.createViews = function (ctx) {
     });
   }
 
-  /** Regular assignments that start after `date` (booked, not yet attending). */
+  /** 시작 예정 반 after `date` (booked, not yet attending). */
   function upcomingRels_(studentId, date) {
     var classes = table('Classes');
-    return table('StudentClasses').filter(function (r) {
-      return LMS.toStr(r.student_id) === LMS.toStr(studentId) && LMS.toStr(r.status) === '현재' && LMS.toStr(r.start_date) > date;
-    }).map(function (r) {
+    return ctx.assignments.upcoming(studentId, date).map(function (r) {
       var c = LMS.findById(classes, 'class_id', r.class_id) || {};
       return {
         rel_id: r.id, class_id: r.class_id, class_name: c.class_name || r.class_id, start_date: r.start_date,
@@ -658,20 +650,10 @@ LMS.createViews = function (ctx) {
     });
   }
 
-  /** 재원생 with no class today and none booked: the 미배정 state (derived, not stored). */
   /** Start date of the student's first regular class assignment ('' when none). */
   function firstRegularStart_(studentId) {
-    var classes = table('Classes');
-    return table('StudentClasses').filter(function (r) {
-      if (LMS.toStr(r.student_id) !== LMS.toStr(studentId) || LMS.toStr(r.status) === '임시') return false;
-      var c = LMS.findById(classes, 'class_id', r.class_id);
-      return !c || LMS.toStr(c.class_type) !== '시험대비';
-    }).map(function (r) { return LMS.toStr(r.start_date); }).filter(Boolean).sort()[0] || '';
-  }
-
-  function isUnassigned_(student, today) {
-    return LMS.toStr(student.status) === '재원' && !activeRels_(student.student_id, today).length &&
-      !upcomingRels_(student.student_id, today).length;
+    var first = ctx.assignments.firstRegular(studentId);
+    return first ? LMS.toStr(first.start_date) : '';
   }
 
   /** Student list with today's classes, badges, last lesson and the next school exam. */
@@ -709,7 +691,7 @@ LMS.createViews = function (ctx) {
         parent_phone: s.parent_phone,
         classes: rels,
         upcoming: upcoming,
-        unassigned: LMS.toStr(s.status) === '재원' && !rels.length && !upcoming.length,
+        unassigned: ctx.assignments.isUnassigned(s, today),
         last_lesson_date: last,
         badges: LMS.toStr(s.status) === '재원' ? badgesFor(s, lessonsByStudent) : [],
         next_exam: exam ? { date: exam.exam_date, d_day: LMS.daysBetween(today, exam.exam_date), label: examLabel(exam) } : null
@@ -778,7 +760,7 @@ LMS.createViews = function (ctx) {
       today: today,
       classes: rels,
       upcoming_classes: upcomingRels_(studentId, today),
-      unassigned: isUnassigned_(s, today),
+      unassigned: ctx.assignments.isUnassigned(s, today),
       next: next,
       month: monthStats_(studentId, monthStart, today),
       badges: LMS.toStr(s.status) === '재원' ? badgesFor(s) : [],
@@ -1048,7 +1030,7 @@ LMS.createViews = function (ctx) {
         };
       }),
       exams_soon: date === today ? upcomingExamsFor(active, 7) : [],
-      unassigned_count: date === today ? active.filter(function (s) { return isUnassigned_(s, today); }).length : 0,
+      unassigned_count: date === today ? active.filter(function (s) { return ctx.assignments.isUnassigned(s, today); }).length : 0,
       flagged: flagged.sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); }),
       week: weekDays,
       weekly_homework: {
@@ -1133,7 +1115,7 @@ LMS.createViews = function (ctx) {
     var sourceUse = {};
     activeStudents_().forEach(function (s) {
       if (placed[s.student_id]) return;
-      var sources = ctx.regularClassIdsOf(s.student_id, period.start_date, period.end_date);
+      var sources = ctx.assignments.regularClassIdsDuring(s.student_id, period.start_date, period.end_date);
       if (!sources.length) return;
       var src = LMS.findById(classes, 'class_id', sources[0]);
       var entry = { student_id: s.student_id, name: s.name, school: s.school, grade: s.grade, source_class_id: sources[0], source_class_name: src ? src.class_name : '' };
@@ -1220,14 +1202,14 @@ LMS.createViews = function (ctx) {
     var suspended = LMS.suspendedClassIds(period).map(function (id) {
       var c = LMS.findById(classes, 'class_id', id) || { class_name: id };
       var last = LMS.classResumeDate(period, id) || period.end_date;
-      var left = ctx.rosterOn(id, period.start_date).filter(function (s) {
-        return LMS.toStr(s.status) === '재원' && !placed[s.student_id];
+      var left = ctx.assignments.recordTargets(id, period.start_date).students.filter(function (s) {
+        return !placed[s.student_id];
       }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
       // Return schedule: who comes back to this class on which day.
       var byDay = {};
       temp.forEach(function (tc) {
         tc.students.forEach(function (m) {
-          var sources = ctx.regularClassIdsOf(m.student_id, period.start_date, period.end_date);
+          var sources = ctx.assignments.regularClassIdsDuring(m.student_id, period.start_date, period.end_date);
           if (sources.indexOf(id) === -1 && m.source_class_id !== id) return;
           var back = LMS.addDays(m.end_date || period.end_date, 1);
           (byDay[back] = byDay[back] || []).push(m.name);
@@ -1263,10 +1245,7 @@ LMS.createViews = function (ctx) {
     var ids = {};
     if (classId) {
       ctx.requireClass(classId);
-      table('StudentClasses').forEach(function (r) {
-        if (LMS.toStr(r.class_id) !== LMS.toStr(classId) || LMS.toStr(r.status) === '종료' && !r.end_date) return;
-        if (LMS.rangesOverlap(r.start_date, r.end_date, range.start, range.end)) ids[r.student_id] = true;
-      });
+      ctx.assignments.membersDuring(classId, range.start, range.end).forEach(function (id) { ids[id] = true; });
       table('Lessons').forEach(function (l) {
         if (LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.inRange(l.lesson_date, range.start, range.end)) ids[l.student_id] = true;
       });
@@ -1307,8 +1286,8 @@ LMS.createViews = function (ctx) {
     var reports = ctx.generateDailyReports(date, classId);
     var recorded = {};
     reports.reports.forEach(function (r) { recorded[r.student_id] = true; });
-    var missing = ctx.rosterOn(classId, date).filter(function (s) {
-      return LMS.toStr(s.status) === '재원' && !recorded[s.student_id];
+    var missing = ctx.assignments.recordTargets(classId, date).students.filter(function (s) {
+      return !recorded[s.student_id];
     }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
     return {
       date: date,
