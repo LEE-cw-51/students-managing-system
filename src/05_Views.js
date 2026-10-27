@@ -781,22 +781,18 @@ LMS.createViews = function (ctx) {
     var today = store.today();
     var classes = table('Classes');
     var periods = ctx.examPeriods();
-    var rels = table('StudentClasses').filter(function (r) { return LMS.toStr(r.student_id) === LMS.toStr(studentId); });
     var lessons = table('Lessons').filter(function (l) {
       return LMS.toStr(l.student_id) === LMS.toStr(studentId) && LMS.inRange(l.lesson_date, range.start, range.end);
     });
     var makeups = table('MakeupSessions').filter(function (m) {
       if (LMS.toStr(m.status) === '취소' || !LMS.inRange(m.makeup_date, range.start, range.end)) return false;
       if (LMS.toStr(m.student_id) === LMS.toStr(studentId)) return true;
-      return LMS.toStr(m.kind) === '반' && rels.some(function (r) {
-        return LMS.toStr(r.class_id) === LMS.toStr(m.class_id) && LMS.relActiveOn(r, m.makeup_date);
-      });
+      return LMS.toStr(m.kind) === '반' && ctx.assignments.inClassOn(studentId, m.class_id, m.makeup_date);
     });
     var counts = { present: 0, absent: 0, makeup: 0, missing: 0, scheduled: 0 };
     var days = LMS.datesInRange(range.start, range.end).map(function (date) {
       var slots = [];
-      rels.forEach(function (r) {
-        if (!LMS.relActiveOn(r, date)) return;
+      ctx.assignments.attending(studentId, date).forEach(function (r) {
         var c = LMS.findById(classes, 'class_id', r.class_id);
         if (!c || !LMS.classMeetsOnDate(c, date, periods)) return;
         slots.push({ class_id: c.class_id, class_name: c.class_name, time: LMS.classTimeOn(c, date) });
@@ -849,7 +845,6 @@ LMS.createViews = function (ctx) {
     var end = LMS.toStr(range.end) || today;
     var start = LMS.toStr(range.start) || LMS.addDays(end, -42);
     var periods = ctx.examPeriods();
-    var rels = table('StudentClasses').filter(function (r) { return LMS.toStr(r.student_id) === LMS.toStr(studentId); });
     var classes = table('Classes');
     var checks = {};
     table('HomeworkChecks').forEach(function (c) {
@@ -858,7 +853,7 @@ LMS.createViews = function (ctx) {
     var groups = {};
     table('HomeworkItems').forEach(function (it) {
       if (!LMS.inRange(it.lesson_date, start, end)) return;
-      var member = rels.some(function (r) { return LMS.toStr(r.class_id) === LMS.toStr(it.class_id) && LMS.relActiveOn(r, it.lesson_date); });
+      var member = ctx.assignments.inClassOn(studentId, it.class_id, it.lesson_date);
       if (!member && !checks[LMS.toStr(it.item_id)]) return;
       var key = it.lesson_date + '|' + it.class_id;
       if (!groups[key]) {
@@ -1072,13 +1067,11 @@ LMS.createViews = function (ctx) {
 
   function getExamPeriods() {
     var today = store.today();
-    var rels = table('StudentClasses');
     return table('ExamPeriods').map(function (p) {
       var classes = periodClasses(p.exam_period_id);
-      var ids = classes.map(function (c) { return c.class_id; });
       var students = {};
-      rels.forEach(function (r) {
-        if (LMS.toStr(r.status) === '임시' && ids.indexOf(r.class_id) !== -1) students[r.student_id] = true;
+      ctx.assignments.tempPlacements(classes.map(function (c) { return c.class_id; })).forEach(function (r) {
+        students[r.student_id] = true;
       });
       return Object.assign({}, p, {
         state: periodState(p, today),
@@ -1107,9 +1100,7 @@ LMS.createViews = function (ctx) {
     var classes = table('Classes');
     var placed = {};
     var tempIds = periodClasses(periodId).map(function (c) { return c.class_id; });
-    table('StudentClasses').forEach(function (r) {
-      if (LMS.toStr(r.status) === '임시' && tempIds.indexOf(r.class_id) !== -1) placed[r.student_id] = true;
-    });
+    ctx.assignments.tempPlacements(tempIds).forEach(function (r) { placed[r.student_id] = true; });
     var groups = {};
     var unassigned = [];
     var sourceUse = {};
@@ -1175,10 +1166,9 @@ LMS.createViews = function (ctx) {
     var today = store.today();
     var students = table('Students');
     var classes = table('Classes');
-    var rels = table('StudentClasses');
     var lessons = table('Lessons');
     var temp = periodClasses(periodId).map(function (c) {
-      var members = rels.filter(function (r) { return LMS.toStr(r.status) === '임시' && r.class_id === c.class_id; }).map(function (r) {
+      var members = ctx.assignments.tempPlacements([c.class_id]).map(function (r) {
         var st = LMS.findById(students, 'student_id', r.student_id) || {};
         var src = LMS.findById(classes, 'class_id', r.source_class_id);
         return {

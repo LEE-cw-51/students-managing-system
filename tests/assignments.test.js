@@ -144,6 +144,165 @@ describe('assignments module (T4)', () => {
     assert.deepEqual(asg.membersDuring('R2', '2026-01-01', '2026-09-30'), []);
     assert.deepEqual(asg.membersDuring('R1', '2026-09-11', '2026-09-30').sort(), ['s1', 's3']);
   });
+
+  it('inClassOn, history and tempPlacements', () => {
+    assert.equal(asg.inClassOn('s1', 'X', '2026-09-20'), true);
+    assert.equal(asg.inClassOn('s1', 'X', '2026-09-21'), false);
+    assert.equal(asg.inClassOn('s1', 'R2'), false, 'booked, and the dead row never counted');
+    assert.equal(asg.inClassOn('s2', 'R1', '2026-09-10'), true);
+    assert.deepEqual(asg.history('s1').map((r) => r.id), ['next', 'tmp', 'r1', 'dead']);
+    assert.deepEqual(ids(asg.tempPlacements(['X', 'R1'])), ['tmp']);
+  });
+});
+
+// A반 (월/수) suspended 11-02 ~ 11-30 (11-02 is 월). 홍길동 is in A반 from 09-01 and placed in 대비반
+// (월/금) 11-02 ~ 11-20, away from A반. `withB` also puts him in B반 (화/목) from 09-01.
+function examSetup(today, withB) {
+  const store = createMemoryStore({ today, now: today + 'T09:00:00' });
+  const api = LMS.createService(store);
+  const a = api.createClass({ class_name: 'A반', grade: '중2', weekday: '월/수', start_time: '18:00', end_time: '20:00' }).class_id;
+  const b = api.createClass({ class_name: 'B반', grade: '중2', weekday: '화/목', start_time: '18:00', end_time: '20:00' }).class_id;
+  const s = api.createStudent({ name: '홍길동', grade: '중2', class_id: a, enrollment_date: '2026-09-01' }).student_id;
+  if (withB) api.assignStudentToClass({ student_id: s, class_id: b, start_date: '2026-09-01' });
+  const period = api.saveExamPeriod({ title: '기말', start_date: '2026-11-02', end_date: '2026-11-30' });
+  const exam = api.applyExamGroups(period.exam_period_id, {
+    groups: [{ class_name: '대비반', schedule: [{ day: '월', start: '18:00', end: '20:00' }, { day: '금', start: '18:00', end: '20:00' }],
+      students: [{ student_id: s, source_class_id: a, end_date: '2026-11-20' }] }],
+    suspended_class_ids: [a]
+  }).classes[0].class_id;
+  const temps = () => store.readTable('StudentClasses').filter((r) => r.status === '임시')
+    .map((r) => [r.start_date, r.end_date, r.source_class_id]).sort();
+  const resume = () => LMS.findById(api.getExamPeriods(), 'exam_period_id', period.exam_period_id).class_resume_dates[a];
+  const regular = (cid) => api.getStudent(s).class_history.find((h) => h.class_id === cid);
+  const lesson = (date) => api.saveLessonsBatch([{ lesson_date: date, class_id: exam, student_id: s, attendance: '출석' }]);
+  const inExam = (date) => api.getClassRoster(exam, date).some((x) => x.student_id === s);
+  return { api, a, b, s, exam, temps, resume, regular, lesson, inExam };
+}
+
+describe('exam-prep placements end with the regular assignment (T6)', () => {
+  it('withdrawing mid-placement ends it yesterday', () => {
+    const t = examSetup('2026-11-05');
+    t.api.archiveStudent(t.s);
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-04', t.a]]);
+    assert.equal(t.resume(), '2026-11-04');
+    assert.equal(t.inExam('2026-11-06'), false);
+  });
+
+  it('withdrawing keeps the placement up to a later exam-class lesson', () => {
+    const t = examSetup('2026-11-09');
+    t.lesson('2026-11-09');
+    t.api.archiveStudent(t.s);
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-09', t.a]]);
+  });
+
+  it('withdrawing ends the placement even when another regular class covers it', () => {
+    const t = examSetup('2026-11-05', true);
+    t.api.archiveStudent(t.s);
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-04', t.a]]);
+  });
+
+  it('taking the student out mid-placement ends it on the last lesson day', () => {
+    const t = examSetup('2026-11-09');
+    t.api.closeStudentClass({ id: t.regular(t.a).id, end_date: '2026-11-06' });
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-06', t.a]]);
+    assert.equal(t.resume(), '2026-11-06');
+    assert.equal(t.inExam('2026-11-09'), false);
+    assert.ok(!t.api.getClassRoster(t.a, '2026-11-09').some((x) => x.student_id === t.s));
+  });
+
+  it('taking the student out before a started placement keeps it while it has lessons', () => {
+    const t = examSetup('2026-11-05');
+    t.lesson('2026-11-02');
+    t.api.closeStudentClass({ id: t.regular(t.a).id, end_date: '2026-10-31' });
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-02', t.a]]);
+  });
+
+  it('taking the student out points the rest at another regular class', () => {
+    const t = examSetup('2026-11-09', true);
+    t.api.closeStudentClass({ id: t.regular(t.a).id, end_date: '2026-11-06' });
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-06', t.a], ['2026-11-07', '2026-11-20', t.b]]);
+    assert.equal(t.inExam('2026-11-10'), true);
+    assert.ok(!t.api.getClassRoster(t.b, '2026-11-10').some((x) => x.student_id === t.s), 'away from B반');
+  });
+
+  it('closing the class mid-placement ends it yesterday', () => {
+    const t = examSetup('2026-11-05');
+    t.api.closeClass(t.a);
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-04', t.a]]);
+    assert.equal(t.resume(), '2026-11-04');
+  });
+
+  it('closing the class before the period drops the placement', () => {
+    const t = examSetup('2026-10-26');
+    t.api.closeClass(t.a);
+    assert.deepEqual(t.temps(), []);
+    assert.equal(t.resume(), '2026-11-30');
+  });
+
+  it('deleting the assignment drops a placement made from it', () => {
+    const t = examSetup('2026-10-26');
+    t.api.removeStudentClass({ id: t.regular(t.a).id });
+    assert.deepEqual(t.temps(), []);
+    assert.equal(t.resume(), '2026-11-30');
+    assert.equal(t.inExam('2026-11-02'), false);
+  });
+
+  it('deleting one of two assignments points the placement at the other', () => {
+    const t = examSetup('2026-10-26', true);
+    t.api.removeStudentClass({ id: t.regular(t.a).id });
+    assert.deepEqual(t.temps(), [['2026-11-02', '2026-11-20', t.b]]);
+  });
+});
+
+describe('assignments module commands (T7)', () => {
+  function moduleTables() {
+    const tables = {
+      Classes: [
+        { class_id: 'A', class_name: 'A반', class_type: '정규', status: '운영' },
+        { class_id: 'X', class_name: '대비반', class_type: '시험대비', status: '운영', exam_period_id: 'P' }
+      ],
+      Students: [{ student_id: 's1', name: '가', status: '재원' }, { student_id: 's2', name: '나', status: '재원' }],
+      ExamPeriods: [{ exam_period_id: 'P', start_date: '2026-11-02', end_date: '2026-11-30', suspended_class_ids: ['A'], class_resume_dates: {} }],
+      StudentClasses: [
+        { id: 'r1', student_id: 's1', class_id: 'A', start_date: '2026-09-01', end_date: '', status: '현재' },
+        { id: 'r2', student_id: 's2', class_id: 'A', start_date: '2026-09-01', end_date: '', status: '현재' },
+        { id: 't1', student_id: 's1', class_id: 'X', start_date: '2026-11-02', end_date: '2026-11-20', status: '임시', source_class_id: 'A' },
+        { id: 't2', student_id: 's2', class_id: 'X', start_date: '2026-11-09', end_date: '2026-11-25', status: '임시', source_class_id: 'A' }
+      ],
+      Lessons: []
+    };
+    let seq = 0;
+    const asg = LMS.createAssignments({
+      table: (name) => tables[name] || (tables[name] = []),
+      saveTable: (name, rows) => { tables[name] = rows; },
+      today: () => '2026-11-05',
+      now: () => '2026-11-05T09:00:00',
+      nextIds: (prefix, n) => Array.from({ length: n || 1 }, () => prefix + '_' + (++seq))
+    });
+    return { tables, asg };
+  }
+  const temp = (tables, id) => tables.StudentClasses.find((r) => r.id === id);
+
+  it('close ends running placements, drops later ones and recomputes resume dates', () => {
+    const { tables, asg } = moduleTables();
+    asg.close({ id: 'r1', end_date: '2026-11-04' });
+    assert.equal(temp(tables, 't1').end_date, '2026-11-04');
+    asg.close({ id: 'r2', end_date: '2026-11-04' });
+    assert.equal(temp(tables, 't2'), undefined, 'not started yet');
+    assert.deepEqual(tables.ExamPeriods[0].class_resume_dates, { A: '2026-11-04' });
+  });
+
+  it('endForClassClose and endForWithdrawal use the same rule', () => {
+    const one = moduleTables();
+    one.asg.endForClassClose('A');
+    assert.equal(temp(one.tables, 't1').end_date, '2026-11-04');
+    assert.equal(temp(one.tables, 't2'), undefined);
+    const two = moduleTables();
+    two.tables.Lessons.push({ lesson_id: 'L1', student_id: 's2', class_id: 'X', lesson_date: '2026-11-09' });
+    two.asg.endForWithdrawal('s2');
+    assert.equal(temp(two.tables, 't2').end_date, '2026-11-09', 'kept up to its lesson');
+    assert.equal(temp(two.tables, 't1').end_date, '2026-11-20', 'other students untouched');
+  });
 });
 
 describe('answers follow changes in the same service instance (T5)', () => {
