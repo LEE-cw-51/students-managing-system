@@ -407,13 +407,4 @@ describe('shared AI client', () => {
     assert.equal(out.text, '【학습 분석】\n좋음');
     assert.equal(sent.temperature, 0.4);
   });
-
-  it('keeps internal service functions off the browser API', () => {
-    const { isPublicApi } = require('../lib/store.js');
-    const api = LMS.createService(createMemoryStore());
-    assert.equal(isPublicApi(api, 'getPlanBoard'), true);
-    ['saveAiPlanDraft', 'getClassPlanContext', 'createSplitDraft', 'setDailyPlanDone', 'ensureSchema', 'nope'].forEach((n) => {
-      assert.equal(isPublicApi(api, n), false, n);
-    });
-  });
 });

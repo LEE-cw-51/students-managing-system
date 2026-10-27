@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isAuthed } from '../../../../lib/auth.js';
 import { withService } from '../../../../lib/store.js';
 import { renderMonthlyReportPdf } from '../../../../lib/monthly-pdf.js';
+import { errorResponse } from '../../../../lib/api-error.js';
 
 export const runtime = 'nodejs';
 
@@ -58,9 +59,6 @@ export async function POST(req) {
       }
     });
   } catch (e) {
-    return NextResponse.json({
-      ok: false,
-      error: e && e.message ? e.message : String(e)
-    });
+    return errorResponse(e);
   }
 }

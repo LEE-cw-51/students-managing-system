@@ -78,6 +78,7 @@ LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-s
 
 - 웹앱은 비밀번호 세션으로 막습니다. 비밀번호는 서버 환경 변수에만 둡니다.
 - 브라우저에 데이터베이스 키를 넣지 않습니다. 모든 읽기/쓰기는 서버 API를 통과합니다.
+- `/api/[name]`은 `lib/public-api.js` 허용 목록(화면이 실제로 부르는 업무 함수)만 호출합니다. 화면에서 새 함수를 부르면 목록에 추가해야 하며, `tests/public-api.test.js`가 빠진 이름을 잡습니다.
 - AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 OpenRouter로 전송됩니다.
 - 강의 계획 AI 제안에는 학생 이름 대신 `S1, S2…` 별칭과 숫자 요약(출석·숙제 이행률·최근 점수·학습 신호)만 보냅니다. 연락처·메모·상담 내용은 보내지 않습니다.
 
@@ -138,7 +139,7 @@ src/  00_Core 규칙·계산 │ 01_Service 업무 │ 05_Views 화면 조회 �
 
 ```text
 app/(lms)/      React 화면 (오늘·학생·반·시험·보고서·설정)
-app/api/        API (/api/[name] 은 업무 API를 그대로 호출, 서버 내부용 함수는 막음)
+app/api/        API (/api/[name] 은 허용 목록에 있는 업무 API만 호출)
 components/     공통 UI(components/ui) · 화면별 부품(components/domain)
 lib/            세션 · Postgres 저장소 · AI 클라이언트 · 화면용 API 클라이언트
 src/00_Core.js  도메인 상수 · 순수 계산 · 보고서 문장 (브라우저에서도 import)

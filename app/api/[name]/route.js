@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isAuthed } from '../../../lib/auth.js';
 import { withService, isPublicApi } from '../../../lib/store.js';
+import { errorResponse } from '../../../lib/api-error.js';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +30,6 @@ export async function POST(req, ctx) {
     });
     return NextResponse.json({ ok: true, data });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: e && e.message ? e.message : String(e) });
+    return errorResponse(e);
   }
 }

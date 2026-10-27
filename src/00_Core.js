@@ -579,6 +579,21 @@ LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
   return 'C';
 };
 
+/**
+ * 숙제 완료율 over homework check rows. Unchecked (미확인) cells have no row and are left out;
+ * callers pass only rows of students who were in the item's class on its lesson date.
+ * Returns { done, checked, rate }; rate is null when nothing was checked.
+ */
+LMS.homeworkRate = function (cells) {
+  var checked = 0;
+  var done = 0;
+  (cells || []).forEach(function (c) {
+    checked += 1;
+    if (LMS.toStr(c.status) === '완료') done += 1;
+  });
+  return { done: done, checked: checked, rate: checked ? Math.round((done / checked) * 100) : null };
+};
+
 LMS.addDays = function (isoDate, delta) {
   var parts = LMS.toStr(isoDate).split('-');
   var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));

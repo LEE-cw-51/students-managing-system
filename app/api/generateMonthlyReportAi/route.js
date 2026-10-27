@@ -6,6 +6,7 @@ import {
   buildGenerateMonthlyReportAiData,
   isMonthlyAiConfigured
 } from '../../../lib/monthly-ai.js';
+import { errorResponse } from '../../../lib/api-error.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -37,9 +38,6 @@ export async function POST(req) {
       data: buildGenerateMonthlyReportAiData(pack, ai.text, ai.model)
     });
   } catch (e) {
-    return NextResponse.json({
-      ok: false,
-      error: e && e.message ? e.message : String(e)
-    });
+    return errorResponse(e);
   }
 }

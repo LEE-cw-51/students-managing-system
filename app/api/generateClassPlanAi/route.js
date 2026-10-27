@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isAuthed } from '../../../lib/auth.js';
 import { withService } from '../../../lib/store.js';
 import { draftClassPlan } from '../../../lib/plan-ai.js';
+import { errorResponse } from '../../../lib/api-error.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -19,6 +20,6 @@ export async function POST(req) {
     const board = await draftClassPlan(body.class_id, body.month, withService);
     return NextResponse.json({ ok: true, data: board });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: e && e.message ? e.message : String(e) });
+    return errorResponse(e);
   }
 }

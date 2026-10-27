@@ -50,6 +50,41 @@ LMS.createViews = function (ctx) {
     return { byDate: byDate, checkByKey: checkByKey };
   }
 
+  /**
+   * Checked homework cells for 숙제 완료율: items given in [from, to] (optionally one class) joined
+   * with their check rows, kept only when the student was in that class on the lesson date.
+   * q: { classId?, studentId?, from, to }
+   */
+  function homeworkCells_(q) {
+    var classId = LMS.toStr(q.classId);
+    var studentId = LMS.toStr(q.studentId);
+    var items = {};
+    table('HomeworkItems').forEach(function (it) {
+      if (classId && LMS.toStr(it.class_id) !== classId) return;
+      if (LMS.inRange(it.lesson_date, q.from, q.to)) items[LMS.toStr(it.item_id)] = it;
+    });
+    var byKey = {};
+    var member = {};
+    table('HomeworkChecks').forEach(function (c) {
+      var sid = LMS.toStr(c.student_id);
+      var it = items[LMS.toStr(c.item_id)];
+      if (!it || (studentId && sid !== studentId)) return;
+      var memberKey = sid + '|' + LMS.toStr(it.class_id) + '|' + LMS.toStr(it.lesson_date);
+      if (!Object.prototype.hasOwnProperty.call(member, memberKey)) {
+        member[memberKey] = ctx.assignments.inClassOn(sid, it.class_id, it.lesson_date);
+      }
+      if (!member[memberKey]) return;
+      byKey[LMS.toStr(it.item_id) + '|' + sid] = {
+        item_id: LMS.toStr(it.item_id),
+        student_id: sid,
+        class_id: LMS.toStr(it.class_id),
+        lesson_date: LMS.toStr(it.lesson_date),
+        status: LMS.toStr(c.status)
+      };
+    });
+    return Object.keys(byKey).map(function (k) { return byKey[k]; });
+  }
+
   function nextMeeting(cls, fromDate) {
     var periods = ctx.examPeriods();
     var cur = fromDate;
@@ -147,19 +182,7 @@ LMS.createViews = function (ctx) {
     var collected = LMS.collectRawScoresForStats(lessons);
     var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
 
-    var hw = homeworkByDate(classId, monthStart, today);
-    var done = 0;
-    var total = 0;
-    Object.keys(hw.byDate).forEach(function (d) {
-      hw.byDate[d].forEach(function (it) {
-        roster.forEach(function (s) {
-          var c = hw.checkByKey[LMS.toStr(it.item_id) + '|' + LMS.toStr(s.student_id)];
-          if (!c) return;
-          total += 1;
-          if (LMS.toStr(c.status) === '완료') done += 1;
-        });
-      });
-    });
+    var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: monthStart, to: today }));
 
     var sessionDates = {};
     table('ClassSessions').forEach(function (r) {
@@ -184,7 +207,7 @@ LMS.createViews = function (ctx) {
       month: {
         lesson_count: Object.keys(lessons.reduce(function (m, l) { m[l.lesson_date] = 1; return m; }, {})).length,
         attendance_rate: pct(lessons.length - absent, lessons.length),
-        homework_rate: pct(done, total),
+        homework_rate: homework.rate,
         test_average: scores.average,
         test_average_display: collected.comparable ? scores.average_display : '-'
       },
@@ -256,13 +279,15 @@ LMS.createViews = function (ctx) {
     var students = {};
     ctx.assignments.recordTargets(classId, end).students.forEach(function (s) { students[s.student_id] = s; });
     var allStudents = table('Students');
+    var checkedByDate = {};
+    homeworkCells_({ classId: classId, from: start, to: end }).forEach(function (c) {
+      (checkedByDate[c.lesson_date] = checkedByDate[c.lesson_date] || []).push(c);
+    });
     var rows = Object.keys(hw.byDate).sort().reverse().map(function (d) {
       var items = hw.byDate[d];
       var roster = ctx.assignments.recordTargets(classId, d).students;
       roster.forEach(function (s) { if (!students[s.student_id]) students[s.student_id] = s; });
       var cells = {};
-      var done = 0;
-      var total = 0;
       roster.forEach(function (s) {
         var cell = { done: 0, total: items.length, checked: 0, missing: [] };
         items.forEach(function (it) {
@@ -272,18 +297,15 @@ LMS.createViews = function (ctx) {
           else if (c) cell.missing.push(it.title);
         });
         cells[s.student_id] = cell;
-        if (cell.checked) {
-          done += cell.done;
-          total += cell.total;
-        }
       });
+      var homework = LMS.homeworkRate(checkedByDate[d]);
       return {
         date: d,
         weekday: LMS.weekdayName(d),
         items: items.map(function (it) { return { item_id: it.item_id, title: it.title }; }),
         cells: cells,
-        checked: total > 0,
-        rate: pct(done, total)
+        checked: homework.checked > 0,
+        rate: homework.rate
       };
     });
     return {
@@ -386,18 +408,7 @@ LMS.createViews = function (ctx) {
       var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
       var collected = LMS.collectRawScoresForStats(lessons);
       var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
-      var hw = homeworkByDate(classId, range.start, range.end);
-      var done = 0;
-      var total = 0;
-      Object.keys(hw.byDate).forEach(function (d) {
-        hw.byDate[d].forEach(function (it) {
-          Object.keys(hw.checkByKey).forEach(function (key) {
-            if (key.indexOf(LMS.toStr(it.item_id) + '|') !== 0) return;
-            total += 1;
-            if (LMS.toStr(hw.checkByKey[key].status) === '완료') done += 1;
-          });
-        });
-      });
+      var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: range.start, to: range.end }));
       var assignTotal = 0;
       var assignA = 0;
       lessons.forEach(function (l) {
@@ -412,7 +423,7 @@ LMS.createViews = function (ctx) {
         label: mm + '월',
         lesson_days: Object.keys(lessons.reduce(function (acc, l) { acc[l.lesson_date] = 1; return acc; }, {})).length,
         attendance_rate: pct(lessons.length - absent, lessons.length),
-        homework_rate: pct(done, total),
+        homework_rate: homework.rate,
         assignment_a_rate: pct(assignA, assignTotal),
         test_average: scores.average,
         test_comparable: collected.comparable
@@ -710,10 +721,7 @@ LMS.createViews = function (ctx) {
       return LMS.toStr(l.student_id) === LMS.toStr(studentId) && LMS.inRange(l.lesson_date, start, end);
     });
     var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
-    var hw = studentHomeworkDates_(studentId, start, end);
-    var done = 0;
-    var total = 0;
-    hw.forEach(function (h) { done += h.done; total += h.total; });
+    var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
     var collected = LMS.collectRawScoresForStats(lessons);
     var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
     var assign = lessons.map(function (l) { return LMS.assignmentCode(l.assignment_completion); }).filter(Boolean);
@@ -721,7 +729,7 @@ LMS.createViews = function (ctx) {
       lesson_count: lessons.length,
       absent_count: absent,
       attendance_rate: pct(lessons.length - absent, lessons.length),
-      homework_rate: pct(done, total),
+      homework_rate: homework.rate,
       test_count: collected.test_count,
       test_average_display: collected.comparable ? scores.average_display : (collected.test_count ? '만점 다름' : '-'),
       assignment_a_rate: pct(assign.filter(function (a) { return a === 'A'; }).length, assign.length)
@@ -878,18 +886,14 @@ LMS.createViews = function (ctx) {
       g.items.sort(function (a, b) { return a.sort_order - b.sort_order; });
       return g;
     }).sort(function (a, b) { return LMS.toStr(b.date).localeCompare(LMS.toStr(a.date)); });
-    var done = 0;
-    var checked = 0;
     var missing = [];
     rows.forEach(function (r) {
       r.items.forEach(function (it) {
-        if (it.status === '미확인') return;
-        checked += 1;
-        if (it.status === '완료') done += 1;
-        else missing.push({ date: r.date, class_name: r.class_name, title: it.title });
+        if (it.status !== '미확인' && it.status !== '완료') missing.push({ date: r.date, class_name: r.class_name, title: it.title });
       });
     });
-    return { start: start, end: end, rows: rows, rate: pct(done, checked), checked: checked, missing: missing };
+    var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
+    return { start: start, end: end, rows: rows, rate: homework.rate, checked: homework.checked, missing: missing };
   }
 
   /** Tests the student took with the class average of the same day. */
@@ -1314,7 +1318,8 @@ LMS.createViews = function (ctx) {
     getClassTests: getClassTests,
     getClassTestDetail: getClassTestDetail,
     getClassTrend: getClassTrend,
-    getClassMembers: getClassMembers
+    getClassMembers: getClassMembers,
+    homeworkCells_: homeworkCells_
   };
 };
 
