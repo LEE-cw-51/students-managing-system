@@ -110,6 +110,47 @@ describe('per-student homework items', () => {
     );
   });
 
+  it('prior payload keeps personal items separate from class items (no double count)', () => {
+    const t = setup();
+    const assigned = '2026-09-11';
+    const checkDate = '2026-09-15';
+    t.api.saveTodaySession({
+      lesson_date: assigned,
+      class_id: t.cls.class_id,
+      session: { progress: '진도', class_notice: '' },
+      homework_items: [{ title: '공통1' }, { title: '공통2' }],
+      students: [
+        {
+          student_id: t.a.student_id,
+          attendance: '출석',
+          personal_homework: [{ title: '개인보충' }],
+          homework_replace_class: ''
+        },
+        {
+          student_id: t.b.student_id,
+          attendance: '출석',
+          personal_homework: []
+        }
+      ]
+    });
+    const today = t.api.getTodayClassSession(checkDate, t.cls.class_id);
+    const prior = today.prior_homework;
+    assert.deepEqual(prior.items.map((it) => it.title), ['공통1', '공통2']);
+    const personalA = prior.personal_items_by_student[t.a.student_id];
+    assert.deepEqual(personalA.map((it) => it.title), ['개인보충']);
+    assert.ok(personalA.every((it) => it.scope === 'student'));
+    const checkIdsA = Object.keys(prior.checks_by_student[t.a.student_id]);
+    assert.equal(checkIdsA.length, 3);
+    assert.equal(new Set(checkIdsA).size, 3);
+    const classIds = new Set(prior.items.map((it) => it.item_id));
+    const personalIds = new Set(personalA.map((it) => it.item_id));
+    checkIdsA.forEach((id) => {
+      assert.ok(classIds.has(id) || personalIds.has(id));
+    });
+    assert.equal(Object.keys(prior.checks_by_student[t.b.student_id]).length, 2);
+    assert.deepEqual(prior.personal_items_by_student[t.b.student_id], []);
+  });
+
   it('replace mode drops class items for that student only', () => {
     const t = setup();
     const assigned = '2026-09-11';

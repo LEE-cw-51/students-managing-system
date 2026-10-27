@@ -1187,8 +1187,11 @@ LMS.createService = function (store) {
       students.forEach(function (s) {
         var replace = homeworkReplaceOn_(priorDate, classId, s.student_id);
         priorReplaceByStudent[s.student_id] = LMS.normalizeHomeworkReplaceClass(replace);
+        // Personal-only list (same shape as today_homework); UI merges with class items when needed.
+        priorItemsByStudent[s.student_id] = (priorHomework.items || []).filter(function (it) {
+          return LMS.toStr(it.student_id) === LMS.toStr(s.student_id);
+        }).map(enrichHomeworkItem_);
         var effective = LMS.homeworkItemsForStudent(priorHomework.items || [], s.student_id, replace);
-        priorItemsByStudent[s.student_id] = effective.map(enrichHomeworkItem_);
         var map = {};
         effective.forEach(function (it) {
           if (!it.item_id) return;
