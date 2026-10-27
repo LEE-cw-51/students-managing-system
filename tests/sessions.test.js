@@ -130,3 +130,74 @@ describe('class sessions', () => {
     assert.equal(row.test_max_score, 10);
   });
 });
+
+describe('class record copies', () => {
+  function seeded() {
+    const store = createMemoryStore();
+    const api = LMS.createService(store);
+    api.ensureSchema();
+    const demo = seedDemo(api);
+    return { api, demo, classId: demo.class.class_id };
+  }
+  const byStudent = (api, classId) => {
+    const out = {};
+    api.getLessons('2026-09-14', classId).forEach((l) => { out[l.student_id] = l; });
+    return out;
+  };
+
+  it('a batch without progress or homework keeps them (no checklist that day)', () => {
+    const { api, demo, classId } = seeded();
+    assert.equal(api.getSessionHomework('2026-09-14', classId).from_legacy, true);
+    api.saveLessonsBatch(demo.students.map((s) => ({
+      lesson_date: '2026-09-14', class_id: classId, student_id: s.student_id,
+      attendance: '출석', test_status: '실시', test_score: 15
+    })));
+    api.getLessons('2026-09-14', classId).forEach((l) => {
+      assert.match(l.progress, /삼각형의 성질/);
+      assert.match(l.homework, /오답 프린트/);
+    });
+  });
+
+  it('difficulty and max go to tested students only', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim, lee] = demo.students;
+    assert.equal(byStudent(api, classId)[kim.student_id].test_difficulty, '', 'seed sent 중 for untested 김철수');
+    api.saveLessonsBatch([{
+      lesson_date: '2026-09-14', class_id: classId, student_id: lee.student_id,
+      attendance: '결석', test_status: '미실시', test_difficulty: '중', test_max_score: 20
+    }]);
+    api.saveClassSession({ lesson_date: '2026-09-14', class_id: classId, test_difficulty: '상', test_max_score: 30 });
+    const rows = byStudent(api, classId);
+    assert.equal(rows[hong.student_id].test_difficulty, '상');
+    assert.equal(rows[hong.student_id].test_max_score, 30);
+    [kim, lee].forEach((s) => {
+      assert.equal(rows[s.student_id].test_difficulty, '');
+      assert.equal(rows[s.student_id].test_max_score, '');
+    });
+  });
+
+  it('the class difficulty comes from tested rows only', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim, lee] = demo.students;
+    api.saveLessonsBatch([
+      { student_id: hong.student_id, test_status: '실시', test_score: 10, test_max_score: 20, test_difficulty: '상' },
+      { student_id: kim.student_id, test_status: '미실시', test_difficulty: '하' },
+      { student_id: lee.student_id, test_status: '미실시', test_difficulty: '하' }
+    ].map((r) => Object.assign({ lesson_date: '2026-09-21', class_id: classId, attendance: '출석' }, r)));
+    assert.equal(api.getClassSession('2026-09-21', classId).test_difficulty, '상');
+  });
+
+  it('clearing the class max clears the rows that followed it and keeps their own', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, , lee] = demo.students;
+    api.saveLessonsBatch([{
+      lesson_date: '2026-09-14', class_id: classId, student_id: hong.student_id,
+      attendance: '출석', test_status: '실시', test_score: 9, test_max_score: 10
+    }]);
+    api.saveClassSession({ lesson_date: '2026-09-14', class_id: classId, test_max_score: '' });
+    const rows = byStudent(api, classId);
+    assert.equal(rows[lee.student_id].test_max_score, '', 'followed the class max');
+    assert.equal(rows[hong.student_id].test_max_score, 10, 'own max kept');
+    assert.equal(api.getClassSession('2026-09-14', classId).test_max_score, '');
+  });
+});

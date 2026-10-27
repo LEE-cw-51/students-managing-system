@@ -13,7 +13,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
  * ctx: { table(name) → rows, saveTable(name, rows), today() → 'YYYY-MM-DD', now() → timestamp,
  * nextIds(prefix, count) }. Every query reads the tables again, so results follow saveTable and
  * in-place row edits within the same service instance. A blank date means today. Unknown ids give
- * empty query results; commands throw. Commands do not lock: callers hold the store lock.
+ * empty query results; commands throw. Callers run commands inside the service transaction.
  */
 LMS.createAssignments = function (ctx) {
   var table = ctx.table;

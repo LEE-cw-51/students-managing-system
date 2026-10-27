@@ -539,31 +539,27 @@ LMS.createPlanner = function (ctx) {
 
   /** Draft the unit-order split (no AI) for the month; `note` says why AI was not used. */
   function createSplitDraft(classId, month, note) {
-    return ctx.withLock(function () {
-      var cls = ctx.requireClass(classId);
-      month = assertMonth(month);
-      var support = planningSupport(cls);
-      if (!support.ok) throw new Error(support.reason);
-      var computed = computeProposal(cls, month);
-      if (!computed.editable.length) throw new Error('이 달에는 계획을 바꿀 수 있는 남은 수업일이 없습니다.');
-      var payload = Object.assign({ rationale: '' }, computed.proposal);
-      writeDraft(cls, month, 'split', payload, note ? [LMS.clipText(note, 300)] : [], baseVersion(cls), '');
-      return getPlanBoard(classId, month);
-    });
+    var cls = ctx.requireClass(classId);
+    month = assertMonth(month);
+    var support = planningSupport(cls);
+    if (!support.ok) throw new Error(support.reason);
+    var computed = computeProposal(cls, month);
+    if (!computed.editable.length) throw new Error('이 달에는 계획을 바꿀 수 있는 남은 수업일이 없습니다.');
+    var payload = Object.assign({ rationale: '' }, computed.proposal);
+    writeDraft(cls, month, 'split', payload, note ? [LMS.clipText(note, 300)] : [], baseVersion(cls), '');
+    return getPlanBoard(classId, month);
   }
 
   function discardPlanDraft(draftId) {
-    return ctx.withLock(function () {
-      var rows = table('PlanDrafts');
-      var row = LMS.findById(rows, 'draft_id', draftId);
-      if (!row) throw new Error('계획 초안을 찾을 수 없습니다.');
-      if (LMS.toStr(row.status) === '대기') {
-        row.status = '폐기';
-        row.updated_at = ctx.now();
-        saveTable('PlanDrafts', rows);
-      }
-      return getPlanBoard(row.class_id, row.month);
-    });
+    var rows = table('PlanDrafts');
+    var row = LMS.findById(rows, 'draft_id', draftId);
+    if (!row) throw new Error('계획 초안을 찾을 수 없습니다.');
+    if (LMS.toStr(row.status) === '대기') {
+      row.status = '폐기';
+      row.updated_at = ctx.now();
+      saveTable('PlanDrafts', rows);
+    }
+    return getPlanBoard(row.class_id, row.month);
   }
 
   /**
@@ -571,93 +567,91 @@ LMS.createPlanner = function (ctx) {
    * teacher reviewed: if plans changed since then, nothing is written and the screen reloads.
    */
   function applyPlanDraft(data) {
-    return ctx.withLock(function () {
-      data = data || {};
-      var rows = table('PlanDrafts');
-      var draft = LMS.findById(rows, 'draft_id', data.draft_id);
-      if (!draft) throw new Error('계획 초안을 찾을 수 없습니다.');
-      if (LMS.toStr(draft.status) !== '대기') throw new Error('이미 처리된 초안입니다. 화면을 새로 고쳐 주세요.');
-      var cls = ctx.requireClass(draft.class_id);
-      if (LMS.toStr(data.seen_version) !== baseVersion(cls)) {
-        throw new Error('확인하는 사이 계획이 바뀌었습니다. 바뀐 내용으로 다시 비교해 주세요.');
-      }
-      var keys = LMS.jsonList(data.keys).map(LMS.toStr);
-      var studentKeys = LMS.jsonList(data.student_keys).map(LMS.toStr);
-      if (!keys.length && !studentKeys.length) throw new Error('확정할 항목을 하나 이상 선택해 주세요.');
-      var month = LMS.toStr(draft.month);
-      var computed = computeProposal(cls, month);
-      var payload = draftPayload(draft);
-      if (!payload) throw new Error('초안 내용을 읽을 수 없습니다. 다시 만들어 주세요.');
-      var items = LMS.diffPlanProposal(monthPlans(cls, month), payload, { locked: computed.locked, orphans: computed.orphans });
-      var byKey = {};
-      items.forEach(function (it) { byKey[it.key] = it; });
-      var plans = table('ClassPlans');
-      var ts = ctx.now();
-      var source = LMS.toStr(draft.mode) === 'ai' ? 'ai' : 'split';
-      var applied = 0;
-      var removeIds = {};
-      keys.forEach(function (key) {
-        var it = byKey[key];
-        if (!it || !it.selectable) return;
-        if (it.action === 'remove') {
-          removeIds[LMS.toStr(it.current.plan_id)] = true;
-          applied += 1;
-          return;
-        }
-        var p = it.proposed;
-        var fields = {
-          title: LMS.clipText(p.title, 200),
-          objectives: LMS.clipText(p.objectives, 2000),
-          content: LMS.clipText(p.content, 4000),
-          homework: LMS.clipText(p.homework, 1000),
-          materials: LMS.clipText(p.materials, 500),
-          unit_ids: LMS.jsonList(p.unit_ids),
-          // What the teacher edited is theirs: later drafts keep it unless they choose otherwise.
-          source: p.edited ? 'manual' : source,
-          rationale: it.period_type === '월간' ? LMS.clipText(payload.rationale, 2000) : LMS.clipText(p.rationale, 500),
-          updated_at: ts
-        };
-        var row = it.current ? LMS.findById(plans, 'plan_id', it.current.plan_id) : null;
-        if (row) {
-          Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
-        } else {
-          plans.push(Object.assign({
-            plan_id: ctx.nextIds(LMS.PREFIX.plan, 1)[0],
-            class_id: cls.class_id,
-            period_type: it.period_type,
-            period_key: it.period_key,
-            memo: '',
-            done_status: '',
-            created_at: ts
-          }, fields));
-        }
+    data = data || {};
+    var rows = table('PlanDrafts');
+    var draft = LMS.findById(rows, 'draft_id', data.draft_id);
+    if (!draft) throw new Error('계획 초안을 찾을 수 없습니다.');
+    if (LMS.toStr(draft.status) !== '대기') throw new Error('이미 처리된 초안입니다. 화면을 새로 고쳐 주세요.');
+    var cls = ctx.requireClass(draft.class_id);
+    if (LMS.toStr(data.seen_version) !== baseVersion(cls)) {
+      throw new Error('확인하는 사이 계획이 바뀌었습니다. 바뀐 내용으로 다시 비교해 주세요.');
+    }
+    var keys = LMS.jsonList(data.keys).map(LMS.toStr);
+    var studentKeys = LMS.jsonList(data.student_keys).map(LMS.toStr);
+    if (!keys.length && !studentKeys.length) throw new Error('확정할 항목을 하나 이상 선택해 주세요.');
+    var month = LMS.toStr(draft.month);
+    var computed = computeProposal(cls, month);
+    var payload = draftPayload(draft);
+    if (!payload) throw new Error('초안 내용을 읽을 수 없습니다. 다시 만들어 주세요.');
+    var items = LMS.diffPlanProposal(monthPlans(cls, month), payload, { locked: computed.locked, orphans: computed.orphans });
+    var byKey = {};
+    items.forEach(function (it) { byKey[it.key] = it; });
+    var plans = table('ClassPlans');
+    var ts = ctx.now();
+    var source = LMS.toStr(draft.mode) === 'ai' ? 'ai' : 'split';
+    var applied = 0;
+    var removeIds = {};
+    keys.forEach(function (key) {
+      var it = byKey[key];
+      if (!it || !it.selectable) return;
+      if (it.action === 'remove') {
+        removeIds[LMS.toStr(it.current.plan_id)] = true;
         applied += 1;
-      });
-      var tasks = 0;
-      var studentList = Array.isArray(payload.students) ? payload.students : [];
-      var due = meetingDates(cls, LMS.addDays(today(), 1), LMS.addDays(today(), 30))[0] || today();
-      studentList.forEach(function (st) {
-        if (studentKeys.indexOf(LMS.toStr(st.key)) === -1) return;
-        ctx.saveTask({
-          due_date: due,
-          kind: LMS.SUGGESTION_TASK_KIND[st.kind] || 'other',
-          title: (st.kind === '보강' ? '보강 일정 잡기: ' : '[' + st.kind + '] ') + LMS.toStr(st.title),
-          memo: LMS.toStr(st.reason),
-          student_id: st.student_id,
-          class_id: cls.class_id
-        });
-        tasks += 1;
-      });
-      if (!applied && !tasks) throw new Error('확정할 수 있는 항목이 없습니다. 화면을 새로 고쳐 주세요.');
-      saveTable('ClassPlans', plans.filter(function (p) { return !removeIds[LMS.toStr(p.plan_id)]; }));
-      draft.status = '적용';
-      draft.updated_at = ts;
-      saveTable('PlanDrafts', rows);
-      var board = getPlanBoard(cls.class_id, month);
-      board.applied_count = applied;
-      board.task_count = tasks;
-      return board;
+        return;
+      }
+      var p = it.proposed;
+      var fields = {
+        title: LMS.clipText(p.title, 200),
+        objectives: LMS.clipText(p.objectives, 2000),
+        content: LMS.clipText(p.content, 4000),
+        homework: LMS.clipText(p.homework, 1000),
+        materials: LMS.clipText(p.materials, 500),
+        unit_ids: LMS.jsonList(p.unit_ids),
+        // What the teacher edited is theirs: later drafts keep it unless they choose otherwise.
+        source: p.edited ? 'manual' : source,
+        rationale: it.period_type === '월간' ? LMS.clipText(payload.rationale, 2000) : LMS.clipText(p.rationale, 500),
+        updated_at: ts
+      };
+      var row = it.current ? LMS.findById(plans, 'plan_id', it.current.plan_id) : null;
+      if (row) {
+        Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+      } else {
+        plans.push(Object.assign({
+          plan_id: ctx.nextIds(LMS.PREFIX.plan, 1)[0],
+          class_id: cls.class_id,
+          period_type: it.period_type,
+          period_key: it.period_key,
+          memo: '',
+          done_status: '',
+          created_at: ts
+        }, fields));
+      }
+      applied += 1;
     });
+    var tasks = 0;
+    var studentList = Array.isArray(payload.students) ? payload.students : [];
+    var due = meetingDates(cls, LMS.addDays(today(), 1), LMS.addDays(today(), 30))[0] || today();
+    studentList.forEach(function (st) {
+      if (studentKeys.indexOf(LMS.toStr(st.key)) === -1) return;
+      ctx.saveTask({
+        due_date: due,
+        kind: LMS.SUGGESTION_TASK_KIND[st.kind] || 'other',
+        title: (st.kind === '보강' ? '보강 일정 잡기: ' : '[' + st.kind + '] ') + LMS.toStr(st.title),
+        memo: LMS.toStr(st.reason),
+        student_id: st.student_id,
+        class_id: cls.class_id
+      });
+      tasks += 1;
+    });
+    if (!applied && !tasks) throw new Error('확정할 수 있는 항목이 없습니다. 화면을 새로 고쳐 주세요.');
+    saveTable('ClassPlans', plans.filter(function (p) { return !removeIds[LMS.toStr(p.plan_id)]; }));
+    draft.status = '적용';
+    draft.updated_at = ts;
+    saveTable('PlanDrafts', rows);
+    var board = getPlanBoard(cls.class_id, month);
+    board.applied_count = applied;
+    board.task_count = tasks;
+    return board;
   }
 
   // ----- AI context and draft -----
@@ -793,71 +787,69 @@ LMS.createPlanner = function (ctx) {
    * basic split, and store it as the pending draft. Students in `result` are already mapped to ids.
    */
   function saveAiPlanDraft(classId, month, result, meta) {
-    return ctx.withLock(function () {
-      var cls = ctx.requireClass(classId);
-      month = assertMonth(month);
-      meta = meta || {};
-      result = result && typeof result === 'object' ? result : {};
-      var computed = computeProposal(cls, month);
-      if (!computed.editable.length) throw new Error('이 달에는 계획을 바꿀 수 있는 남은 수업일이 없습니다.');
-      var warnings = [];
-      var unitIds = {};
-      computed.curriculum.forEach(function (u) { unitIds[u.unit_id] = true; });
-      var baseDays = {};
-      computed.proposal.days.forEach(function (d) { baseDays[d.date] = d; });
-      var aiDays = {};
-      var dropped = 0;
-      (Array.isArray(result.days) ? result.days : []).forEach(function (d) {
-        var date = LMS.toStr(d && d.date);
-        if (!baseDays[date] || aiDays[date]) {
-          dropped += 1;
-          return;
-        }
-        var units = LMS.uniqueIds(LMS.jsonList(d.unit_ids)).filter(function (u) { return unitIds[u]; });
-        var text = cleanPlanText(d, baseDays[date]);
-        aiDays[date] = Object.assign({ period_type: '일간', period_key: date, date: date, unit_ids: units }, text);
-      });
-      if (dropped) warnings.push('수업일이 아니거나 중복된 날짜 ' + dropped + '건은 뺐습니다.');
-      var filled = 0;
-      var days = computed.editable.map(function (date) {
-        if (aiDays[date]) return aiDays[date];
-        filled += 1;
-        return baseDays[date];
-      });
-      if (filled) warnings.push('AI가 빠뜨린 수업일 ' + filled + '일은 기본 분할로 채웠습니다.');
-      var monthPlan = computed.proposal.month ? Object.assign({}, computed.proposal.month, cleanPlanText(result.month, computed.proposal.month)) : null;
-      var roster = {};
-      ctx.assignments.recordTargets(classId, today()).students.forEach(function (s) { roster[LMS.toStr(s.student_id)] = true; });
-      var perStudent = {};
-      var suggestions = [];
-      var badStudents = 0;
-      (Array.isArray(result.students) ? result.students : []).forEach(function (s) {
-        var sid = LMS.toStr(s && s.student_id);
-        var kind = LMS.toStr(s && s.kind);
-        var title = LMS.clipText(s && s.title, 200);
-        if (!roster[sid] || LMS.SUGGESTION_KIND.indexOf(kind) === -1 || !title) {
-          badStudents += 1;
-          return;
-        }
-        perStudent[sid] = (perStudent[sid] || 0) + 1;
-        if (perStudent[sid] > 2 || suggestions.length >= 20) return;
-        suggestions.push({ key: 'student|' + suggestions.length, student_id: sid, kind: kind, title: title, reason: LMS.clipText(s.reason, 500) });
-      });
-      if (badStudents) warnings.push('반 명단에 없거나 형식이 틀린 학생 제안 ' + badStudents + '건은 뺐습니다.');
-      var payload = {
-        month: monthPlan,
-        days: days,
-        carry_over: computed.proposal.carry_over,
-        students: suggestions,
-        rationale: LMS.clipText(result.rationale, 2000)
-      };
-      var current = baseVersion(cls);
-      if (meta.base_version && meta.base_version !== current) {
-        warnings.push('AI가 계획을 만드는 사이 반 계획이 바뀌었습니다. 아래 비교는 바뀐 계획 기준입니다.');
+    var cls = ctx.requireClass(classId);
+    month = assertMonth(month);
+    meta = meta || {};
+    result = result && typeof result === 'object' ? result : {};
+    var computed = computeProposal(cls, month);
+    if (!computed.editable.length) throw new Error('이 달에는 계획을 바꿀 수 있는 남은 수업일이 없습니다.');
+    var warnings = [];
+    var unitIds = {};
+    computed.curriculum.forEach(function (u) { unitIds[u.unit_id] = true; });
+    var baseDays = {};
+    computed.proposal.days.forEach(function (d) { baseDays[d.date] = d; });
+    var aiDays = {};
+    var dropped = 0;
+    (Array.isArray(result.days) ? result.days : []).forEach(function (d) {
+      var date = LMS.toStr(d && d.date);
+      if (!baseDays[date] || aiDays[date]) {
+        dropped += 1;
+        return;
       }
-      writeDraft(cls, month, 'ai', payload, warnings, LMS.toStr(meta.base_version) || current, meta.model);
-      return getPlanBoard(classId, month);
+      var units = LMS.uniqueIds(LMS.jsonList(d.unit_ids)).filter(function (u) { return unitIds[u]; });
+      var text = cleanPlanText(d, baseDays[date]);
+      aiDays[date] = Object.assign({ period_type: '일간', period_key: date, date: date, unit_ids: units }, text);
     });
+    if (dropped) warnings.push('수업일이 아니거나 중복된 날짜 ' + dropped + '건은 뺐습니다.');
+    var filled = 0;
+    var days = computed.editable.map(function (date) {
+      if (aiDays[date]) return aiDays[date];
+      filled += 1;
+      return baseDays[date];
+    });
+    if (filled) warnings.push('AI가 빠뜨린 수업일 ' + filled + '일은 기본 분할로 채웠습니다.');
+    var monthPlan = computed.proposal.month ? Object.assign({}, computed.proposal.month, cleanPlanText(result.month, computed.proposal.month)) : null;
+    var roster = {};
+    ctx.assignments.recordTargets(classId, today()).students.forEach(function (s) { roster[LMS.toStr(s.student_id)] = true; });
+    var perStudent = {};
+    var suggestions = [];
+    var badStudents = 0;
+    (Array.isArray(result.students) ? result.students : []).forEach(function (s) {
+      var sid = LMS.toStr(s && s.student_id);
+      var kind = LMS.toStr(s && s.kind);
+      var title = LMS.clipText(s && s.title, 200);
+      if (!roster[sid] || LMS.SUGGESTION_KIND.indexOf(kind) === -1 || !title) {
+        badStudents += 1;
+        return;
+      }
+      perStudent[sid] = (perStudent[sid] || 0) + 1;
+      if (perStudent[sid] > 2 || suggestions.length >= 20) return;
+      suggestions.push({ key: 'student|' + suggestions.length, student_id: sid, kind: kind, title: title, reason: LMS.clipText(s.reason, 500) });
+    });
+    if (badStudents) warnings.push('반 명단에 없거나 형식이 틀린 학생 제안 ' + badStudents + '건은 뺐습니다.');
+    var payload = {
+      month: monthPlan,
+      days: days,
+      carry_over: computed.proposal.carry_over,
+      students: suggestions,
+      rationale: LMS.clipText(result.rationale, 2000)
+    };
+    var current = baseVersion(cls);
+    if (meta.base_version && meta.base_version !== current) {
+      warnings.push('AI가 계획을 만드는 사이 반 계획이 바뀌었습니다. 아래 비교는 바뀐 계획 기준입니다.');
+    }
+    writeDraft(cls, month, 'ai', payload, warnings, LMS.toStr(meta.base_version) || current, meta.model);
+    return getPlanBoard(classId, month);
   }
 
   /**
@@ -866,50 +858,49 @@ LMS.createPlanner = function (ctx) {
    * stores the teacher's version as their own plan.
    */
   function updatePlanDraftItem(data) {
-    return ctx.withLock(function () {
-      data = data || {};
-      var rows = table('PlanDrafts');
-      var draft = LMS.findById(rows, 'draft_id', data.draft_id);
-      if (!draft) throw new Error('계획 초안을 찾을 수 없습니다.');
-      if (LMS.toStr(draft.status) !== '대기') throw new Error('이미 처리된 초안입니다. 화면을 새로 고쳐 주세요.');
-      var cls = ctx.requireClass(draft.class_id);
-      var month = LMS.toStr(draft.month);
-      var payload = draftPayload(draft);
-      if (!payload) throw new Error('초안 내용을 읽을 수 없습니다. 다시 만들어 주세요.');
-      var key = LMS.toStr(data.key);
-      var fields = data.fields && typeof data.fields === 'object' ? data.fields : {};
-      if (key.indexOf('student|') === 0) {
-        var st = (payload.students || []).filter(function (x) { return LMS.toStr(x.key) === key; })[0];
-        if (!st) throw new Error('고칠 제안을 찾을 수 없습니다.');
-        var title = LMS.clipText(fields.title, 200);
-        if (!title) throw new Error('제안 내용을 입력해 주세요.');
-        st.title = title;
-        st.kind = LMS.assertEnum(fields.kind || st.kind, LMS.SUGGESTION_KIND, '제안 종류');
-        st.reason = LMS.clipText(fields.reason, 500);
-        st.edited = true;
-      } else {
-        var target = null;
-        if (payload.month && key === '월간|' + payload.month.period_key) target = payload.month;
-        (payload.days || []).forEach(function (d) { if (key === '일간|' + d.period_key) target = d; });
-        if (!target) throw new Error('고칠 계획을 찾을 수 없습니다.');
-        if (target.period_type === '일간' && computeProposal(cls, month).locked[target.period_key]) {
-          throw new Error('지난 수업이나 기록이 있는 날의 계획은 초안에서 고칠 수 없습니다.');
-        }
-        var unitIds = {};
-        LMS.classCurriculum(cls).forEach(function (u) { unitIds[u.unit_id] = true; });
-        var text = cleanPlanText(fields, {});
-        if (!text.title && !text.objectives && !text.content) throw new Error('계획 내용을 한 곳 이상 입력해 주세요.');
-        ['title', 'objectives', 'content', 'homework', 'materials'].forEach(function (k) { target[k] = text[k]; });
-        if (fields.unit_ids !== undefined) {
-          target.unit_ids = LMS.uniqueIds(LMS.jsonList(fields.unit_ids)).filter(function (u) { return unitIds[u]; });
-        }
-        target.edited = true;
+    data = data || {};
+    var rows = table('PlanDrafts');
+    var draft = LMS.findById(rows, 'draft_id', data.draft_id);
+    if (!draft) throw new Error('계획 초안을 찾을 수 없습니다.');
+    if (LMS.toStr(draft.status) !== '대기') throw new Error('이미 처리된 초안입니다. 화면을 새로 고쳐 주세요.');
+    var cls = ctx.requireClass(draft.class_id);
+    var month = LMS.toStr(draft.month);
+    var payload = draftPayload(draft);
+    if (!payload) throw new Error('초안 내용을 읽을 수 없습니다. 다시 만들어 주세요.');
+    var key = LMS.toStr(data.key);
+    var fields = data.fields && typeof data.fields === 'object' ? data.fields : {};
+    if (key.indexOf('student|') === 0) {
+      var st = (payload.students || []).filter(function (x) { return LMS.toStr(x.key) === key; })[0];
+      if (!st) throw new Error('고칠 제안을 찾을 수 없습니다.');
+      var title = LMS.clipText(fields.title, 200);
+      if (!title) throw new Error('제안 내용을 입력해 주세요.');
+      var kind = LMS.assertEnum(fields.kind || st.kind, LMS.SUGGESTION_KIND, '제안 종류');
+      st.title = title;
+      st.kind = kind;
+      st.reason = LMS.clipText(fields.reason, 500);
+      st.edited = true;
+    } else {
+      var target = null;
+      if (payload.month && key === '월간|' + payload.month.period_key) target = payload.month;
+      (payload.days || []).forEach(function (d) { if (key === '일간|' + d.period_key) target = d; });
+      if (!target) throw new Error('고칠 계획을 찾을 수 없습니다.');
+      if (target.period_type === '일간' && computeProposal(cls, month).locked[target.period_key]) {
+        throw new Error('지난 수업이나 기록이 있는 날의 계획은 초안에서 고칠 수 없습니다.');
       }
-      draft.payload = payload;
-      draft.updated_at = ctx.now();
-      saveTable('PlanDrafts', rows);
-      return getPlanBoard(cls.class_id, month);
-    });
+      var unitIds = {};
+      LMS.classCurriculum(cls).forEach(function (u) { unitIds[u.unit_id] = true; });
+      var text = cleanPlanText(fields, {});
+      if (!text.title && !text.objectives && !text.content) throw new Error('계획 내용을 한 곳 이상 입력해 주세요.');
+      ['title', 'objectives', 'content', 'homework', 'materials'].forEach(function (k) { target[k] = text[k]; });
+      if (fields.unit_ids !== undefined) {
+        target.unit_ids = LMS.uniqueIds(LMS.jsonList(fields.unit_ids)).filter(function (u) { return unitIds[u]; });
+      }
+      target.edited = true;
+    }
+    draft.payload = payload;
+    draft.updated_at = ctx.now();
+    saveTable('PlanDrafts', rows);
+    return getPlanBoard(cls.class_id, month);
   }
 
   // ----- Single-day cancellations -----
@@ -921,41 +912,37 @@ LMS.createPlanner = function (ctx) {
   }
 
   function cancelClassDate(data) {
-    return ctx.withLock(function () {
-      data = data || {};
-      var date = LMS.toStr(data.date);
-      if (!LMS.isIsoDate(date)) throw new Error('휴강할 날짜를 선택해 주세요.');
-      var rows = table('Classes');
-      var cls = LMS.findById(rows, 'class_id', data.class_id);
-      if (!cls) throw new Error('반 정보를 찾을 수 없습니다.');
-      if (LMS.classCancellationOn(cls, date)) throw new Error('이미 휴강으로 지정된 날입니다.');
-      if (!LMS.classMeetsOnDate(cls, date, ctx.examPeriods())) throw new Error('이 날은 이 반의 수업일이 아닙니다.');
-      if (recordedDates(cls.class_id)[date]) {
-        throw new Error('이미 수업 기록이 있는 날은 휴강할 수 없습니다. 기록을 먼저 지워 주세요.');
-      }
-      var ts = ctx.now();
-      var list = LMS.classCancelDates(cls).concat([{ date: date, reason: LMS.clipText(data.reason, 200), created_at: ts }]);
-      list.sort(function (a, b) { return LMS.toStr(a.date).localeCompare(LMS.toStr(b.date)); });
-      cls.cancel_dates = list;
-      cls.updated_at = ts;
-      saveTable('Classes', rows);
-      return { class_id: cls.class_id, date: date, plan: slimPlan(dailyPlanOn(cls.class_id, date)) };
-    });
+    data = data || {};
+    var date = LMS.toStr(data.date);
+    if (!LMS.isIsoDate(date)) throw new Error('휴강할 날짜를 선택해 주세요.');
+    var rows = table('Classes');
+    var cls = LMS.findById(rows, 'class_id', data.class_id);
+    if (!cls) throw new Error('반 정보를 찾을 수 없습니다.');
+    if (LMS.classCancellationOn(cls, date)) throw new Error('이미 휴강으로 지정된 날입니다.');
+    if (!LMS.classMeetsOnDate(cls, date, ctx.examPeriods())) throw new Error('이 날은 이 반의 수업일이 아닙니다.');
+    if (recordedDates(cls.class_id)[date]) {
+      throw new Error('이미 수업 기록이 있는 날은 휴강할 수 없습니다. 기록을 먼저 지워 주세요.');
+    }
+    var ts = ctx.now();
+    var list = LMS.classCancelDates(cls).concat([{ date: date, reason: LMS.clipText(data.reason, 200), created_at: ts }]);
+    list.sort(function (a, b) { return LMS.toStr(a.date).localeCompare(LMS.toStr(b.date)); });
+    cls.cancel_dates = list;
+    cls.updated_at = ts;
+    saveTable('Classes', rows);
+    return { class_id: cls.class_id, date: date, plan: slimPlan(dailyPlanOn(cls.class_id, date)) };
   }
 
   function restoreClassDate(data) {
-    return ctx.withLock(function () {
-      data = data || {};
-      var date = LMS.toStr(data.date);
-      var rows = table('Classes');
-      var cls = LMS.findById(rows, 'class_id', data.class_id);
-      if (!cls) throw new Error('반 정보를 찾을 수 없습니다.');
-      if (!LMS.classCancellationOn(cls, date)) throw new Error('휴강으로 지정된 날이 아닙니다.');
-      cls.cancel_dates = LMS.classCancelDates(cls).filter(function (c) { return LMS.toStr(c.date) !== date; });
-      cls.updated_at = ctx.now();
-      saveTable('Classes', rows);
-      return { class_id: cls.class_id, date: date, plan: slimPlan(dailyPlanOn(cls.class_id, date)) };
-    });
+    data = data || {};
+    var date = LMS.toStr(data.date);
+    var rows = table('Classes');
+    var cls = LMS.findById(rows, 'class_id', data.class_id);
+    if (!cls) throw new Error('반 정보를 찾을 수 없습니다.');
+    if (!LMS.classCancellationOn(cls, date)) throw new Error('휴강으로 지정된 날이 아닙니다.');
+    cls.cancel_dates = LMS.classCancelDates(cls).filter(function (c) { return LMS.toStr(c.date) !== date; });
+    cls.updated_at = ctx.now();
+    saveTable('Classes', rows);
+    return { class_id: cls.class_id, date: date, plan: slimPlan(dailyPlanOn(cls.class_id, date)) };
   }
 
   /** The unit the class is on now (first unfinished in curriculum order), or null without a list. */

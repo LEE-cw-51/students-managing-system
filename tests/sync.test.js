@@ -61,7 +61,7 @@ describe('class record → student lessons', () => {
     api.updateLesson({ lesson_id: first.lesson_id, progress: '새 진도', homework: '새 숙제', test_difficulty: '하' });
     assert.deepEqual(field(api, '2026-09-14', classId, 'progress'), ['새 진도', '새 진도', '새 진도']);
     assert.deepEqual(field(api, '2026-09-14', classId, 'homework'), ['새 숙제', '새 숙제', '새 숙제']);
-    assert.deepEqual(field(api, '2026-09-14', classId, 'test_difficulty'), ['하', '하', '하']);
+    assert.deepEqual(field(api, '2026-09-14', classId, 'test_difficulty'), ['하', '', '하'], 'untested 김철수 gets none');
     assert.equal(api.getClassSession('2026-09-14', classId).progress, '새 진도');
     assert.deepEqual(api.getSessionHomework('2026-09-14', classId).items.map((i) => i.title), ['새 숙제']);
   });
