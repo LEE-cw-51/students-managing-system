@@ -844,7 +844,6 @@ LMS.createViews = function (ctx) {
     var today = store.today();
     var end = LMS.toStr(range.end) || today;
     var start = LMS.toStr(range.start) || LMS.addDays(end, -42);
-    var periods = ctx.examPeriods();
     var classes = table('Classes');
     var checks = {};
     table('HomeworkChecks').forEach(function (c) {
@@ -858,12 +857,11 @@ LMS.createViews = function (ctx) {
       var key = it.lesson_date + '|' + it.class_id;
       if (!groups[key]) {
         var c = LMS.findById(classes, 'class_id', it.class_id);
-        var checkDate = c ? LMS.nextMeetingDateFor(c, LMS.addDays(it.lesson_date, 1), periods) : '';
         groups[key] = {
           date: it.lesson_date,
           class_id: it.class_id,
           class_name: c ? c.class_name : '',
-          check_date: checkDate || today,
+          check_date: c ? ctx.checkingLessonDate(c, it.lesson_date) : '',
           items: []
         };
       }

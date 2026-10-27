@@ -979,6 +979,32 @@ LMS.createService = function (store) {
   }
 
   /**
+   * Recorded lesson day (Lessons or ClassSessions) that checked the homework given on
+   * `assignedDate`: the earliest one whose prior lesson is `assignedDate`, or '' if none yet.
+   */
+  function checkingLessonDate_(cls, assignedDate) {
+    var classId = LMS.toStr(cls.class_id);
+    assignedDate = LMS.toStr(assignedDate);
+    var seen = {};
+    var dates = [];
+    var collect = function (row) {
+      var d = LMS.toStr(row.lesson_date);
+      if (LMS.toStr(row.class_id) !== classId || d <= assignedDate || seen[d]) return;
+      seen[d] = true;
+      dates.push(d);
+    };
+    table('Lessons').forEach(collect);
+    table('ClassSessions').forEach(collect);
+    dates.sort();
+    for (var i = 0; i < dates.length; i++) {
+      var prior = priorLessonDate_(cls, dates[i]);
+      if (prior === assignedDate) return dates[i];
+      if (prior > assignedDate) break;
+    }
+    return '';
+  }
+
+  /**
    * After the homework items of `date` change, the auto grades written on the lesson that checked
    * them follow the new items. A grade the teacher picked by hand (≠ the old auto grade) is kept.
    */
@@ -986,10 +1012,8 @@ LMS.createService = function (store) {
     if (!oldChecks.length) return;
     var cls = LMS.findById(table('Classes'), 'class_id', classId);
     if (!cls) return;
-    var checkDate = table('Lessons').filter(function (l) {
-      return LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.toStr(l.lesson_date) > LMS.toStr(date);
-    }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort()[0];
-    if (!checkDate || priorLessonDate_(cls, checkDate) !== LMS.toStr(date)) return;
+    var checkDate = checkingLessonDate_(cls, date);
+    if (!checkDate) return;
     var items = listHomeworkItemRows_(date, classId);
     var ids = {};
     items.forEach(function (it) { ids[LMS.toStr(it.item_id)] = true; });
@@ -1033,8 +1057,8 @@ LMS.createService = function (store) {
       data = data || {};
       var date = LMS.toStr(data.lesson_date || data.assigned_date || data.date);
       var classId = LMS.toStr(data.class_id);
-      var checkDate = LMS.toStr(data.check_date) || store.today();
-      requireClass(classId);
+      var checkDate = LMS.toStr(data.check_date);
+      var cls = requireClass(classId);
       if (!LMS.isIsoDate(date)) throw new Error('숙제 배정일 형식이 올바르지 않습니다.');
       if (checkDate && !LMS.isIsoDate(checkDate)) {
         throw new Error('확인일 형식이 올바르지 않습니다.');
@@ -1050,6 +1074,7 @@ LMS.createService = function (store) {
         items = session.items;
       }
       if (!items.length) throw new Error('확인할 숙제 항목이 없습니다.');
+      if (!checkDate || priorLessonDate_(cls, checkDate) !== date) checkDate = checkingLessonDate_(cls, date);
       var itemById = {};
       items.forEach(function (it) { itemById[LMS.toStr(it.item_id)] = it; });
       var incoming = Array.isArray(data.checks) ? data.checks : [];
@@ -1101,7 +1126,7 @@ LMS.createService = function (store) {
         return !!itemById[LMS.toStr(c.item_id)];
       });
       var grades = [];
-      var lessonUpserts = [];
+      var gradeByStudent = {};
       Object.keys(studentIds).forEach(function (studentId) {
         var comp = homeworkCompletionForStudent_(items, checksForItems, studentId);
         grades.push({
@@ -1110,59 +1135,20 @@ LMS.createService = function (store) {
           total: comp.total,
           assignment_completion: comp.grade
         });
-        if (!comp.grade) return;
-        lessonUpserts.push({
-          lesson_date: checkDate,
-          class_id: classId,
-          student_id: studentId,
-          attendance: '출석',
-          test_status: '미실시',
-          assignment_completion: comp.grade
-        });
+        if (comp.grade) gradeByStudent[studentId] = comp.grade;
       });
-      if (lessonUpserts.length) {
+      if (checkDate && Object.keys(gradeByStudent).length) {
         var lessonRows = table('Lessons');
-        var index = {};
-        lessonRows.forEach(function (row, i) {
-          index[LMS.lessonKey(row.lesson_date, row.student_id, row.class_id)] = i;
+        var lessonsChanged = false;
+        lessonRows.forEach(function (row) {
+          if (LMS.toStr(row.class_id) !== classId || LMS.toStr(row.lesson_date) !== checkDate) return;
+          var grade = gradeByStudent[LMS.toStr(row.student_id)];
+          if (!grade) return;
+          row.assignment_completion = grade;
+          row.updated_at = ts;
+          lessonsChanged = true;
         });
-        var insertCount = 0;
-        lessonUpserts.forEach(function (row) {
-          var key = LMS.lessonKey(row.lesson_date, row.student_id, row.class_id);
-          if (index[key] === undefined) insertCount += 1;
-        });
-        var newIds = insertCount ? nextIds('LES', insertCount) : [];
-        var idPos = 0;
-        lessonUpserts.forEach(function (row) {
-          var key = LMS.lessonKey(row.lesson_date, row.student_id, row.class_id);
-          if (index[key] !== undefined) {
-            var prev = lessonRows[index[key]];
-            prev.assignment_completion = row.assignment_completion;
-            prev.updated_at = ts;
-          } else {
-            lessonRows.push({
-              lesson_id: newIds[idPos++],
-              lesson_date: row.lesson_date,
-              student_id: row.student_id,
-              class_id: row.class_id,
-              attendance: row.attendance,
-              test_status: row.test_status,
-              test_score: '',
-              test_max_score: '',
-              test_difficulty: '',
-              assignment_completion: row.assignment_completion,
-              concentration: '',
-              progress: '',
-              homework: '',
-              special_note: '',
-              created_at: ts,
-              updated_at: ts
-            });
-          }
-        });
-        saveTable('Lessons', lessonRows);
-        // Rows created here are lessons of the check date: give them that date's class record.
-        applySessionToLessons_(checkDate, classId);
+        if (lessonsChanged) saveTable('Lessons', lessonRows);
       }
 
       return {
@@ -2933,6 +2919,7 @@ LMS.createService = function (store) {
     requireStudent: requireStudent,
     assignments: assignments,
     examPeriods: examPeriods_,
+    checkingLessonDate: checkingLessonDate_,
     getClassSession: getClassSession,
     getClassPlan: getClassPlan,
     getClassPlans: getClassPlans,
