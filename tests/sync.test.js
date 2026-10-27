@@ -41,17 +41,18 @@ describe('class record → student lessons', () => {
     assert.deepEqual(field(api, '2026-09-16', classId, 'progress'), ['P1', 'P1', 'P1']);
   });
 
-  it('lessons created by homework checks on another day take that day’s class record', () => {
+  it('homework checks never create lessons on a day that has only a class record', () => {
     const { api, demo, classId } = seeded();
     api.saveClassSession({ lesson_date: '2026-09-21', class_id: classId, progress: 'P21', test_difficulty: '상' });
     api.saveSessionHomework({ lesson_date: '2026-09-21', class_id: classId, items: [{ title: 'HW21' }] });
-    api.saveHomeworkChecks({
+    const result = api.saveHomeworkChecks({
       lesson_date: '2026-09-14', class_id: classId, check_date: '2026-09-21',
       checks: demo.students.map((s) => ({ index: 0, student_id: s.student_id, status: '완료' }))
     });
-    assert.deepEqual(field(api, '2026-09-21', classId, 'progress'), ['P21', 'P21', 'P21']);
-    assert.deepEqual(field(api, '2026-09-21', classId, 'homework'), ['HW21', 'HW21', 'HW21']);
-    assert.deepEqual(field(api, '2026-09-21', classId, 'test_difficulty'), ['상', '상', '상']);
+    assert.equal(result.checks.length, 3);
+    assert.equal(result.check_date, '');
+    assert.deepEqual(api.getLessons('2026-09-21', classId), []);
+    assert.equal(api.getLessons('2026-09-14', classId).length, 3);
   });
 
   it('editing class fields on one lesson edits the class record for everyone', () => {
