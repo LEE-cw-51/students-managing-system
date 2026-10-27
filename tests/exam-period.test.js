@@ -173,10 +173,11 @@ describe('resume dates follow regular assignment changes', () => {
     assert.ok(t.api.getClassRoster(t.b, '2026-11-05').every((s) => s.student_id !== t.ga.student_id), '가 is away from B반');
   });
 
-  it('closing a sole assignment keeps the placement source', () => {
+  it('closing a sole assignment drops a placement that has not started', () => {
     const t = small();
     t.api.closeStudentClass({ id: t.rel(t.na.student_id, t.b).id, end_date: '2026-10-31' });
-    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' });
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-30' }, 'B반 no longer waits for 나');
+    assert.ok(!t.api.getStudent(t.na.student_id).class_history.some((h) => h.status === '임시'));
   });
 
   it('removing a mistaken assignment', () => {
@@ -191,7 +192,8 @@ describe('resume dates follow regular assignment changes', () => {
   it('withdrawing a student', () => {
     const t = small('2026-10-01');
     t.api.archiveStudent(t.ga.student_id);
-    assert.deepEqual(t.resume(), { [t.a]: '2026-11-10', [t.b]: '2026-11-20' }, 'B반 no longer waits for 가');
+    assert.deepEqual(t.resume(), { [t.a]: '2026-11-30', [t.b]: '2026-11-20' }, 'neither class waits for 가');
+    assert.ok(!t.api.getStudent(t.ga.student_id).class_history.some((h) => h.status === '임시'), 'the placement had not started');
   });
 
   it('closing a class', () => {

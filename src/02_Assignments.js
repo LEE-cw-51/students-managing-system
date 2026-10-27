@@ -313,6 +313,53 @@ LMS.createAssignments = function (ctx) {
   }
 
   /**
+   * The student stopped attending `sourceClassId` after `lastDay` (every class on withdrawal, with a
+   * blank source). Their placements away from it that run past lastDay: point at another regular class
+   * attended then (not on withdrawal), else end on lastDay, or are deleted when they start later.
+   * Lessons recorded in the exam class keep a placement up to the last of them.
+   */
+  function endTempAfter(studentId, sourceClassId, lastDay, withdrawal) {
+    var rels = table('StudentClasses');
+    var drop = [];
+    var touched = {};
+    var changed = false;
+    var ts = now();
+    rels.slice().forEach(function (r) {
+      if (LMS.toStr(r.status) !== '임시' || !same(r.student_id, studentId)) return;
+      if (sourceClassId && !same(r.source_class_id, sourceClassId)) return;
+      var start = LMS.toStr(r.start_date);
+      var end = LMS.toStr(r.end_date);
+      if (end && end <= lastDay) return;
+      var from = start > lastDay ? start : LMS.addDays(lastDay, 1);
+      var sources = withdrawal ? [] : regularClassIdsDuring(studentId, from, end);
+      if (sources.indexOf(LMS.toStr(r.source_class_id)) !== -1) return;
+      if (sources.length) {
+        if (start < from) {
+          rels.push(Object.assign({}, r, {
+            id: ctx.nextIds('REL', 1)[0], start_date: from, source_class_id: sources[0], created_at: ts
+          }));
+          r.end_date = lastDay;
+        } else {
+          r.source_class_id = sources[0];
+        }
+      } else {
+        var lastLesson = table('Lessons').filter(function (l) {
+          return same(l.student_id, studentId) && same(l.class_id, r.class_id) && LMS.inRange(l.lesson_date, start, end);
+        }).map(function (l) { return LMS.toStr(l.lesson_date); }).sort().pop() || '';
+        if (start > lastDay && !lastLesson) drop.push(r);
+        else r.end_date = lastLesson > lastDay ? lastLesson : lastDay;
+      }
+      r.updated_at = ts;
+      changed = true;
+      var pid = periodOfClass(r.class_id);
+      if (pid) touched[pid] = true;
+    });
+    if (!changed) return;
+    saveTable('StudentClasses', rels.filter(function (r) { return drop.indexOf(r) === -1; }));
+    Object.keys(touched).forEach(recomputeResume);
+  }
+
+  /**
    * New regular assignment. skipSync: the caller syncs exam-prep placements itself, or the
    * student is new and has none.
    */
@@ -581,6 +628,7 @@ LMS.createAssignments = function (ctx) {
     row.status = '종료';
     row.updated_at = now();
     saveTable('StudentClasses', rels);
+    endTempAfter(row.student_id, LMS.toStr(row.class_id), end, false);
     syncExamPrep([{ student_id: row.student_id, start: LMS.toStr(row.start_date), end: '' }]);
     return row;
   }
@@ -607,31 +655,40 @@ LMS.createAssignments = function (ctx) {
     if (LMS.toStr(row.status) === '임시') throw new Error('시험대비 임시 배정은 시험 화면에서 바꿔 주세요.');
     if (!removable(row)) throw new Error('이 반에 수업 기록이나 숙제 체크가 있어 삭제할 수 없습니다. ‘반에서 빼기’를 써 주세요.');
     saveTable('StudentClasses', rels.filter(function (r) { return r !== row; }));
+    endTempAfter(row.student_id, LMS.toStr(row.class_id), LMS.addDays(LMS.toStr(row.start_date), -1), false);
     syncExamPrep([{ student_id: row.student_id, start: LMS.toStr(row.start_date), end: LMS.toStr(row.end_date) }]);
     return { deleted: true, id: row.id };
   }
 
-  /** The student withdrew: every open regular assignment ends (see endForClosing). */
+  /**
+   * The student withdrew: every open regular assignment ends (see endForClosing), and so does every
+   * exam-prep placement running past the latest of those ends (yesterday when none was open).
+   */
   function endForWithdrawal(studentId) {
+    var lastDay = LMS.addDays(ctx.today(), -1);
     var ended = openRegular(studentId).map(function (r) {
       var change = { student_id: r.student_id, start: LMS.toStr(r.start_date), end: '' };
       endForClosing(r);
+      if (r.end_date > lastDay) lastDay = r.end_date;
       return change;
     });
     saveRels();
+    endTempAfter(studentId, '', lastDay, true);
     syncExamPrep(ended);
   }
 
-  /** The regular class closed: its open assignments end (see endForClosing). */
+  /** The regular class closed: its open assignments end (see endForClosing), with placements away from it. */
   function endForClassClose(classId) {
-    var ended = table('StudentClasses').filter(function (r) {
+    var closed = table('StudentClasses').filter(function (r) {
       return same(r.class_id, classId) && LMS.toStr(r.status) === '현재';
-    }).map(function (r) {
+    });
+    var ended = closed.map(function (r) {
       var change = { student_id: r.student_id, start: LMS.toStr(r.start_date), end: '' };
       endForClosing(r);
       return change;
     });
     saveRels();
+    closed.forEach(function (r) { endTempAfter(r.student_id, LMS.toStr(classId), r.end_date, false); });
     syncExamPrep(ended);
   }
 
