@@ -179,7 +179,10 @@ function Editor({ data, onSaved, onGoDate }) {
   const save = async () => {
     setError('');
     const s = form.session;
-    if (s.test_on && !String(s.test_max_score).trim()) return setError('테스트 만점을 입력해 주세요.');
+    if (s.test_on && !String(s.test_max_score).trim()) {
+      setError('테스트 만점을 입력해 주세요.');
+      return document.getElementById('rec-tm')?.focus();
+    }
     setSaving(true);
     try {
       await api('saveTodaySession', {
@@ -284,7 +287,7 @@ function Editor({ data, onSaved, onGoDate }) {
             {form.session.test_on ? (
               <div className="form-grid" style={{ marginTop: 8 }}>
                 <div className="field"><label htmlFor="rec-tt">테스트 이름</label><input id="rec-tt" value={form.session.test_title} onChange={(e) => setSession('test_title', e.target.value)} placeholder="예: 단원 확인 테스트" /></div>
-                <div className="field"><label htmlFor="rec-tm">만점</label><input id="rec-tm" inputMode="numeric" value={form.session.test_max_score} onChange={(e) => setSession('test_max_score', e.target.value.replace(/[^\d.]/g, ''))} /></div>
+                <div className="field"><label htmlFor="rec-tm">만점</label><input id="rec-tm" inputMode="numeric" value={form.session.test_max_score} aria-invalid={error === '테스트 만점을 입력해 주세요.'} onChange={(e) => setSession('test_max_score', e.target.value.replace(/[^\d.]/g, ''))} /></div>
                 <div className="field"><label>난이도</label><Chips value={form.session.test_difficulty} options={['상', '중', '하']} label="난이도" onChange={(v) => setSession('test_difficulty', v)} /></div>
               </div>
             ) : null}
@@ -489,8 +492,8 @@ function Editor({ data, onSaved, onGoDate }) {
         ) : <EmptyState title="이 날 이 반에 배정된 학생이 없습니다">반 화면의 학생 탭에서 배정하세요.</EmptyState>}
       </section>
 
-      {error ? <div className="error-box" role="alert">{error}</div> : null}
       <div className="save-bar">
+        {error ? <div className="error-box save-bar-error" role="alert">{error}</div> : null}
         <span className={'save-state ' + (dirty ? 'dirty' : savedOnce ? 'saved' : '')}>
           {dirty ? '● 저장하지 않은 변경이 있습니다' : savedOnce ? '✓ 저장됨' : data.recorded_count ? `기록 ${data.recorded_count}/${data.total_count}명 저장됨` : '아직 저장하지 않았습니다'}
         </span>

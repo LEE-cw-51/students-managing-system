@@ -2,6 +2,11 @@
 
 import { useId } from 'react';
 
+/** After a failed check, move focus to the first control marked aria-invalid inside `root`. */
+export function focusInvalid(root) {
+  requestAnimationFrame(() => root?.querySelector('[aria-invalid="true"]')?.focus());
+}
+
 /** Label + control + hint/error. Children receive the generated id via render prop or cloneless id. */
 export default function Field({ label, hint, error, wide, children, className = '' }) {
   const id = useId();

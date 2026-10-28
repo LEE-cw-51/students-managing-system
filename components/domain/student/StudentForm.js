@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useDirty } from '@/components/ui/useDirty';
-import Field from '@/components/ui/Field';
+import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
@@ -20,6 +20,7 @@ export default function StudentForm({ initial, onClose, onSaved }) {
     enrollment_date: boot.today, status: '재원', memo: '', class_id: '', ...(initial || {})
   }));
   const [error, setError] = useState('');
+  const [invalid, setInvalid] = useState({});
   const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -28,7 +29,10 @@ export default function StudentForm({ initial, onClose, onSaved }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim()) return setError('이름을 입력해 주세요.');
+    if (!form.name.trim()) {
+      setInvalid({ name: '이름을 입력해 주세요.' });
+      return focusInvalid(e.currentTarget);
+    }
     setSaving(true);
     setError('');
     try {
@@ -58,7 +62,7 @@ export default function StudentForm({ initial, onClose, onSaved }) {
     <Modal title={isEdit ? '학생 정보 수정' : '학생 등록'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
-          <Field label="이름">{(id) => <input id={id} value={form.name} onChange={set('name')} />}</Field>
+          <Field label="이름" error={invalid.name}>{(id) => <input id={id} value={form.name} aria-invalid={!!invalid.name} onChange={(e) => { set('name')(e); setInvalid({}); }} />}</Field>
           <Field label="학년">{(id) => (
             <select id={id} value={form.grade} onChange={set('grade')}>
               <option value="">선택</option>
