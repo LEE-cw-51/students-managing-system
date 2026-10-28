@@ -65,6 +65,25 @@ describe('saveTodaySession', () => {
     assert.equal(s.api.getClassSession(TODAY, s.classId).test_title, '확인 테스트');
   });
 
+  it('students with their own progress get it in their daily report', () => {
+    const s = seeded();
+    const p = payload(s);
+    p.students[1] = Object.assign({}, p.students[1], { progress_own: 'Y', progress: '10. 복습' });
+    p.students[2] = Object.assign({}, p.students[2], { progress_own: 'Y', progress: '12. 선행' });
+    s.api.saveTodaySession(p);
+    const byId = Object.fromEntries(s.api.getLessons(TODAY, s.classId).map((l) => [l.student_id, l]));
+    const progressLine = (i) => s.api.generateDailyReport(byId[p.students[i].student_id].lesson_id).text
+      .split('\n').find((line) => line.includes('학습 진도'));
+    assert.equal(progressLine(1), '3. 학습 진도: 10. 복습');
+    assert.equal(progressLine(2), '3. 학습 진도: 12. 선행');
+    assert.equal(progressLine(3), '3. 학습 진도: 11. 피타고라스 정리');
+    assert.equal(s.api.getClassSession(TODAY, s.classId).progress, '11. 피타고라스 정리');
+
+    const row = s.api.getClassProgressLog(s.classId, { start: TODAY, end: TODAY }).rows.find((r) => r.date === TODAY);
+    assert.equal(row.progress, '11. 피타고라스 정리');
+    assert.equal(row.own_progress_count, 2);
+  });
+
   it('writes nothing when a row is invalid', () => {
     const s = seeded();
     const before = JSON.stringify([s.store.readTable('Lessons'), s.store.readTable('HomeworkChecks'), s.store.readTable('HomeworkItems'), s.store.readTable('ClassSessions')]);

@@ -75,6 +75,43 @@ describe('counseling follow-ups', () => {
   });
 });
 
+describe('bulk status change', () => {
+  function twoInClass() {
+    const api = LMS.createService(createMemoryStore());
+    const a = api.createClass({ class_name: 'A반', grade: '중2', weekday: '월/수', start_time: '18:00', end_time: '20:00' }).class_id;
+    const ids = ['홍길동', '김철수'].map((name) => api.createStudent({ name, grade: '중2', class_id: a, enrollment_date: '2026-03-01' }).student_id);
+    return { api, a, ids };
+  }
+  const statusOf = (api, sid) => api.getStudent(sid).status;
+  const classesOf = (api, sid) => api.getStudent(sid).current_classes.length;
+
+  it('휴원 keeps the class assignments', () => {
+    const { api, ids } = twoInClass();
+    assert.deepEqual(api.setStudentsStatus({ student_ids: ids, status: '휴원' }), { count: 2 });
+    ids.forEach((sid) => {
+      assert.equal(statusOf(api, sid), '휴원');
+      assert.equal(classesOf(api, sid), 1);
+    });
+  });
+
+  it('퇴원 ends the class assignments', () => {
+    const { api, a, ids } = twoInClass();
+    assert.equal(api.setStudentsStatus({ student_ids: ids, status: '퇴원' }).count, 2);
+    ids.forEach((sid) => {
+      assert.equal(statusOf(api, sid), '퇴원');
+      assert.equal(classesOf(api, sid), 0);
+    });
+    assert.equal(api.getClassRoster(a).length, 0);
+  });
+
+  it('rejects an unknown status or no students', () => {
+    const { api, ids } = twoInClass();
+    assert.throws(() => api.setStudentsStatus({ student_ids: ids, status: '졸업' }), /학생 상태 값이 올바르지 않습니다/);
+    assert.throws(() => api.setStudentsStatus({ student_ids: [], status: '휴원' }), /학생을 골라 주세요/);
+    ids.forEach((sid) => assert.equal(statusOf(api, sid), '재원'));
+  });
+});
+
 describe('student views', () => {
   it('list carries classes, badges and next exam', () => {
     const { api } = seeded();

@@ -95,6 +95,80 @@ describe('class record → student lessons', () => {
   });
 });
 
+describe('student own progress', () => {
+  const progressOf = (api, date, classId) =>
+    Object.fromEntries(api.getLessons(date, classId).map((l) => [l.student_id, [l.progress, l.progress_own]]));
+
+  function recordWithOwn(api, classId, classProgress, own) {
+    return recordToday(api, '2026-09-16', classId, (d) => ({
+      session: { progress: classProgress },
+      students: d.students.map((s) => Object.assign({ student_id: s.student_id, attendance: '출석' }, own[s.student_id] || {}))
+    }));
+  }
+
+  it('keeps a student’s own progress when the class progress is saved again', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim, lee] = demo.students;
+    recordWithOwn(api, classId, 'P1', { [kim.student_id]: { progress_own: 'Y', progress: '김 개인' } });
+    api.saveClassSession({ lesson_date: '2026-09-16', class_id: classId, progress: 'P2' });
+    api.saveLesson({ lesson_date: '2026-09-16', class_id: classId, student_id: hong.student_id, attendance: '출석', progress: 'P3' });
+    const p = progressOf(api, '2026-09-16', classId);
+    assert.deepEqual(p[kim.student_id], ['김 개인', 'Y']);
+    assert.deepEqual(p[hong.student_id], ['P3', '']);
+    assert.deepEqual(p[lee.student_id], ['P3', '']);
+    assert.equal(api.getClassSession('2026-09-16', classId).progress, 'P3');
+    const ses = api.getTodayClassSession('2026-09-16', classId);
+    assert.equal(ses.students.find((s) => s.student_id === kim.student_id).lesson.progress_own, 'Y');
+    assert.equal(ses.students.find((s) => s.student_id === hong.student_id).lesson.progress_own, '');
+  });
+
+  it('follows the class progress again once the own progress is dropped', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim] = demo.students;
+    recordWithOwn(api, classId, 'P1', {
+      [hong.student_id]: { progress_own: 'Y', progress: '홍 개인' },
+      [kim.student_id]: { progress_own: 'Y', progress: '김 개인' }
+    });
+    recordWithOwn(api, classId, 'P2', { [kim.student_id]: { progress_own: 'Y', progress: '김 개인' } });
+    assert.deepEqual(progressOf(api, '2026-09-16', classId)[hong.student_id], ['P2', ''], 'today screen');
+    api.saveLesson({ lesson_date: '2026-09-16', class_id: classId, student_id: kim.student_id, attendance: '출석', progress_own: '' });
+    assert.deepEqual(progressOf(api, '2026-09-16', classId)[kim.student_id], ['P2', ''], 'single lesson save');
+    recordWithOwn(api, classId, 'P3', { [hong.student_id]: { progress_own: 'Y', progress: '' } });
+    assert.deepEqual(progressOf(api, '2026-09-16', classId)[hong.student_id], ['P3', ''], 'an empty own progress is no own progress');
+  });
+
+  it('never turns a student’s own progress into the class progress', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim, lee] = demo.students;
+    api.saveLessonsBatch([
+      { lesson_date: '2026-09-16', class_id: classId, student_id: hong.student_id, attendance: '출석', progress_own: 'Y', progress: '개인' },
+      { lesson_date: '2026-09-16', class_id: classId, student_id: kim.student_id, attendance: '출석', progress: '반' },
+      { lesson_date: '2026-09-16', class_id: classId, student_id: lee.student_id, attendance: '출석', progress_own: 'Y', progress: '개인' }
+    ]);
+    assert.equal(api.getClassSession('2026-09-16', classId).progress, '반', 'most rows say 개인, but they are own');
+    assert.deepEqual(progressOf(api, '2026-09-16', classId)[hong.student_id], ['개인', 'Y']);
+    recordWithOwn(api, classId, '', { [kim.student_id]: { progress_own: 'Y', progress: '김만' } });
+    assert.equal(api.getClassSession('2026-09-16', classId).progress, '');
+    assert.notEqual(api.getClass(classId).current_progress, '김만');
+  });
+
+  it('an own progress equal to the class progress is no own progress', () => {
+    const { api, demo, classId } = seeded();
+    const [hong, kim] = demo.students;
+    recordWithOwn(api, classId, 'P1', {
+      [hong.student_id]: { progress_own: 'Y', progress: 'P1' },
+      [kim.student_id]: { progress_own: 'Y', progress: '  P1 ' }
+    });
+    let p = progressOf(api, '2026-09-16', classId);
+    assert.deepEqual(p[hong.student_id], ['P1', '']);
+    assert.deepEqual(p[kim.student_id], ['P1', ''], 'surrounding spaces ignored');
+    api.saveClassSession({ lesson_date: '2026-09-16', class_id: classId, progress: 'P2' });
+    p = progressOf(api, '2026-09-16', classId);
+    assert.deepEqual(p[hong.student_id], ['P2', '']);
+    assert.deepEqual(p[kim.student_id], ['P2', '']);
+  });
+});
+
 describe('homework carried to the next lesson', () => {
   it('homework given on a makeup day is checked at the next lesson', () => {
     const { api, classId } = seeded();

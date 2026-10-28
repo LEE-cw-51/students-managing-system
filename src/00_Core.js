@@ -47,7 +47,7 @@ LMS.TABLES = {
     'test_status', 'test_score', 'test_max_score', 'test_difficulty',
     'assignment_completion', 'concentration', 'progress', 'homework',
     'special_note', 'student_notice', 'homework_replace_class',
-    'created_at', 'updated_at'
+    'created_at', 'updated_at', 'progress_own'
   ],
   ClassSessionNotices: [
     'id', 'lesson_date', 'class_id', 'class_notice', 'created_at', 'updated_at'
@@ -1718,6 +1718,10 @@ LMS.validateLessonInput = function (data) {
   if (concentration === '결석') concentration = 'ABSENT';
   if (concentration) LMS.assertEnum(concentration, LMS.CONCENTRATION, '수업 집중도', true);
 
+  var progress = LMS.toStr(data.progress);
+  // A student's own progress needs text; an empty one follows the class progress again.
+  var progressOwn = LMS.toStr(data.progress_own).toUpperCase() === 'Y' && progress ? 'Y' : '';
+
   return {
     lesson_id: LMS.toStr(data.lesson_id),
     lesson_date: LMS.toStr(data.lesson_date),
@@ -1730,7 +1734,8 @@ LMS.validateLessonInput = function (data) {
     test_difficulty: difficulty,
     assignment_completion: assignment,
     concentration: concentration,
-    progress: LMS.toStr(data.progress),
+    progress: progress,
+    progress_own: progressOwn,
     homework: LMS.toStr(data.homework),
     special_note: LMS.toStr(data.special_note),
     student_notice: LMS.toStr(data.student_notice),

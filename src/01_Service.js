@@ -386,6 +386,26 @@ LMS.createService = function (store) {
     return assignments.moveMany(data);
   }
 
+  function assignStudentsToClass(data) {
+    return assignments.assignMany(data);
+  }
+
+  function closeStudentsInClass(data) {
+    return assignments.closeMany(data);
+  }
+
+  /** Change the status of several students; 퇴원 ends their assignments as updateStudent does. */
+  function setStudentsStatus(data) {
+    data = data || {};
+    var status = LMS.assertEnum(data.status, LMS.STUDENT_STATUS, '학생 상태');
+    var ids = LMS.uniqueIds(data.student_ids);
+    if (!ids.length) throw new Error('상태를 바꿀 학생을 골라 주세요.');
+    var done = assignments.forEachStudent(ids, '바꾸지 않았습니다.', function (sid) {
+      return updateStudent(Object.assign({}, requireStudent(sid), { status: status }));
+    });
+    return { count: done.length };
+  }
+
   function getLessons(date, classId) {
     if (!LMS.isIsoDate(date)) throw new Error('수업일 형식이 올바르지 않습니다.');
     return table('Lessons').filter(function (row) {
@@ -554,9 +574,10 @@ LMS.createService = function (store) {
           updated_at: ts
         });
         // Fields left out of the input keep their stored text; the class record re-aligns them below.
-        ['progress', 'homework'].forEach(function (k) {
+        ['progress', 'homework', 'progress_own'].forEach(function (k) {
           if ((list[i] || {})[k] === undefined) merged[k] = prev[k];
         });
+        if (!LMS.toStr(merged.progress)) merged.progress_own = '';
         lessons[existingIndex] = merged;
         saved.push(merged);
       } else {
@@ -1165,7 +1186,9 @@ LMS.createService = function (store) {
     var onLeave = targets.onLeave.map(function (s) { return { student_id: s.student_id, name: s.name }; });
     var lessons = getLessons(date, classId);
     var byStudent = {};
-    lessons.forEach(function (l) { byStudent[l.student_id] = l; });
+    lessons.forEach(function (l) {
+      byStudent[l.student_id] = Object.assign({}, l, { progress_own: LMS.toStr(l.progress_own) === 'Y' ? 'Y' : '' });
+    });
     // Keep students who already have a record that day even if no longer on the roster.
     var allStudents = table('Students');
     lessons.forEach(function (l) {
@@ -1282,6 +1305,8 @@ LMS.createService = function (store) {
       : (existingSession ? existingSession.test_max_score : '');
     var difficulty = sessionInput.test_difficulty !== undefined ? sessionInput.test_difficulty
       : (existingSession ? existingSession.test_difficulty : '');
+    var classProgress = LMS.toStr(sessionInput.progress !== undefined ? sessionInput.progress
+      : (existingSession ? existingSession.progress : '')).trim();
     var classHwTitles = (Array.isArray(p.homework_items) ? p.homework_items : []).map(function (it) {
       return LMS.toStr(typeof it === 'string' ? it : it && it.title);
     }).filter(Boolean);
@@ -1305,7 +1330,10 @@ LMS.createService = function (store) {
       var sid = LMS.toStr(s.student_id);
       var replace = LMS.normalizeHomeworkReplaceClass(s.homework_replace_class);
       var hwTitles = replace ? (personalByStudent[sid] || []) : classHwTitles.concat(personalByStudent[sid] || []);
-      return {
+      var ownText = LMS.toStr(s.progress).trim();
+      // Own progress equal to the class progress would stop following later class edits.
+      var own = LMS.toStr(s.progress_own) === 'Y' && ownText !== '' && ownText !== classProgress;
+      var row = {
         lesson_date: date,
         class_id: classId,
         student_id: sid,
@@ -1319,8 +1347,12 @@ LMS.createService = function (store) {
         homework: hwTitles.join('\n'),
         special_note: LMS.toStr(s.special_note),
         student_notice: LMS.toStr(s.student_notice),
-        homework_replace_class: replace
+        homework_replace_class: replace,
+        progress_own: own ? 'Y' : ''
       };
+      // Rows without their own progress send none, so the class progress is copied onto them.
+      if (own) row.progress = LMS.toStr(s.progress);
+      return row;
     };
     // Validate every row up front so a bad score never leaves a half-saved lesson.
     students.forEach(function (s) {
@@ -2527,6 +2559,10 @@ LMS.createService = function (store) {
     return assignments.addTemp(data);
   }
 
+  function addTempAssignments(data) {
+    return assignments.addTempMany(data);
+  }
+
   function endTempAssignment(relId, date) {
     return assignments.endTemp(relId, date);
   }
@@ -2932,6 +2968,9 @@ LMS.createService = function (store) {
     closeStudentClass: closeStudentClass,
     moveStudent: moveStudent,
     moveStudents: moveStudents,
+    assignStudentsToClass: assignStudentsToClass,
+    closeStudentsInClass: closeStudentsInClass,
+    setStudentsStatus: setStudentsStatus,
     removeStudentClass: removeStudentClass,
     getLessons: getLessons,
     getStudentLessons: getStudentLessons,
@@ -2990,6 +3029,7 @@ LMS.createService = function (store) {
     saveExamPeriod: saveExamPeriod,
     applyExamGroups: applyExamGroups,
     addTempAssignment: addTempAssignment,
+    addTempAssignments: addTempAssignments,
     endTempAssignment: endTempAssignment,
     removeTempAssignment: removeTempAssignment,
     setPeriodSuspendedClasses: setPeriodSuspendedClasses,

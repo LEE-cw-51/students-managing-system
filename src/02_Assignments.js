@@ -594,6 +594,33 @@ LMS.createAssignments = function (ctx) {
   }
 
   /**
+   * Run fn(studentId) for every student and collect the results. Errors are gathered per student
+   * name; when any student failed, throws `failLabel` followed by '이름: 이유' lines. Callers run
+   * inside the service transaction, so changes made for the other students roll back.
+   */
+  function forEachStudent(ids, failLabel, fn) {
+    var students = table('Students');
+    var results = [];
+    var problems = [];
+    ids.forEach(function (sid) {
+      try {
+        results.push(fn(sid));
+      } catch (e) {
+        var st = LMS.findById(students, 'student_id', sid);
+        problems.push((st ? st.name : sid) + ': ' + ((e && e.message) || String(e)));
+      }
+    });
+    if (problems.length) throw new Error(failLabel + '\n' + problems.join('\n'));
+    return results;
+  }
+
+  function requireIds(values, emptyMessage) {
+    var ids = LMS.uniqueIds(values);
+    if (!ids.length) throw new Error(emptyMessage);
+    return ids;
+  }
+
+  /**
    * Move several students of one class together. Every student is checked first; if any cannot
    * move, nothing changes and the reasons come back per student.
    */
@@ -604,22 +631,60 @@ LMS.createAssignments = function (ctx) {
     requireClass(fromId);
     requireClass(toId);
     var start = LMS.toStr(data.date) || ctx.today();
-    var ids = LMS.uniqueIds(data.student_ids);
-    if (!ids.length) throw new Error('옮길 학생을 골라 주세요.');
-    var students = table('Students');
-    var plan = [];
-    var problems = [];
-    ids.forEach(function (sid) {
-      var st = LMS.findById(students, 'student_id', sid);
-      var name = st ? st.name : sid;
+    var ids = requireIds(data.student_ids, '옮길 학생을 골라 주세요.');
+    var plan = forEachStudent(ids, '옮기지 않았습니다.', function (sid) {
       var rel = openRegular(sid).filter(function (r) { return LMS.toStr(r.class_id) === fromId; })[0];
       var problem = rel ? moveProblem(rel, toId, start) : '이 반의 정규 배정이 아닙니다.';
-      if (problem) problems.push(name + ': ' + problem);
-      else plan.push(rel);
+      if (problem) throw new Error(problem);
+      return rel;
     });
-    if (problems.length) throw new Error('옮기지 않았습니다.\n' + problems.join('\n'));
     var moved = plan.map(function (rel) { return applyMove(rel, toId, start); });
     return { moved_count: moved.length };
+  }
+
+  /**
+   * Put several students in a regular class. mode 'add' (default) adds the class to each; 'move'
+   * moves a student who attends one regular class, assigns one who attends none, and fails one in
+   * two or more (they must pick which class to leave).
+   */
+  function assignMany(data) {
+    data = data || {};
+    var classId = LMS.toStr(data.class_id);
+    requireClass(classId);
+    var mode = LMS.toStr(data.mode) || 'add';
+    if (mode !== 'add' && mode !== 'move') throw new Error('배정 방식이 올바르지 않습니다.');
+    var ids = requireIds(data.student_ids, '배정할 학생을 골라 주세요.');
+    var start = LMS.toStr(data.start_date);
+    var done = forEachStudent(ids, '배정하지 않았습니다.', function (sid) {
+      var row = { student_id: sid, class_id: classId, start_date: start };
+      if (mode === 'move' && openRegular(sid).length) return move(row);
+      return assign(row);
+    });
+    return { count: done.length };
+  }
+
+  /** Take several students out of a class: each assignment ends on end_date (today when blank). */
+  function closeMany(data) {
+    data = data || {};
+    var classId = LMS.toStr(data.class_id);
+    requireClass(classId);
+    var ids = requireIds(data.student_ids, '반에서 뺄 학생을 골라 주세요.');
+    var done = forEachStudent(ids, '빼지 않았습니다.', function (sid) {
+      return close({ student_id: sid, class_id: classId, end_date: data.end_date });
+    });
+    return { count: done.length };
+  }
+
+  /** Place several students in an exam-prep class for the same dates. */
+  function addTempMany(data) {
+    data = data || {};
+    var classId = LMS.toStr(data.class_id);
+    requireClass(classId);
+    var ids = requireIds(data.student_ids, '추가할 학생을 골라 주세요.');
+    var done = forEachStudent(ids, '추가하지 않았습니다.', function (sid) {
+      return addTemp({ class_id: classId, student_id: sid, start_date: data.start_date, end_date: data.end_date });
+    });
+    return { count: done.length };
   }
 
   /** Take a student out of a class: the assignment ends on end_date (today when blank). */
@@ -832,18 +897,22 @@ LMS.createAssignments = function (ctx) {
     followEnrollment: followEnrollment,
     move: move,
     moveMany: moveMany,
+    assignMany: assignMany,
     close: close,
+    closeMany: closeMany,
     remove: remove,
     endForWithdrawal: endForWithdrawal,
     endForClassClose: endForClassClose,
     assertNoTempOverlap: assertNoTempOverlap,
     placeTemp: placeTemp,
     addTemp: addTemp,
+    addTempMany: addTempMany,
     endTemp: endTemp,
     removeTemp: removeTemp,
     clampTempToPeriod: clampTempToPeriod,
     dropForClasses: dropForClasses,
     recomputeResume: recomputeResume,
+    forEachStudent: forEachStudent,
     // Row-level helpers kept for migrateToV4_.
     endForClosing: endForClosing,
     lastLessonIn: lastLessonIn

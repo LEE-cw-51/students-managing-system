@@ -9,6 +9,9 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
 import StudentForm from '@/components/domain/student/StudentForm';
+import { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
+import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
+import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { relativeDay, shortDate } from '@/lib/format';
@@ -69,6 +72,8 @@ function StudentList({ onCreate }) {
     });
   }, [state.data, deferredQuery, onlyFlagged]);
   const flaggedCount = (state.data || []).filter((r) => r.badges.some((b) => b.tone !== 'muted')).length;
+  const sel = useSelection(rows.map((r) => r.student_id));
+  const bulkDone = () => { sel.clear(); state.reload(); boot.refresh(); };
 
   return (
     <>
@@ -94,14 +99,20 @@ function StudentList({ onCreate }) {
           ))}
         </div>
       </div>
+      {sel.chosen.length ? <StudentBulkBar ids={sel.chosen} onDone={bulkDone} onClear={sel.clear} /> : null}
       <Async state={state}>
         {() => rows.length ? (
+          <>
+          <label className="check-label mobile-only" style={{ marginBottom: 8 }}><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /> 전체 선택</label>
           <div className="table-wrap">
             <table className="data-table stack-mobile">
-              <thead><tr><th>이름</th><th>학년 · 학교</th><th>반</th><th>최근 수업</th><th>다음 학교 시험</th><th>학부모 연락처</th></tr></thead>
+              <thead><tr><th className="check-col"><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /></th><th>이름</th><th>학년 · 학교</th><th>반</th><th>최근 수업</th><th>다음 학교 시험</th><th>학부모 연락처</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.student_id} className="clickable" onClick={() => router.push(`/students/${r.student_id}`)}>
+                    <td className="check-col" data-label="선택" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={sel.selected.has(r.student_id)} onChange={() => sel.toggle(r.student_id)} aria-label={`${r.name} 선택`} />
+                    </td>
                     <td className="primary">
                       <Link href={`/students/${r.student_id}`} onClick={(e) => e.stopPropagation()}>{r.name}</Link>
                       {r.status !== '재원' ? <span className="tag muted" style={{ marginLeft: 6 }}>{r.status}</span> : null}
@@ -123,6 +134,7 @@ function StudentList({ onCreate }) {
               </tbody>
             </table>
           </div>
+          </>
         ) : (
           <div className="card">
             {(state.data || []).length ? (
@@ -135,5 +147,74 @@ function StudentList({ onCreate }) {
         )}
       </Async>
     </>
+  );
+}
+
+const STATUSES = ['재원', '휴원', '퇴원'];
+
+/** "선택한 N명 → 반 배정 | 상태 변경" for the checked students. */
+function StudentBulkBar({ ids, onDone, onClear }) {
+  const boot = useBoot();
+  const toast = useToast();
+  const [action, setAction] = useState('assign');
+  const [target, setTarget] = useState('');
+  const [date, setDate] = useState(boot.today);
+  const [status, setStatus] = useState('휴원');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const targets = openRegularClasses(boot);
+
+  const run = async () => {
+    setError('');
+    if (action === 'assign' && !target) return setError('배정할 반을 골라 주세요.');
+    if (action === 'status' && status === '퇴원' && !window.confirm(`선택한 ${ids.length}명을 퇴원 처리할까요? 다니는 반 배정이 모두 종료됩니다.`)) return;
+    setSaving(true);
+    try {
+      if (action === 'assign') {
+        const res = await api('assignStudentsToClass', { class_id: target, student_ids: ids, start_date: date, mode: 'add' });
+        toast(`${res.count}명을 ${targets.find((c) => c.id === target).name}에 배정했습니다.`);
+      } else {
+        const res = await api('setStudentsStatus', { student_ids: ids, status });
+        toast(`${res.count}명을 ${status}(으)로 바꿨습니다.`);
+      }
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card bulk-bar" style={{ marginBottom: 14 }}>
+      <div className="cluster">
+        <strong>선택한 {ids.length}명</strong>
+        <div className="segmented" role="group" aria-label="할 일">
+          <button type="button" aria-pressed={action === 'assign'} onClick={() => { setAction('assign'); setError(''); }}>반 배정</button>
+          <button type="button" aria-pressed={action === 'status'} onClick={() => { setAction('status'); setError(''); }}>상태 변경</button>
+        </div>
+        <span className="muted">→</span>
+        {action === 'assign' ? (
+          <>
+            <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="배정할 반" style={{ width: 'auto' }}>
+              <option value="">배정할 반</option>
+              {targets.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="시작일" style={{ width: 'auto' }} />
+            <button type="button" className="btn sm" onClick={run} disabled={saving}>{saving ? '배정 중…' : '배정'}</button>
+          </>
+        ) : (
+          <>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="바꿀 상태" style={{ width: 'auto' }}>
+              {STATUSES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <button type="button" className={'btn sm' + (status === '퇴원' ? ' danger' : '')} onClick={run} disabled={saving}>{saving ? '바꾸는 중…' : '상태 변경'}</button>
+          </>
+        )}
+        <button type="button" className="btn ghost sm" onClick={onClear}>선택 해제</button>
+      </div>
+      {action === 'assign' ? <div className="hint" style={{ marginTop: 6 }}>다니던 반은 그대로 두고 추가 수강으로 배정합니다.</div> : null}
+      {error ? <div className="error-box prewrap" role="alert" style={{ marginTop: 8 }}>{error}</div> : null}
+    </div>
   );
 }
