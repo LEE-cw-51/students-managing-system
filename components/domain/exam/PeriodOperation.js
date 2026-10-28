@@ -20,7 +20,7 @@ function ReturnModal({ member, period, onClose, onDone }) {
     e.preventDefault();
     try {
       await api('endTempAssignment', member.rel_id, date);
-      toast(`${member.name} 학생은 ${shortDate(date)}까지 시험대비 수업 후 원래 반으로 돌아갑니다.`);
+      toast(member.source_class_id ? `${member.name} 학생은 ${shortDate(date)}까지 시험대비 수업 후 원래 반으로 돌아갑니다.` : `${member.name} 학생은 ${shortDate(date)}까지 시험대비 수업을 듣습니다.`);
       onDone();
     } catch (err) {
       setError(err.message);
@@ -29,7 +29,7 @@ function ReturnModal({ member, period, onClose, onDone }) {
   return (
     <Modal title={`${member.name} 복귀일 변경`} onClose={onClose}>
       <form className="stack" onSubmit={submit}>
-        <Field label="시험대비 반 마지막 수업일" hint={`다음 날부터 ${member.source_class_name || '원래 반'} 명단으로 돌아갑니다. 시험이 끝난 학생부터 바로 원래 반 수업에 들어갑니다.`}>
+        <Field label="시험대비 반 마지막 수업일" hint={member.source_class_id ? `다음 날부터 ${member.source_class_name || '원래 반'} 명단으로 돌아갑니다. 시험이 끝난 학생부터 바로 원래 반 수업에 들어갑니다.` : '다음 날부터 시험대비 수업이 끝납니다. 원래 반이 없는 학생입니다.'}>
           {(id) => <input id={id} type="date" min={member.start_date} max={period.end_date} value={date} onChange={(e) => setDate(e.target.value)} />}
         </Field>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
@@ -167,7 +167,8 @@ export default function PeriodOperation({ detail, onChanged }) {
               <span className="muted">{c.schedule_label} · 수업 {c.lesson_days}회</span>
             </div>
             <span className="cluster">
-              <Link className="btn secondary sm" href={`/today?class=${c.class_id}`}>수업 기록</Link>
+              <Link className="btn secondary sm" href={`/today?class=${c.class_id}`}>수업 기록하기</Link>
+              <Link className="btn ghost sm" href={`/reports?tab=daily&class=${c.class_id}`}>일일 리포트</Link>
               <button type="button" className="btn secondary sm" onClick={() => setAdding(c)}>학생 추가</button>
             </span>
           </div>

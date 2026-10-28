@@ -106,7 +106,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
                 <ul className="plan-students">
                   {g.students.map((s) => (
                     <li key={s.student_id}>
-                      <span><strong>{s.name}</strong> <span className="muted">{s.school} · {s.source_class_name}</span></span>
+                      <span><strong>{s.name}</strong> <span className="muted">{s.school}{s.source_class_name ? ` · ${s.source_class_name}` : ''}</span>{!s.source_class_id ? <span className="tag warn" style={{ marginLeft: 6 }}>반 미배정</span> : null}</span>
                       <select value={String(i)} aria-label={`${s.name} 옮기기`} onChange={(e) => moveStudent(i, s.student_id, e.target.value)} style={{ width: 'auto', minHeight: 32, padding: '4px 8px' }}>
                         {groups.map((og, j) => <option key={og.key} value={String(j)}>{j === i ? '이 반' : `→ ${og.class_name}`}</option>)}
                         <option value={OUT}>빼기</option>
@@ -118,7 +118,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
             </div>
           ) : null}
         </section>
-      )) : <div className="card"><EmptyState title={firstTime ? '편성할 학생이 없습니다' : '아직 편성하지 않은 학생이 없습니다'}>정규 반에 배정된 재원생만 편성 대상입니다.</EmptyState></div>}
+      )) : <div className="card"><EmptyState title={firstTime ? '편성할 학생이 없습니다' : '아직 편성하지 않은 학생이 없습니다'}>{data.unassigned.length ? '학교가 입력된 학생이 없습니다.' : firstTime ? '재원생이 없습니다.' : '재원생이 모두 편성되었습니다.'}</EmptyState></div>}
 
       {pool.length ? (
         <section className="card">
@@ -127,7 +127,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
           <ul className="plan-students">
             {pool.map((s) => (
               <li key={s.student_id}>
-                <span><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'} · {s.source_class_name}</span></span>
+                <span><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}{s.source_class_name ? ` · ${s.source_class_name}` : ''}</span>{!s.source_class_id ? <span className="tag warn" style={{ marginLeft: 6 }}>반 미배정</span> : null}</span>
                 <select value={OUT} aria-label={`${s.name} 넣을 반`} onChange={(e) => placeFromPool(s.student_id, e.target.value)} style={{ width: 'auto', minHeight: 32, padding: '4px 8px' }}>
                   <option value={OUT}>넣을 반 선택</option>
                   {groups.map((g, j) => g.include ? <option key={g.key} value={String(j)}>{g.class_name}</option> : null)}

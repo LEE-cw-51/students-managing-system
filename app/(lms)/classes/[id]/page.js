@@ -75,10 +75,14 @@ function Workspace() {
       {(data) => {
         const cls = data.class;
         const sub = [cls.schedule_label, cls.grade, cls.teacher && `담당 ${cls.teacher}`, cls.textbook].filter(Boolean).join(' · ');
+        const period = data.exam && data.exam.period;
+        const crumbs = cls.class_type === '시험대비' && cls.exam_period_id
+          ? [{ href: '/exams?tab=periods', label: '시험대비 기간' }, { href: `/exams/periods/${cls.exam_period_id}`, label: (period && period.title) || '기간 상세' }]
+          : [{ href: '/classes', label: '반' }];
         return (
           <>
             <PageHeader
-              crumbs={[{ href: '/classes', label: '반' }]}
+              crumbs={crumbs}
               title={<>{cls.class_name}{cls.status !== '운영' ? <span className="tag muted" style={{ marginLeft: 8, verticalAlign: 'middle' }}>{cls.status}</span> : null}{cls.class_type === '시험대비' ? <span className="tag amber" style={{ marginLeft: 8, verticalAlign: 'middle' }}>시험대비</span> : null}</>}
               sub={sub || '시간표가 없습니다. 정보 수정에서 요일과 시간을 입력하세요.'}
               actions={(

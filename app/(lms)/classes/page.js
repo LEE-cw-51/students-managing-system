@@ -30,26 +30,18 @@ function ExamTag({ exam }) {
 export default function ClassesPage() {
   const router = useRouter();
   const { today } = useBoot();
-  const [type, setType] = useState('정규');
   const [status, setStatus] = useState('운영');
   const [creating, setCreating] = useState(false);
-  const state = useApi(() => api('getClassList', { class_type: type, status }), [type, status]);
+  const state = useApi(() => api('getClassList', { class_type: '정규', status }), [status]);
 
   return (
     <>
       <PageHeader
         title="반"
-        sub="반을 누르면 진도·숙제·테스트·강의 계획을 한 곳에서 관리합니다."
-        actions={type === '시험대비'
-          ? <Link href="/exams?tab=periods" className="btn">시험대비 기간에서 편성</Link>
-          : <button type="button" className="btn" onClick={() => setCreating(true)}>반 등록</button>}
+        sub={<>반을 누르면 진도·숙제·테스트·강의 계획을 한 곳에서 관리합니다. 시험대비 반은 <Link href="/exams?tab=periods">시험 탭</Link>에서 편성합니다.</>}
+        actions={<button type="button" className="btn" onClick={() => setCreating(true)}>반 등록</button>}
       />
       <div className="split" style={{ marginBottom: 14 }}>
-        <div className="segmented" role="group" aria-label="반 종류">
-          {['정규', '시험대비'].map((t) => (
-            <button key={t} type="button" aria-pressed={type === t} onClick={() => setType(t)}>{t === '정규' ? '정규 반' : '시험대비'}</button>
-          ))}
-        </div>
         <div className="segmented" role="group" aria-label="운영 상태">
           {[['운영', '운영 중'], ['종료', '종료'], ['', '전체']].map(([v, label]) => (
             <button key={label} type="button" aria-pressed={status === v} onClick={() => setStatus(v)}>{label}</button>
@@ -86,21 +78,14 @@ export default function ClassesPage() {
           </div>
         ) : (
           <div className="card">
-            {type === '시험대비' ? (
-              <EmptyState title="시험대비 반이 없습니다"
-                action={<Link href="/exams?tab=periods" className="btn">시험대비 기간에서 편성</Link>}>
-                시험 기간에 학교·학년별 임시 반을 편성하면 여기에 표시됩니다.
-              </EmptyState>
-            ) : (
-              <EmptyState title={status === '종료' ? '종료된 반이 없습니다' : '등록된 반이 없습니다'}
-                action={status !== '종료' ? <button type="button" className="btn" onClick={() => setCreating(true)}>첫 반 등록하기</button> : null}>
-                반을 등록하고 학생을 배정하면 수업 기록을 시작할 수 있습니다.
-              </EmptyState>
-            )}
+            <EmptyState title={status === '종료' ? '종료된 반이 없습니다' : '등록된 반이 없습니다'}
+              action={status !== '종료' ? <button type="button" className="btn" onClick={() => setCreating(true)}>첫 반 등록하기</button> : null}>
+              반을 등록하고 학생을 배정하면 수업 기록을 시작할 수 있습니다.
+            </EmptyState>
           </div>
         )}
       </Async>
-      {creating && type === '정규' ? (
+      {creating ? (
         <ClassForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/classes/${row.class_id}`)} />
       ) : null}
     </>

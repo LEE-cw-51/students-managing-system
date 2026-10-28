@@ -1183,9 +1183,8 @@ LMS.createViews = function (ctx) {
     activeStudents_().forEach(function (s) {
       if (placed[s.student_id]) return;
       var sources = ctx.assignments.regularClassIdsDuring(s.student_id, period.start_date, period.end_date);
-      if (!sources.length) return;
-      var src = LMS.findById(classes, 'class_id', sources[0]);
-      var entry = { student_id: s.student_id, name: s.name, school: s.school, grade: s.grade, source_class_id: sources[0], source_class_name: src ? src.class_name : '' };
+      var src = sources.length ? LMS.findById(classes, 'class_id', sources[0]) : null;
+      var entry = { student_id: s.student_id, name: s.name, school: s.school, grade: s.grade, source_class_id: sources[0] || '', source_class_name: src ? src.class_name : '' };
       var key = LMS.schoolGroupKey(s.school, s.grade);
       if (!key) {
         unassigned.push(entry);
@@ -1203,7 +1202,9 @@ LMS.createViews = function (ctx) {
         return g.spellings[b] - g.spellings[a] || b.length - a.length;
       })[0];
       var srcCount = {};
-      g.students.forEach(function (st) { srcCount[st.source_class_id] = (srcCount[st.source_class_id] || 0) + 1; });
+      g.students.forEach(function (st) {
+        if (st.source_class_id) srcCount[st.source_class_id] = (srcCount[st.source_class_id] || 0) + 1;
+      });
       var mainSrc = LMS.findById(classes, 'class_id', Object.keys(srcCount).sort(function (a, b) { return srcCount[b] - srcCount[a]; })[0]);
       var examDate = examDateFor(period, k);
       return {
@@ -1222,7 +1223,7 @@ LMS.createViews = function (ctx) {
       var gd = LMS.GRADE_OPTIONS.indexOf(a.target_grade) - LMS.GRADE_OPTIONS.indexOf(b.target_grade);
       return gd || a.target_school.localeCompare(b.target_school, 'ko');
     });
-    unassigned.forEach(function (u) { sourceUse[u.source_class_id] = true; });
+    unassigned.forEach(function (u) { if (u.source_class_id) sourceUse[u.source_class_id] = true; });
     return {
       period: period,
       groups: list,
@@ -1365,6 +1366,20 @@ LMS.createViews = function (ctx) {
     };
   }
 
+  /** Classes that met or have lesson records on a date, whatever their status now. */
+  function getDailyReportClasses(date) {
+    if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var periods = ctx.examPeriods();
+    var ids = {};
+    table('Classes').forEach(function (c) {
+      if (LMS.classMeetsOnDate(c, date, periods)) ids[c.class_id] = true;
+    });
+    table('Lessons').forEach(function (l) {
+      if (LMS.toStr(l.lesson_date) === date) ids[l.class_id] = true;
+    });
+    return { date: date, class_ids: Object.keys(ids) };
+  }
+
   function studentBadges(student) {
     return LMS.toStr(student.status) === '재원' ? badgesFor(student) : [];
   }
@@ -1372,6 +1387,7 @@ LMS.createViews = function (ctx) {
   return {
     getMonthlyReportBoard: getMonthlyReportBoard,
     getDailyReportBoard: getDailyReportBoard,
+    getDailyReportClasses: getDailyReportClasses,
     getExamPeriods: getExamPeriods,
     getExamPeriodDetail: getExamPeriodDetail,
     proposeExamGroups: proposeExamGroups,

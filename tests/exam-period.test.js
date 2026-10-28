@@ -33,6 +33,63 @@ describe('exam period proposal', () => {
     assert.equal(hanbit.schedule.length, 2, 'schedule copied from the main source class');
     assert.deepEqual(t.proposal.unassigned.map((u) => u.name), ['윤지우']);
   });
+
+  it('includes enrolled students without a regular class, but not 휴원/퇴원 students', () => {
+    const t = setup();
+    const mk = (name, school, grade, status) => t.api.createStudent({ name, school, grade, status, enrollment_date: '2026-09-01' });
+    const noClass = mk('반없음', '한빛중', '중2', '재원');
+    const solo = mk('혼자', '별빛중', '중1', '재원');
+    mk('쉬는중', '한빛중', '중2', '휴원');
+    mk('나간학생', '한빛중', '중2', '퇴원');
+    const proposal = t.api.proposeExamGroups(t.period.exam_period_id);
+    const names = proposal.groups.flatMap((g) => g.students.map((s) => s.name));
+    assert.ok(!names.includes('쉬는중') && !names.includes('나간학생'), '휴원/퇴원 excluded');
+    const hanbit = proposal.groups.find((g) => g.target_school === '한빛중학교' && g.target_grade === '중2');
+    const entry = hanbit.students.find((s) => s.student_id === noClass.student_id);
+    assert.equal(entry.source_class_id, '');
+    assert.equal(entry.source_class_name, '');
+    assert.equal(hanbit.schedule.length, 2, 'schedule still from the main source class');
+    const soloGroup = proposal.groups.find((g) => g.target_school === '별빛중' && g.target_grade === '중1');
+    assert.deepEqual(soloGroup.students.map((s) => s.source_class_id), ['']);
+    assert.deepEqual(soloGroup.schedule, []);
+    const suggested = (p) => p.regular_classes.filter((c) => c.suggested).map((c) => c.class_id).sort();
+    assert.deepEqual(suggested(proposal), suggested(t.proposal), 'no-class students suggest no suspension');
+
+    const groups = [hanbit, { ...soloGroup, schedule: [{ day: '금', start: '18:00', end: '20:00' }] }];
+    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] });
+    const hanbitCls = res.classes.find((c) => c.class_name.startsWith('한빛중 중2'));
+    const roster = t.api.getTodayClassSession('2026-11-04', hanbitCls.class_id).students.map((s) => s.student_id);
+    assert.ok(roster.includes(noClass.student_id), 'placed into the exam class');
+    const soloCls = res.classes.find((c) => c.class_name.startsWith('별빛중 중1'));
+    assert.deepEqual(t.api.getTodayClassSession('2026-11-06', soloCls.class_id).students.map((s) => s.student_id), [solo.student_id]);
+    const after = t.api.proposeExamGroups(t.period.exam_period_id);
+    assert.ok(!after.groups.some((g) => g.students.some((s) => s.student_id === noClass.student_id)), 'placed students leave the proposal');
+  });
+});
+
+describe('exam class lessons and daily reports', () => {
+  it('records lessons, builds daily reports and shows on today, even after the period closes', () => {
+    const t = setup();
+    const res = applyAll(t);
+    const hanbit = res.classes.find((c) => c.class_name.startsWith('한빛중 중2'));
+    const date = '2026-11-04';
+    const student = t.api.getTodayClassSession(date, hanbit.class_id).students[0];
+    t.api.saveLesson({ lesson_date: date, class_id: hanbit.class_id, student_id: student.student_id, attendance: '출석' });
+    const daily = t.api.generateDailyReports(date, hanbit.class_id);
+    assert.deepEqual(daily.reports.map((r) => r.student_id), [student.student_id]);
+    assert.ok(daily.reports[0].text.length > 0);
+
+    const task = t.api.getTodayTeachingTasks(date).regular_classes.find((c) => c.class_id === hanbit.class_id);
+    assert.equal(task.class_type, '시험대비');
+    assert.equal(task.recorded_count, 1);
+    assert.ok(t.api.getTodayBoard(date).classes.some((c) => c.class_id === hanbit.class_id));
+    assert.ok(t.api.getDailyReportClasses(date).class_ids.includes(hanbit.class_id));
+
+    t.api.closeExamPeriod(t.period.exam_period_id);
+    assert.equal(t.api.getClass(hanbit.class_id).status, '종료');
+    assert.ok(t.api.getDailyReportClasses(date).class_ids.includes(hanbit.class_id), 'closed exam class still selectable');
+    assert.ok(!t.api.getDailyReportClasses('2026-11-05').class_ids.includes(hanbit.class_id), 'no lessons that day');
+  });
 });
 
 describe('applying groups', () => {
