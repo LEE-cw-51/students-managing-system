@@ -6,6 +6,7 @@ import { Suspense, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import { Async } from '@/components/ui/Feedback';
+import { useToast } from '@/components/ui/Toast';
 import ClassForm from '@/components/domain/class/ClassForm';
 import { OverviewTab, ProgressTab, HomeworkTab, TestsTab, StudentsTab, StatsTab } from '@/components/domain/class/ClassTabs';
 import PlansTab from '@/components/domain/class/PlansTab';
@@ -58,8 +59,16 @@ const TABS = [
 function Workspace() {
   const { id } = useParams();
   const tab = useTab(TABS);
+  const router = useRouter();
+  const boot = useBoot();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const overview = useApi(() => api('getClassOverview', id), [id]);
+
+  const remove = async () => {
+    if (!window.confirm('이 반과 배정·강의 계획을 모두 삭제할까요? 되돌릴 수 없습니다.')) return;
+    try { await api('deleteClass', id); toast('삭제했습니다.'); boot.refresh(); router.push('/classes'); } catch (err) { toast(err.message, 'error'); }
+  };
 
   return (
     <Async state={overview}>
@@ -77,6 +86,7 @@ function Workspace() {
                   <ClassSwitcher currentId={cls.class_id} tab={tab} />
                   <Link className="btn" href={`/today?class=${cls.class_id}`}>수업 기록하기</Link>
                   <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
+                  {!data.has_lessons ? <button type="button" className="btn ghost" style={{ color: 'var(--red)' }} onClick={remove}>삭제</button> : null}
                 </>
               )}
             />

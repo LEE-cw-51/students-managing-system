@@ -40,7 +40,9 @@ export default function ClassesPage() {
       <PageHeader
         title="반"
         sub="반을 누르면 진도·숙제·테스트·강의 계획을 한 곳에서 관리합니다."
-        actions={<button type="button" className="btn" onClick={() => setCreating(true)}>반 등록</button>}
+        actions={type === '시험대비'
+          ? <Link href="/exams?tab=periods" className="btn">시험대비 기간에서 편성</Link>
+          : <button type="button" className="btn" onClick={() => setCreating(true)}>반 등록</button>}
       />
       <div className="split" style={{ marginBottom: 14 }}>
         <div className="segmented" role="group" aria-label="반 종류">
@@ -85,7 +87,8 @@ export default function ClassesPage() {
         ) : (
           <div className="card">
             {type === '시험대비' ? (
-              <EmptyState title="시험대비 반이 없습니다">
+              <EmptyState title="시험대비 반이 없습니다"
+                action={<Link href="/exams?tab=periods" className="btn">시험대비 기간에서 편성</Link>}>
                 시험 기간에 학교·학년별 임시 반을 편성하면 여기에 표시됩니다.
               </EmptyState>
             ) : (
@@ -97,7 +100,7 @@ export default function ClassesPage() {
           </div>
         )}
       </Async>
-      {creating ? (
+      {creating && type === '정규' ? (
         <ClassForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/classes/${row.class_id}`)} />
       ) : null}
     </>
