@@ -55,6 +55,7 @@ export default function PeriodPage() {
             />
             {fresh || planning ? (
               <>
+                {fresh ? <h2 style={{ margin: '0 0 12px' }}>시험대비 반 편성</h2> : null}
                 {planning ? <div className="split" style={{ marginBottom: 12 }}><h2 style={{ margin: 0 }}>남은 학생 편성</h2><button type="button" className="link-btn" onClick={() => setPlanning(false)}>닫기</button></div> : null}
                 <Planner periodId={id} firstTime={fresh} onApplied={() => { setPlanning(false); changed(); }} />
               </>

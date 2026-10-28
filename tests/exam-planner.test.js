@@ -2,54 +2,36 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { OUT, excludeGroup, includeGroup, classNameKey, mergeTargets } = require('../lib/exam-planner.js');
+const planner = require('../lib/exam-planner.js');
+const { OUT, classNameKey, mergeTargets, studentEndDate } = planner;
 
-function groupsFixture() {
-  return [
-    {
-      key: 'hanbit-m2',
-      include: true,
-      class_name: '한빛중 중2 시험대비',
-      students: [
-        { student_id: 'S1', name: '김민준', source_class_id: 'C1' },
-        { student_id: 'S2', name: '이서연', source_class_id: 'C1' }
-      ]
-    },
-    {
-      key: 'pureun-m2',
-      include: true,
-      class_name: '푸른중 중2 시험대비',
-      students: [{ student_id: 'S3', name: '박지호', source_class_id: 'C1' }]
-    }
-  ];
-}
-
-describe('excludeGroup', () => {
-  it('moves the group roster into the unassigned pool and clears students', () => {
-    const pool = [{ student_id: 'S0', name: '윤지우', target: OUT }];
-    const next = excludeGroup(groupsFixture(), pool, 0);
-    assert.equal(next.groups[0].include, false);
-    assert.deepEqual(next.groups[0].students, []);
-    assert.equal(next.groups[1].include, true);
-    assert.deepEqual(next.pool.map((p) => p.student_id), ['S0', 'S1', 'S2']);
-    assert.ok(next.pool.every((p) => p.target === OUT));
-  });
-
-  it('skips students already in the pool', () => {
-    const groups = groupsFixture();
-    const pool = [{ student_id: 'S1', name: '김민준', target: OUT }];
-    const next = excludeGroup(groups, pool, 0);
-    assert.deepEqual(next.pool.map((p) => p.student_id), ['S1', 'S2']);
+describe('exports', () => {
+  it('keeps the out marker and drops the group toggles', () => {
+    assert.equal(typeof OUT, 'string');
+    assert.equal(planner.excludeGroup, undefined);
+    assert.equal(planner.includeGroup, undefined);
   });
 });
 
-describe('includeGroup', () => {
-  it('re-checks the group without pulling students back from the pool', () => {
-    const excluded = excludeGroup(groupsFixture(), [], 0);
-    const restored = includeGroup(excluded.groups, 0);
-    assert.equal(restored[0].include, true);
-    assert.deepEqual(restored[0].students, []);
-    assert.deepEqual(excluded.pool.map((p) => p.student_id), ['S1', 'S2']);
+describe('studentEndDate', () => {
+  const cls = { start_date: '2026-11-02', end_date: '2026-11-20' };
+
+  it('uses the school exam date when it falls inside the class range', () => {
+    assert.equal(studentEndDate({ exam_date: '2026-11-11' }, cls), '2026-11-11');
+    assert.equal(studentEndDate({ exam_date: '2026-11-02' }, cls), '2026-11-02', 'start edge');
+    assert.equal(studentEndDate({ exam_date: '2026-11-20' }, cls), '2026-11-20', 'end edge');
+  });
+
+  it('falls back to the class end when the exam is outside the range', () => {
+    assert.equal(studentEndDate({ exam_date: '2026-11-25' }, cls), '2026-11-20');
+    assert.equal(studentEndDate({ exam_date: '2026-11-01' }, cls), '2026-11-20');
+  });
+
+  it('falls back to the class end when there is no exam date', () => {
+    assert.equal(studentEndDate({ exam_date: '' }, cls), '2026-11-20');
+    assert.equal(studentEndDate({}, cls), '2026-11-20');
+    assert.equal(studentEndDate(undefined, cls), '2026-11-20');
+    assert.equal(studentEndDate({ exam_date: '2026-11-11' }, undefined), '2026-11-11', 'no class range to check');
   });
 });
 
