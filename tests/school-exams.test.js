@@ -74,6 +74,16 @@ describe('school exams', () => {
     assert.equal(exams[0].students.length, 2);
   });
 
+  it('exam planning material carries each student\'s school exam date for the period', () => {
+    const { api } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-11-12' });
+    api.saveSchoolExam({ ...base, exam_type: '중간', school: '한빛중', exam_date: '2026-11-05' });
+    api.saveSchoolExam({ ...base, grade: '중3', school: '한빛중학교', exam_date: '2026-12-10' });
+    const period = api.saveExamPeriod({ title: '기말', start_date: '2026-11-02', end_date: '2026-11-30', exam_year: '2026', exam_semester: '2', exam_type: '기말' });
+    const dates = Object.fromEntries(api.proposeExamGroups(period.exam_period_id).students.map((s) => [s.name, s.exam_date]));
+    assert.deepEqual(dates, { 가: '2026-11-12', 나: '2026-11-12', 다: '', 라: '' }, 'spellings match; other exam types and out-of-period dates do not');
+  });
+
   it('deletes', () => {
     const { api } = setup();
     const row = api.saveSchoolExam({ ...base, school: '한빛중' });

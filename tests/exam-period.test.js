@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore } = require('./memory-store.js');
 const { seedRich } = require('../scripts/dev-data.js');
+const { studentEndDate } = require('../lib/exam-planner.js');
 
 const TODAY = '2026-10-26';
 
@@ -17,21 +18,68 @@ function setup() {
   return { api, demo, period, proposal, classA: demo.classes[0].class_id, classB: demo.classes[1].class_id };
 }
 
+/** Most frequent non-empty value first; ties go to the longer one. */
+function ranked(values) {
+  const n = new Map();
+  values.filter(Boolean).forEach((v) => n.set(v, (n.get(v) || 0) + 1));
+  return [...n.keys()].sort((a, b) => n.get(b) - n.get(a) || b.length - a.length);
+}
+
+/** Hand-built school+grade groups from the flat student list, as a teacher might arrange them. */
+function schoolGroups(t, proposal = t.proposal) {
+  const byKey = new Map();
+  proposal.students.forEach((s) => {
+    const key = LMS.schoolGroupKey(s.school, s.grade);
+    if (!key) return;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(s);
+  });
+  return [...byKey.values()].map((students) => {
+    const school = ranked(students.map((s) => String(s.school).trim()))[0];
+    const grade = students[0].grade;
+    const mainSrc = ranked(students.map((s) => s.source_class_id))[0];
+    const examDate = students[0].exam_date;
+    return {
+      target_school: school,
+      target_grade: grade,
+      class_name: `${school.replace(/학교$/, '')} ${grade} 시험대비`,
+      schedule: mainSrc ? LMS.classSchedule(t.api.getClass(mainSrc)) : [],
+      teacher: '',
+      start_date: t.period.start_date,
+      end_date: examDate || t.period.end_date,
+      students
+    };
+  });
+}
+
 function applyAll(t) {
   return t.api.applyExamGroups(t.period.exam_period_id, {
-    groups: t.proposal.groups,
+    groups: schoolGroups(t),
     suspended_class_ids: t.proposal.regular_classes.filter((c) => c.suggested).map((c) => c.class_id)
   });
 }
 
-describe('exam period proposal', () => {
-  it('groups by school+grade across spellings and defaults the end to the school exam date', () => {
+describe('exam period planning material', () => {
+  it('lists unplaced students flat, sorted by grade then name, with their school exam date', () => {
     const t = setup();
-    const hanbit = t.proposal.groups.find((g) => g.target_school === '한빛중학교' && g.target_grade === '중2');
-    assert.equal(hanbit.students.length, 3, '한빛중 + 한빛중학교 together');
-    assert.equal(hanbit.end_date, '2026-11-11');
-    assert.equal(hanbit.schedule.length, 2, 'schedule copied from the main source class');
-    assert.deepEqual(t.proposal.unassigned.map((u) => u.name), ['윤지우']);
+    assert.ok(!('groups' in t.proposal) && !('unassigned' in t.proposal), 'no automatic grouping');
+    assert.deepEqual(t.proposal.students.map((s) => s.name), [
+      '강서윤', '김민준', '박지호', '윤지우', '이서연', '정도윤', '조예준', '최하은',
+      '오수아', '임하린', '장시우', '한주원'
+    ]);
+    const by = Object.fromEntries(t.proposal.students.map((s) => [s.name, s]));
+    assert.deepEqual(Object.keys(by['김민준']).sort(), ['exam_date', 'grade', 'name', 'school', 'source_class_id', 'source_class_name', 'student_id']);
+    assert.equal(by['김민준'].exam_date, '2026-11-11');
+    assert.equal(by['이서연'].exam_date, '2026-11-11', '한빛중 matches 한빛중학교');
+    assert.equal(by['박지호'].exam_date, '2026-11-15');
+    assert.equal(by['조예준'].exam_date, '2026-11-18');
+    assert.equal(by['장시우'].exam_date, '2026-11-07');
+    assert.equal(by['한주원'].exam_date, '2026-11-29');
+    assert.equal(by['윤지우'].exam_date, '', 'no school → no exam date, still listed');
+    assert.equal(by['김민준'].source_class_id, t.classA);
+    assert.equal(by['김민준'].source_class_name, '중2 A반');
+    assert.deepEqual(t.proposal.existing_classes, []);
+    assert.equal(t.proposal.regular_classes.filter((c) => c.suggested).length, 3, 'every source class suggested for suspension');
   });
 
   it('includes enrolled students without a regular class, but not 휴원/퇴원 students', () => {
@@ -42,19 +90,22 @@ describe('exam period proposal', () => {
     mk('쉬는중', '한빛중', '중2', '휴원');
     mk('나간학생', '한빛중', '중2', '퇴원');
     const proposal = t.api.proposeExamGroups(t.period.exam_period_id);
-    const names = proposal.groups.flatMap((g) => g.students.map((s) => s.name));
+    const names = proposal.students.map((s) => s.name);
     assert.ok(!names.includes('쉬는중') && !names.includes('나간학생'), '휴원/퇴원 excluded');
-    const hanbit = proposal.groups.find((g) => g.target_school === '한빛중학교' && g.target_grade === '중2');
-    const entry = hanbit.students.find((s) => s.student_id === noClass.student_id);
+    const entry = proposal.students.find((s) => s.student_id === noClass.student_id);
     assert.equal(entry.source_class_id, '');
     assert.equal(entry.source_class_name, '');
-    assert.equal(hanbit.schedule.length, 2, 'schedule still from the main source class');
-    const soloGroup = proposal.groups.find((g) => g.target_school === '별빛중' && g.target_grade === '중1');
-    assert.deepEqual(soloGroup.students.map((s) => s.source_class_id), ['']);
-    assert.deepEqual(soloGroup.schedule, []);
+    assert.equal(entry.exam_date, '2026-11-11');
+    const soloEntry = proposal.students.find((s) => s.student_id === solo.student_id);
+    assert.equal(soloEntry.source_class_id, '');
+    assert.equal(soloEntry.exam_date, '', 'no exam registered for 별빛중');
     const suggested = (p) => p.regular_classes.filter((c) => c.suggested).map((c) => c.class_id).sort();
     assert.deepEqual(suggested(proposal), suggested(t.proposal), 'no-class students suggest no suspension');
 
+    const built = schoolGroups(t, proposal);
+    const hanbit = built.find((g) => g.class_name === '한빛중 중2 시험대비');
+    assert.equal(hanbit.schedule.length, 2, 'schedule from the main source class');
+    const soloGroup = built.find((g) => g.class_name === '별빛중 중1 시험대비');
     const groups = [hanbit, { ...soloGroup, schedule: [{ day: '금', start: '18:00', end: '20:00' }] }];
     const res = t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] });
     const hanbitCls = res.classes.find((c) => c.class_name.startsWith('한빛중 중2'));
@@ -63,7 +114,27 @@ describe('exam period proposal', () => {
     const soloCls = res.classes.find((c) => c.class_name.startsWith('별빛중 중1'));
     assert.deepEqual(t.api.getTodayClassSession('2026-11-06', soloCls.class_id).students.map((s) => s.student_id), [solo.student_id]);
     const after = t.api.proposeExamGroups(t.period.exam_period_id);
-    assert.ok(!after.groups.some((g) => g.students.some((s) => s.student_id === noClass.student_id)), 'placed students leave the proposal');
+    assert.ok(!after.students.some((s) => s.student_id === noClass.student_id), 'placed students leave the list');
+    assert.deepEqual(after.existing_classes.map((c) => c.class_id).sort(), [hanbitCls.class_id, soloCls.class_id].sort());
+    const ex = after.existing_classes.find((c) => c.class_id === soloCls.class_id);
+    assert.equal(ex.class_name, '별빛중 중1 시험대비');
+    assert.equal(ex.status, '운영');
+    assert.equal(ex.schedule.length, 1);
+    assert.ok(ex.schedule_label.includes('금'));
+  });
+
+  it('a hand-made mixed class returns each student on their own exam date', () => {
+    const t = setup();
+    const pickNames = ['김민준', '박지호', '윤지우'];
+    const cls = { class_name: '중2 혼합반', schedule: [{ day: '금', start: '18:00', end: '20:00' }], start_date: '2026-11-02', end_date: '2026-11-20' };
+    const students = t.proposal.students.filter((s) => pickNames.includes(s.name));
+    const res = t.api.applyExamGroups(t.period.exam_period_id, {
+      groups: [{ ...cls, students: students.map((s) => ({ student_id: s.student_id, source_class_id: s.source_class_id, start_date: cls.start_date, end_date: studentEndDate(s, cls) })) }],
+      suspended_class_ids: []
+    });
+    const detail = t.api.getExamPeriodDetail(t.period.exam_period_id).classes.find((c) => c.class_id === res.classes[0].class_id);
+    const ends = Object.fromEntries(detail.students.map((m) => [m.name, m.end_date]));
+    assert.deepEqual(ends, { 김민준: '2026-11-11', 박지호: '2026-11-15', 윤지우: '2026-11-20' });
   });
 });
 
@@ -136,7 +207,7 @@ describe('applying groups', () => {
 
   it('keeps moved students off a class that was not suspended (E2)', () => {
     const t = setup();
-    t.api.applyExamGroups(t.period.exam_period_id, { groups: t.proposal.groups, suspended_class_ids: [] });
+    t.api.applyExamGroups(t.period.exam_period_id, { groups: schoolGroups(t), suspended_class_ids: [] });
     const roster = t.api.getTodayClassSession('2026-11-02', t.classA).students.map((s) => s.name);
     assert.deepEqual(roster, [], 'all A반 students are in exam classes that day');
     const after = t.api.getTodayClassSession('2026-11-30', t.classA).students.length;
@@ -146,7 +217,7 @@ describe('applying groups', () => {
   it('rejects double placement (E3) and reports unplaced students (E5)', () => {
     const t = setup();
     applyAll(t);
-    const someone = t.proposal.groups[0].students[0];
+    const someone = schoolGroups(t)[0].students[0];
     const other = t.api.getExamPeriodDetail(t.period.exam_period_id).classes[1];
     assert.throws(() => t.api.addTempAssignment({ class_id: other.class_id, student_id: someone.student_id }), /이미 다른 시험대비 반/);
     const b = t.api.getExamPeriodDetail(t.period.exam_period_id).suspended.find((s) => s.class_id === t.classB);
@@ -177,7 +248,7 @@ describe('applying groups', () => {
     const ends = t.api.getExamPeriodDetail(t.period.exam_period_id).classes.flatMap((c) => c.students.map((m) => m.end_date));
     assert.ok(ends.every((d) => d <= '2026-11-20'), 'assignments clipped (E8)');
     const hanbit = res.classes.find((c) => c.class_name.startsWith('한빛중 중2'));
-    t.api.saveLessonsBatch([{ lesson_date: '2026-11-02', class_id: hanbit.class_id, student_id: t.proposal.groups.find((g) => g.class_name === hanbit.class_name).students[0].student_id, attendance: '출석' }]);
+    t.api.saveLessonsBatch([{ lesson_date: '2026-11-02', class_id: hanbit.class_id, student_id: schoolGroups(t).find((g) => g.class_name === hanbit.class_name).students[0].student_id, attendance: '출석' }]);
     assert.throws(() => t.api.deleteExamPeriod(t.period.exam_period_id), /삭제할 수 없습니다/);
     t.api.closeExamPeriod(t.period.exam_period_id);
     assert.equal(t.api.getClass(hanbit.class_id).status, '종료');
@@ -188,7 +259,7 @@ describe('applying groups', () => {
 });
 
 describe('same-name exam groups', () => {
-  const pick = (t, school) => t.proposal.groups.find((g) => g.target_school.startsWith(school) && g.target_grade === '중2');
+  const pick = (t, school) => schoolGroups(t).find((g) => g.target_school.startsWith(school) && g.target_grade === '중2');
   const roster = (t, classId, date) => t.api.getTodayClassSession(date, classId).students.map((s) => s.student_id).sort();
   const detailClass = (t, classId) => t.api.getExamPeriodDetail(t.period.exam_period_id).classes.find((c) => c.class_id === classId);
 

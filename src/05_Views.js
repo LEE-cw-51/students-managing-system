@@ -1169,65 +1169,41 @@ LMS.createViews = function (ctx) {
     return hit ? hit.exam_date : '';
   }
 
-  /** Suggested school+grade groups for a period (students already placed in it are skipped). */
+  /** Planning material for a period: unplaced active students and the exam-prep classes already in it. */
   function proposeExamGroups(periodId) {
     var period = LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId);
     if (!period) throw new Error('시험대비 기간을 찾을 수 없습니다.');
     var classes = table('Classes');
+    var existing = periodClasses(periodId);
     var placed = {};
-    var tempIds = periodClasses(periodId).map(function (c) { return c.class_id; });
-    ctx.assignments.tempPlacements(tempIds).forEach(function (r) { placed[r.student_id] = true; });
-    var groups = {};
-    var unassigned = [];
+    ctx.assignments.tempPlacements(existing.map(function (c) { return c.class_id; })).forEach(function (r) { placed[r.student_id] = true; });
     var sourceUse = {};
-    activeStudents_().forEach(function (s) {
-      if (placed[s.student_id]) return;
+    var examDates = {};
+    var gradeRank = function (g) {
+      var i = LMS.GRADE_OPTIONS.indexOf(LMS.toStr(g));
+      return i < 0 ? LMS.GRADE_OPTIONS.length : i;
+    };
+    var students = activeStudents_().filter(function (s) { return !placed[s.student_id]; }).map(function (s) {
       var sources = ctx.assignments.regularClassIdsDuring(s.student_id, period.start_date, period.end_date);
-      var src = sources.length ? LMS.findById(classes, 'class_id', sources[0]) : null;
-      var entry = { student_id: s.student_id, name: s.name, school: s.school, grade: s.grade, source_class_id: sources[0] || '', source_class_name: src ? src.class_name : '' };
-      var key = LMS.schoolGroupKey(s.school, s.grade);
-      if (!key) {
-        unassigned.push(entry);
-        return;
-      }
-      if (!groups[key]) groups[key] = { key: key, grade: LMS.toStr(s.grade), spellings: {}, students: [] };
-      groups[key].students.push(entry);
-      var sp = LMS.toStr(s.school).trim();
-      groups[key].spellings[sp] = (groups[key].spellings[sp] || 0) + 1;
       sources.forEach(function (id) { sourceUse[id] = true; });
-    });
-    var list = Object.keys(groups).map(function (k) {
-      var g = groups[k];
-      var school = Object.keys(g.spellings).sort(function (a, b) {
-        return g.spellings[b] - g.spellings[a] || b.length - a.length;
-      })[0];
-      var srcCount = {};
-      g.students.forEach(function (st) {
-        if (st.source_class_id) srcCount[st.source_class_id] = (srcCount[st.source_class_id] || 0) + 1;
-      });
-      var mainSrc = LMS.findById(classes, 'class_id', Object.keys(srcCount).sort(function (a, b) { return srcCount[b] - srcCount[a]; })[0]);
-      var examDate = examDateFor(period, k);
+      var src = sources.length ? LMS.findById(classes, 'class_id', sources[0]) : null;
+      var key = LMS.schoolGroupKey(s.school, s.grade);
+      if (key && !(key in examDates)) examDates[key] = examDateFor(period, key);
       return {
-        key: k,
-        target_school: school,
-        target_grade: g.grade,
-        class_name: school.replace(/학교$/, '') + ' ' + g.grade + ' 시험대비',
-        schedule: mainSrc ? LMS.classSchedule(mainSrc) : [],
-        teacher: mainSrc ? LMS.toStr(mainSrc.teacher) : '',
-        start_date: period.start_date,
-        end_date: examDate || period.end_date,
-        exam_date: examDate,
-        students: g.students.sort(function (a, b) { return LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko'); })
+        student_id: s.student_id, name: s.name, school: s.school, grade: s.grade,
+        source_class_id: sources[0] || '', source_class_name: src ? src.class_name : '',
+        exam_date: key ? examDates[key] : ''
       };
     }).sort(function (a, b) {
-      var gd = LMS.GRADE_OPTIONS.indexOf(a.target_grade) - LMS.GRADE_OPTIONS.indexOf(b.target_grade);
-      return gd || a.target_school.localeCompare(b.target_school, 'ko');
+      return gradeRank(a.grade) - gradeRank(b.grade) || LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko');
     });
-    unassigned.forEach(function (u) { if (u.source_class_id) sourceUse[u.source_class_id] = true; });
     return {
       period: period,
-      groups: list,
-      unassigned: unassigned,
+      students: students,
+      existing_classes: existing.map(function (c) {
+        var schedule = LMS.classSchedule(c);
+        return { class_id: c.class_id, class_name: c.class_name, schedule: schedule, schedule_label: LMS.scheduleLabel(schedule), status: c.status };
+      }),
       regular_classes: classes.filter(function (c) {
         return LMS.toStr(c.status) === '운영' && LMS.toStr(c.class_type) !== '시험대비';
       }).map(function (c) {
