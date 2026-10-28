@@ -7,6 +7,7 @@ import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import MiniBars from '@/components/ui/MiniBars';
 import { useToast } from '@/components/ui/Toast';
+import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import SessionEditor from './SessionEditor';
 import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
@@ -183,6 +184,7 @@ export function ProgressTab({ classId, onChanged }) {
                     <td data-label="계획">{r.plan ? <span className="prewrap">{r.plan.title || r.plan.content}</span> : <span className="muted">-</span>}</td>
                     <td data-label="진도">
                       {r.progress ? <strong className="prewrap">{r.progress}</strong> : <span className="muted">미입력</span>}
+                      {r.own_progress_count > 0 ? <span className="hint"> · 개인 진도 {r.own_progress_count}명</span> : null}
                       {r.content ? <div className="muted prewrap">{r.content}</div> : null}
                       {r.class_notice ? <div className="muted">공지: {r.class_notice}</div> : null}
                     </td>
@@ -352,34 +354,38 @@ function AssignModal({ classId, members, onClose, onDone }) {
   const candidates = (boot.search.students || []).filter((s) => s.status === '재원' && !inClass.has(s.id))
     .sort((a, b) => (a.classes.length ? 1 : 0) - (b.classes.length ? 1 : 0) || a.name.localeCompare(b.name, 'ko'));
   const classNames = Object.fromEntries((boot.search.classes || []).map((c) => [c.id, c.name]));
-  const [studentId, setStudentId] = useState('');
-  const [mode, setMode] = useState('add');
-  const [fromClass, setFromClass] = useState('');
+  const [chosenMode, setMode] = useState('add');
+  const [fromChoice, setFromClass] = useState('');
   const [date, setDate] = useState(boot.today);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const picked = candidates.find((s) => s.id === studentId);
-  const pickedFrom = picked ? (picked.class_ids || []) : [];
   const visible = candidates.filter((s) => !filter || s.name.includes(filter) || s.school.includes(filter));
+  const sel = useSelection(visible.map((s) => s.id));
+  const picked = candidates.filter((s) => sel.selected.has(s.id));
+  const anyInClass = picked.some((s) => (s.class_ids || []).length);
+  const mode = anyInClass ? chosenMode : 'add';
+  // One student in two or more classes: ask which class they leave, as before.
+  const single = picked.length === 1 && (picked[0].class_ids || []).length > 1 ? picked[0] : null;
+  const fromClass = single && single.class_ids.includes(fromChoice) ? fromChoice : '';
+  const multiClassCount = picked.filter((s) => (s.class_ids || []).length > 1).length;
 
-  const pick = (id) => {
-    setStudentId(id);
-    const s = candidates.find((x) => x.id === id);
-    setFromClass(s && (s.class_ids || []).length === 1 ? s.class_ids[0] : '');
-    if (!s || !(s.class_ids || []).length) setMode('add');
-  };
+  const toggle = (id) => { sel.toggle(id); setFromClass(''); };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!studentId) return setError('학생을 선택해 주세요.');
-    if (mode === 'move' && !fromClass) return setError('어느 반에서 옮길지 골라 주세요.');
+    if (!picked.length) return setError('학생을 선택해 주세요.');
+    if (mode === 'move' && single && !fromClass) return setError('어느 반에서 옮길지 골라 주세요.');
     setSaving(true);
     setError('');
     try {
-      if (mode === 'move') await api('moveStudent', { student_id: studentId, class_id: classId, start_date: date, from_class_id: fromClass });
-      else await api('assignStudentToClass', { student_id: studentId, class_id: classId, start_date: date });
-      toast('학생을 배정했습니다.');
+      if (mode === 'move' && single) {
+        await api('moveStudent', { student_id: single.id, class_id: classId, start_date: date, from_class_id: fromClass });
+        toast(`${single.name} 학생을 옮겼습니다.`);
+      } else {
+        const res = await api('assignStudentsToClass', { class_id: classId, student_ids: picked.map((s) => s.id), start_date: date, mode });
+        toast(mode === 'move' ? `${res.count}명을 이 반으로 옮겼습니다.` : `${res.count}명을 배정했습니다.`);
+      }
       boot.refresh();
       onDone();
     } catch (err) {
@@ -393,13 +399,17 @@ function AssignModal({ classId, members, onClose, onDone }) {
     <Modal title="학생 배정" onClose={onClose}>
       <form className="stack" onSubmit={submit}>
         <Field label="학생 찾기">{(id) => <input id={id} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="이름 또는 학교" />}</Field>
+        <div className="split">
+          <label className="check-label"><SelectAllCheckbox sel={sel} label="검색 결과 전체 선택" /> 검색 결과 전체 선택</label>
+          <span className="muted" aria-live="polite">{picked.length}명 선택됨</span>
+        </div>
         <div className="table-wrap" style={{ maxHeight: 240, overflow: 'auto' }}>
           <table className="data-table">
             <tbody>
               {visible.length ? visible.map((s) => (
-                <tr key={s.id} className="clickable" onClick={() => pick(s.id)} aria-selected={studentId === s.id}
-                  style={studentId === s.id ? { background: 'var(--navy-soft)' } : undefined}>
-                  <td><input type="radio" name="pick" checked={studentId === s.id} onChange={() => pick(s.id)} aria-label={s.name} style={{ width: 'auto', minHeight: 0 }} /></td>
+                <tr key={s.id} className="clickable" onClick={() => toggle(s.id)} aria-selected={sel.selected.has(s.id)}
+                  style={sel.selected.has(s.id) ? { background: 'var(--navy-soft)' } : undefined}>
+                  <td className="check-col"><input type="checkbox" checked={sel.selected.has(s.id)} onChange={() => toggle(s.id)} onClick={(e) => e.stopPropagation()} aria-label={`${s.name} 선택`} /></td>
                   <td><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span></td>
                   <td>{s.classes.length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</td>
                 </tr>
@@ -407,17 +417,20 @@ function AssignModal({ classId, members, onClose, onDone }) {
             </tbody>
           </table>
         </div>
-        {pickedFrom.length ? (
+        {anyInClass ? (
           <div className="segmented" role="group" aria-label="배정 방식">
             <button type="button" aria-pressed={mode === 'add'} onClick={() => setMode('add')}>추가 수강 (기존 반 유지)</button>
             <button type="button" aria-pressed={mode === 'move'} onClick={() => setMode('move')}>반 이동 (기존 반 종료)</button>
           </div>
         ) : null}
-        {mode === 'move' && pickedFrom.length > 1 ? (
+        {mode === 'move' && !single && multiClassCount ? (
+          <div className="notice-bar">두 반 이상 다니는 학생 {multiClassCount}명은 어느 반에서 옮길지 정할 수 없어 함께 옮길 수 없습니다. 한 명씩 고르거나 추가 수강으로 배정하세요.</div>
+        ) : null}
+        {mode === 'move' && single ? (
           <Field label="어느 반에서 옮기나요?">{(id) => (
             <select id={id} value={fromClass} onChange={(e) => setFromClass(e.target.value)}>
               <option value="">반 선택</option>
-              {pickedFrom.map((cid) => <option key={cid} value={cid}>{classNames[cid] || cid}</option>)}
+              {single.class_ids.map((cid) => <option key={cid} value={cid}>{classNames[cid] || cid}</option>)}
             </select>
           )}</Field>
         ) : null}
@@ -425,29 +438,37 @@ function AssignModal({ classId, members, onClose, onDone }) {
         {error ? <div className="error-box prewrap" role="alert">{error}</div> : null}
         <div className="form-actions">
           <button type="button" className="btn secondary" onClick={onClose}>취소</button>
-          <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '배정'}</button>
+          <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : picked.length > 1 ? `${picked.length}명 배정` : '배정'}</button>
         </div>
       </form>
     </Modal>
   );
 }
 
-/** "선택한 N명 → 반 · 이동일 → 이동" for the checked students of this class. */
-function BulkMoveBar({ classId, ids, onDone, onClear }) {
+/** "선택한 N명 → 반 · 이동일 → 이동" or "→ 마지막 수업일 → 반에서 빼기" for the checked students of this class. */
+function BulkMoveBar({ classId, className, ids, onDone, onClear }) {
   const boot = useBoot();
   const toast = useToast();
+  const [action, setAction] = useState('move');
   const [target, setTarget] = useState('');
   const [date, setDate] = useState(boot.today);
+  // Taking out ends yesterday so the students leave today's roster right away.
+  const [endDate, setEndDate] = useState(addDays(boot.today, -1));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const targets = openRegularClasses(boot, [classId]);
-  const move = async () => {
-    if (!target) return setError('옮겨 갈 반을 골라 주세요.');
+  const run = async () => {
+    if (action === 'move' && !target) return setError('옮겨 갈 반을 골라 주세요.');
     setSaving(true);
     setError('');
     try {
-      const res = await api('moveStudents', { from_class_id: classId, to_class_id: target, student_ids: ids, date });
-      toast(`${res.moved_count}명을 ${targets.find((c) => c.id === target).name}으로 옮겼습니다.`);
+      if (action === 'move') {
+        const res = await api('moveStudents', { from_class_id: classId, to_class_id: target, student_ids: ids, date });
+        toast(`${res.moved_count}명을 ${targets.find((c) => c.id === target).name}으로 옮겼습니다.`);
+      } else {
+        const res = await api('closeStudentsInClass', { class_id: classId, student_ids: ids, end_date: endDate });
+        toast(`${res.count}명을 ${className || '이 반'}에서 뺐습니다.`);
+      }
       boot.refresh();
       onDone();
     } catch (err) {
@@ -460,15 +481,30 @@ function BulkMoveBar({ classId, ids, onDone, onClear }) {
     <div className="card bulk-bar">
       <div className="cluster">
         <strong>선택한 {ids.length}명</strong>
+        <div className="segmented" role="group" aria-label="할 일">
+          <button type="button" aria-pressed={action === 'move'} onClick={() => { setAction('move'); setError(''); }}>이동</button>
+          <button type="button" aria-pressed={action === 'out'} onClick={() => { setAction('out'); setError(''); }}>반에서 빼기</button>
+        </div>
         <span className="muted">→</span>
-        <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="옮겨 갈 반" style={{ width: 'auto' }}>
-          <option value="">옮겨 갈 반</option>
-          {targets.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="이동일" style={{ width: 'auto' }} />
-        <button type="button" className="btn sm" onClick={move} disabled={saving}>{saving ? '옮기는 중…' : '이동'}</button>
+        {action === 'move' ? (
+          <>
+            <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="옮겨 갈 반" style={{ width: 'auto' }}>
+              <option value="">옮겨 갈 반</option>
+              {targets.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="이동일" style={{ width: 'auto' }} />
+            <button type="button" className="btn sm" onClick={run} disabled={saving}>{saving ? '옮기는 중…' : '이동'}</button>
+          </>
+        ) : (
+          <>
+            <label className="cluster"><span className="muted">마지막 수업일</span>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ width: 'auto' }} /></label>
+            <button type="button" className="btn danger sm" onClick={run} disabled={saving}>{saving ? '빼는 중…' : '반에서 빼기'}</button>
+          </>
+        )}
         <button type="button" className="btn ghost sm" onClick={onClear}>선택 해제</button>
       </div>
+      {action === 'out' ? <div className="hint" style={{ marginTop: 6 }}>마지막 수업일까지 명단에 남고 기록은 그대로입니다. 다른 반이 없는 학생은 미배정이 됩니다.</div> : null}
       {error ? <div className="error-box prewrap" role="alert" style={{ marginTop: 8 }}>{error}</div> : null}
     </div>
   );
@@ -480,8 +516,8 @@ function MemberRows({ rows, selectable, selected, onToggle, onChange }) {
     return (
       <tr key={r.rel_id}>
         {selectable ? (
-          <td style={{ width: 32 }}>
-            {regular ? <input type="checkbox" checked={selected.has(r.student_id)} onChange={() => onToggle(r.student_id)} aria-label={`${r.name} 선택`} style={{ width: 'auto', minHeight: 0 }} /> : null}
+          <td className="check-col" data-label="선택">
+            {regular ? <input type="checkbox" checked={selected.has(r.student_id)} onChange={() => onToggle(r.student_id)} aria-label={`${r.name} 선택`} /> : null}
           </td>
         ) : null}
         <td className="primary"><Link href={`/students/${r.student_id}`}>{r.name}</Link>
@@ -505,30 +541,27 @@ export function StudentsTab({ classId, onChanged }) {
   const [assigning, setAssigning] = useState(false);
   const [changing, setChanging] = useState(null);
   const [showPast, setShowPast] = useState(false);
-  const [selected, setSelected] = useState(() => new Set());
-  const done = () => { setAssigning(false); setChanging(null); setSelected(new Set()); state.reload(); onChanged(); };
-  const toggle = (id) => setSelected((s) => {
-    const next = new Set(s);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+  const regularIds = state.data ? state.data.current.filter((r) => r.assignment_type !== '임시').map((r) => r.student_id) : [];
+  const sel = useSelection(regularIds);
+  const done = () => { setAssigning(false); setChanging(null); sel.clear(); state.reload(); onChanged(); };
   const head = (withCheck) => (
-    <thead><tr>{withCheck ? <th aria-label="선택" /> : null}<th>이름</th><th>학교 · 학년</th><th>학부모 연락처</th><th>시작일</th><th>구분</th><th /></tr></thead>
+    <thead><tr>{withCheck ? <th className="check-col"><SelectAllCheckbox sel={sel} label="정규 학생 전체 선택" /></th> : null}<th>이름</th><th>학교 · 학년</th><th>학부모 연락처</th><th>시작일</th><th>구분</th><th /></tr></thead>
   );
   return (
     <Async state={state}>
       {(m) => (
         <div className="stack">
           <div className="split">
-            <span className="muted">현재 {m.current.length}명{m.upcoming.length ? ` · 시작 예정 ${m.upcoming.length}명` : ''}{m.current.length ? ' · 체크해서 여러 명을 한 번에 옮길 수 있습니다' : ''}</span>
+            <span className="muted">현재 {m.current.length}명{m.upcoming.length ? ` · 시작 예정 ${m.upcoming.length}명` : ''}{m.current.length ? ' · 체크해서 여러 명을 한 번에 옮기거나 반에서 뺄 수 있습니다' : ''}</span>
             <button type="button" className="btn" onClick={() => setAssigning(true)}>학생 배정</button>
           </div>
-          {selected.size ? <BulkMoveBar classId={classId} ids={[...selected]} onDone={done} onClear={() => setSelected(new Set())} /> : null}
+          {sel.chosen.length ? <BulkMoveBar classId={classId} className={m.class_name} ids={sel.chosen} onDone={done} onClear={sel.clear} /> : null}
+          {regularIds.length ? <label className="check-label mobile-only"><SelectAllCheckbox sel={sel} label="정규 학생 전체 선택" /> 전체 선택</label> : null}
           {m.current.length ? (
             <div className="table-wrap">
               <table className="data-table stack-mobile">
                 {head(true)}
-                <tbody><MemberRows rows={m.current} selectable selected={selected} onToggle={toggle} onChange={setChanging} /></tbody>
+                <tbody><MemberRows rows={m.current} selectable selected={sel.selected} onToggle={sel.toggle} onChange={setChanging} /></tbody>
               </table>
             </div>
           ) : <div className="card"><EmptyState title="배정된 학생이 없습니다" action={<button type="button" className="btn" onClick={() => setAssigning(true)}>학생 배정</button>} /></div>}
@@ -538,7 +571,7 @@ export function StudentsTab({ classId, onChanged }) {
               <div className="table-wrap">
                 <table className="data-table stack-mobile">
                   {head(false)}
-                  <tbody><MemberRows rows={m.upcoming} selected={selected} onToggle={toggle} onChange={setChanging} /></tbody>
+                  <tbody><MemberRows rows={m.upcoming} onChange={setChanging} /></tbody>
                 </table>
               </div>
             </div>

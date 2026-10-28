@@ -108,9 +108,15 @@ LMS.createSessionSync = function (ctx) {
     return LMS.toStr(row.test_status) === '실시';
   }
 
+  /** A student lesson that keeps its own progress instead of the class progress. */
+  function ownProgress(row) {
+    return LMS.toStr(row.progress_own) === 'Y';
+  }
+
   /**
    * Copy the class values of a date onto every student lesson of that date and class. Difficulty
-   * and max score go to tested rows only; untested rows carry neither.
+   * and max score go to tested rows only; untested rows carry neither. Rows with their own
+   * progress keep it.
    * options.prevMax: the session max before this save; options.homework: text to use when the date has
    * no checklist; options.realign: v4 migration (homework only from a checklist, untested rows and
    * max scores left alone).
@@ -133,7 +139,7 @@ LMS.createSessionSync = function (ctx) {
       if (!sameDay(row, date, classId)) return;
       var next = {};
       if (session) {
-        next.progress = LMS.toStr(session.progress);
+        if (!ownProgress(row)) next.progress = LMS.toStr(session.progress);
         if (tested(row)) {
           next.test_difficulty = LMS.toStr(session.test_difficulty);
           // Max score follows the session (a cleared one too) unless the row carries its own value.
@@ -214,14 +220,16 @@ LMS.createSessionSync = function (ctx) {
     var groups = {};
     saved.forEach(function (row, i) {
       var key = LMS.sessionKey(row.lesson_date, row.class_id);
-      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [], testedRaws: [] };
+      if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [], classRaws: [], testedRaws: [] };
       groups[key].raws.push(rawList[i] || {});
+      if (!ownProgress(row)) groups[key].classRaws.push(rawList[i] || {});
       if (tested(row)) groups[key].testedRaws.push(rawList[i] || {});
     });
     Object.keys(groups).forEach(function (key) {
       var g = groups[key];
       var fields = {};
-      var progress = LMS.modeValue(g.raws.map(function (r) { return LMS.toStr(r.progress); }));
+      // A student's own progress never becomes the class progress.
+      var progress = LMS.modeValue(g.classRaws.map(function (r) { return LMS.toStr(r.progress); }));
       var difficulty = LMS.modeValue(g.testedRaws.map(function (r) { return LMS.toStr(r.test_difficulty); }));
       var max = LMS.modeValue(g.testedRaws.map(function (r) { return LMS.toStr(r.test_max_score); }));
       var session = find(g.date, g.classId);

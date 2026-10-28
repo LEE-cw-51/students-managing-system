@@ -83,7 +83,9 @@ function initialForm(d) {
         personal_homework: (todayPersonal[s.student_id] || []).map((it) => ({
           item_id: it.item_id || '',
           title: it.title || ''
-        }))
+        })),
+        progress_own: l.progress_own === 'Y',
+        own_progress: l.progress_own === 'Y' ? l.progress || '' : ''
       }];
     }))
   };
@@ -134,6 +136,10 @@ function Editor({ data, onSaved, onGoDate }) {
   const hasPriorHomework = anyPriorReady(data);
   const setSession = (key, v) => setForm((f) => ({ ...f, session: { ...f.session, [key]: v } }));
   const setStudent = (id, key, v) => setForm((f) => ({ ...f, students: { ...f.students, [id]: { ...f.students[id], [key]: v } } }));
+  const setOwnProgress = (id, on) => setForm((f) => ({
+    ...f,
+    students: { ...f.students, [id]: { ...f.students[id], progress_own: on, own_progress: on ? f.session.progress : '' } }
+  }));
   const setCheck = (sid, itemId, done) => setForm((f) => ({ ...f, checks: { ...f.checks, [sid]: { ...f.checks[sid], [itemId]: done ? '완료' : '미완료' } } }));
   const setAllChecks = (sid, done) => setForm((f) => ({
     ...f,
@@ -196,7 +202,9 @@ function Editor({ data, onSaved, onGoDate }) {
         students: data.students.map((st) => {
           const v = form.students[st.student_id];
           const tested = s.test_on && v.attendance !== '결석' && String(v.test_score).trim() !== '';
+          const own = v.progress_own && v.own_progress.trim() !== '' && v.own_progress.trim() !== s.progress.trim();
           return {
+            ...(own ? { progress_own: 'Y', progress: v.own_progress.trim() } : { progress_own: '' }),
             student_id: st.student_id,
             attendance: v.attendance,
             test_status: tested ? '실시' : '미실시',
@@ -389,6 +397,7 @@ function Editor({ data, onSaved, onGoDate }) {
                   <div className="sr-name">
                     <Link href={`/students/${st.student_id}`}>{st.name}</Link>
                     {st.off_roster ? <span className="tag muted">명단 밖</span> : null}
+                    {v.progress_own ? <span className="tag">개인 진도</span> : null}
                     <Badges badges={st.badges} quiet />
                   </div>
                   <div className="sr-field">
@@ -416,6 +425,18 @@ function Editor({ data, onSaved, onGoDate }) {
                   <div className="sr-note" style={{ flexBasis: '100%' }}>
                     <input value={v.student_notice} aria-label={`${st.name} 개별 공지`} placeholder="개별 공지 (피드백과 별도)" onChange={(e) => setStudent(st.student_id, 'student_notice', e.target.value)} />
                   </div>
+                  {v.progress_own ? (
+                    <div className="sr-field sr-progress">
+                      <span className="sr-label">진도</span>
+                      <input value={v.own_progress} aria-label={`${st.name} 개인 진도`} placeholder="이 학생의 오늘 진도"
+                        onChange={(e) => setStudent(st.student_id, 'own_progress', e.target.value)} />
+                      <button type="button" className="link-btn" onClick={() => setOwnProgress(st.student_id, false)}>반 진도로</button>
+                    </div>
+                  ) : (
+                    <div className="sr-field">
+                      <button type="button" className="link-btn" onClick={() => setOwnProgress(st.student_id, true)}>진도 다름</button>
+                    </div>
+                  )}
                   <div className="sr-note">
                     <input value={v.special_note} aria-label={`${st.name} 특이사항`} placeholder="특이사항 · 학생 피드백" onChange={(e) => setStudent(st.student_id, 'special_note', e.target.value)} />
                   </div>

@@ -202,6 +202,7 @@ LMS.createViews = function (ctx) {
       recorded_count: lessons.length,
       present_count: lessons.length - absent,
       absent_count: absent,
+      own_progress_count: lessons.filter(function (l) { return LMS.toStr(l.progress_own) === 'Y'; }).length,
       roster_count: roster.length
     };
   }

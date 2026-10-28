@@ -6,6 +6,7 @@ import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
+import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { shortDate } from '@/lib/format';
@@ -44,39 +45,60 @@ function ReturnModal({ member, period, onClose, onDone }) {
 function AddModal({ cls, period, onClose, onDone }) {
   const boot = useBoot();
   const toast = useToast();
-  const [sid, setSid] = useState('');
+  const [filter, setFilter] = useState('');
   const [start, setStart] = useState(period.start_date);
   const [end, setEnd] = useState(period.end_date);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const students = (boot.search.students || []).filter((s) => s.status === '재원' && !cls.students.some((m) => m.student_id === s.id));
+  const visible = students.filter((s) => !filter || s.name.includes(filter) || (s.school || '').includes(filter));
+  const sel = useSelection(visible.map((s) => s.id));
+  const picked = students.filter((s) => sel.selected.has(s.id));
   const submit = async (e) => {
     e.preventDefault();
-    if (!sid) return setError('학생을 선택해 주세요.');
+    if (!picked.length) return setError('학생을 선택해 주세요.');
+    setSaving(true);
+    setError('');
     try {
-      await api('addTempAssignment', { class_id: cls.class_id, student_id: sid, start_date: start, end_date: end });
-      toast('학생을 추가했습니다.');
+      const res = await api('addTempAssignments', { class_id: cls.class_id, student_ids: picked.map((s) => s.id), start_date: start, end_date: end });
+      toast(`${res.count}명을 추가했습니다.`);
       onDone();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
     }
   };
   return (
     <Modal title={`${cls.class_name}에 학생 추가`} onClose={onClose}>
       <form className="stack" onSubmit={submit}>
-        <Field label="학생">{(id) => (
-          <select id={id} value={sid} onChange={(e) => setSid(e.target.value)}>
-            <option value="">선택</option>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.grade} {s.school}</option>)}
-          </select>
-        )}</Field>
+        <Field label="학생 찾기">{(id) => <input id={id} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="이름 또는 학교" />}</Field>
+        <div className="split">
+          <label className="check-label"><SelectAllCheckbox sel={sel} label="검색 결과 전체 선택" /> 검색 결과 전체 선택</label>
+          <span className="muted" aria-live="polite">{picked.length}명 선택됨</span>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: 240, overflow: 'auto' }}>
+          <table className="data-table">
+            <tbody>
+              {visible.length ? visible.map((s) => (
+                <tr key={s.id} className="clickable" onClick={() => sel.toggle(s.id)} aria-selected={sel.selected.has(s.id)}
+                  style={sel.selected.has(s.id) ? { background: 'var(--navy-soft)' } : undefined}>
+                  <td className="check-col"><input type="checkbox" checked={sel.selected.has(s.id)} onChange={() => sel.toggle(s.id)} onClick={(e) => e.stopPropagation()} aria-label={`${s.name} 선택`} /></td>
+                  <td><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span></td>
+                  <td>{(s.classes || []).length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</td>
+                </tr>
+              )) : <tr><td className="muted">{students.length ? '검색 결과가 없습니다.' : '추가할 수 있는 재원생이 없습니다.'}</td></tr>}
+            </tbody>
+          </table>
+        </div>
         <div className="form-grid">
           <Field label="시작일">{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={start} onChange={(e) => setStart(e.target.value)} />}</Field>
-          <Field label="마지막 수업일">{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={end} onChange={(e) => setEnd(e.target.value)} />}</Field>
+          <Field label="마지막 수업일" hint={picked.length > 1 ? '고른 학생 모두에게 같은 기간을 적용합니다.' : undefined}>{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={end} onChange={(e) => setEnd(e.target.value)} />}</Field>
         </div>
-        {error ? <div className="error-box" role="alert">{error}</div> : null}
+        {error ? <div className="error-box prewrap" role="alert">{error}</div> : null}
         <div className="form-actions">
           <button type="button" className="btn secondary" onClick={onClose}>취소</button>
-          <button type="submit" className="btn">추가</button>
+          <button type="submit" className="btn" disabled={saving}>{saving ? '추가 중…' : picked.length > 1 ? `${picked.length}명 추가` : '추가'}</button>
         </div>
       </form>
     </Modal>

@@ -305,6 +305,77 @@ describe('assignments module commands (T7)', () => {
   });
 });
 
+describe('bulk assignment commands (T8)', () => {
+  const current = (api, sid) => names(api.getStudent(sid).current_classes).sort();
+  const withKim = () => {
+    const t = setup();
+    t.k = t.api.createStudent({ name: '김철수', grade: '중2', enrollment_date: '2026-03-01' }).student_id;
+    return t;
+  };
+
+  it('adds the class to every student', () => {
+    const { api, b, s, k } = withKim();
+    const res = api.assignStudentsToClass({ class_id: b.class_id, student_ids: [s.student_id, k], start_date: '2026-09-14' });
+    assert.deepEqual(res, { count: 2 });
+    assert.deepEqual(current(api, s.student_id), ['A반', 'B반']);
+    assert.deepEqual(current(api, k), ['B반']);
+  });
+
+  it('move mode moves a student in one class and assigns one in none', () => {
+    const { api, a, b, s, k } = withKim();
+    const res = api.assignStudentsToClass({ class_id: b.class_id, student_ids: [s.student_id, k], start_date: '2026-09-14', mode: 'move' });
+    assert.equal(res.count, 2);
+    assert.deepEqual(current(api, s.student_id), ['B반']);
+    assert.deepEqual(current(api, k), ['B반']);
+    assert.equal(countOf(api, a.class_id), 0);
+  });
+
+  it('one failing student means nobody is assigned, and the reason names them', () => {
+    const { api, b, s, k } = withKim();
+    api.assignStudentToClass({ student_id: s.student_id, class_id: b.class_id, start_date: '2026-09-14' });
+    assert.throws(
+      () => api.assignStudentsToClass({ class_id: b.class_id, student_ids: [k, s.student_id], start_date: '2026-09-14' }),
+      /^Error: 배정하지 않았습니다\.\n홍길동: 이미 해당 반에 소속되어 있습니다\.$/
+    );
+    assert.deepEqual(current(api, k), []);
+    assert.equal(countOf(api, b.class_id), 1);
+  });
+
+  it('takes several students out of a class, or none when one is not in it', () => {
+    const { api, a, s, k } = withKim();
+    const t = api.createStudent({ name: '이영희', grade: '중2', class_id: a.class_id, enrollment_date: '2026-03-01' }).student_id;
+    assert.throws(
+      () => api.closeStudentsInClass({ class_id: a.class_id, student_ids: [s.student_id, k], end_date: '2026-09-13' }),
+      /빼지 않았습니다\.\n김철수: /
+    );
+    assert.equal(countOf(api, a.class_id), 2);
+    const res = api.closeStudentsInClass({ class_id: a.class_id, student_ids: [s.student_id, t], end_date: '2026-09-13' });
+    assert.deepEqual(res, { count: 2 });
+    assert.equal(api.getClassRoster(a.class_id).length, 0);
+    assert.deepEqual(current(api, s.student_id), []);
+  });
+
+  it('places several students in an exam class; an overlapping one rolls back all', () => {
+    const { store, api, a, s, k } = withKim();
+    const period = api.saveExamPeriod({ title: '중간', start_date: '2026-09-14', end_date: '2026-09-30' });
+    const exam = api.applyExamGroups(period.exam_period_id, {
+      groups: [{ class_name: '대비반', schedule: [{ day: '금', start: '18:00', end: '20:00' }], students: [{ student_id: s.student_id, source_class_id: a.class_id }] }]
+    }).classes[0].class_id;
+    const t = api.createStudent({ name: '이영희', grade: '중2', class_id: a.class_id, enrollment_date: '2026-03-01' }).student_id;
+    const temps = () => store.readTable('StudentClasses').filter((r) => r.status === '임시').map((r) => r.student_id).sort();
+
+    assert.throws(
+      () => api.addTempAssignments({ class_id: exam, student_ids: [k, s.student_id], start_date: '2026-09-21', end_date: '2026-09-25' }),
+      /추가하지 않았습니다\.\n홍길동: /
+    );
+    assert.deepEqual(temps(), [s.student_id]);
+
+    const res = api.addTempAssignments({ class_id: exam, student_ids: [k, t], start_date: '2026-09-21', end_date: '2026-09-25' });
+    assert.deepEqual(res, { count: 2 });
+    assert.deepEqual(temps(), [s.student_id, k, t].sort());
+  });
+});
+
 describe('answers follow changes in the same service instance (T5)', () => {
   it('take out, then assign elsewhere', () => {
     const { api, a, b, s } = setup();
