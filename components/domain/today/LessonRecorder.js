@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import LMS from '../../../src/00_Core.js';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
@@ -164,6 +164,8 @@ function Editor({ data, onSaved, onGoDate }) {
   const setHomework = (list) => setForm((f) => ({ ...f, homework: list }));
   const planHomework = data.daily_plan && data.daily_plan.homework ? data.daily_plan.homework : '';
 
+  // 개별 공지 · 개인 숙제 are rarely used: folded per student unless opened or already filled.
+  const [extraOpen, setExtraOpen] = useState({});
   const presentCount = data.students.filter((s) => form.students[s.student_id].attendance !== '결석').length;
 
   const restore = async () => {
@@ -235,6 +237,20 @@ function Editor({ data, onSaved, onGoDate }) {
       setSaving(false);
     }
   };
+
+  // Ctrl+S (⌘S) saves; ignored while a dialog is open or nothing can be saved.
+  const saveRef = useRef(save);
+  saveRef.current = () => { if (!saving && data.students.length && !document.querySelector('.modal')) save(); };
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="stack recorder">
@@ -395,6 +411,7 @@ function Editor({ data, onSaved, onGoDate }) {
               const v = form.students[st.student_id];
               const absent = v.attendance === '결석';
               const grade = v.assignment_manual || autoGrade(st.student_id);
+              const extra = extraOpen[st.student_id] || !!v.student_notice || !!v.homework_replace_class || !!(v.personal_homework || []).length;
               return (
                 <div key={st.student_id} className={'student-row' + (absent ? ' is-absent' : '')}>
                   <div className="sr-name">
@@ -425,9 +442,9 @@ function Editor({ data, onSaved, onGoDate }) {
                     <span className="sr-label">과제{!v.assignment_manual && grade ? ' (자동)' : ''}</span>
                     <Chips value={grade} options={ASSIGN} label={`${st.name} 과제 이행`} onChange={(x) => setStudent(st.student_id, 'assignment_manual', x)} />
                   </div>
-                  <div className="sr-note" style={{ flexBasis: '100%' }}>
+                  {extra ? <div className="sr-note" style={{ flexBasis: '100%' }}>
                     <input value={v.student_notice} aria-label={`${st.name} 개별 공지`} placeholder="개별 공지 (피드백과 별도)" onChange={(e) => setStudent(st.student_id, 'student_notice', e.target.value)} />
-                  </div>
+                  </div> : null}
                   {v.progress_own ? (
                     <div className="sr-field sr-progress">
                       <span className="sr-label">진도</span>
@@ -443,7 +460,7 @@ function Editor({ data, onSaved, onGoDate }) {
                   <div className="sr-note">
                     <input value={v.special_note} aria-label={`${st.name} 특이사항`} placeholder="특이사항 · 학생 피드백" onChange={(e) => setStudent(st.student_id, 'special_note', e.target.value)} />
                   </div>
-                  <div className="sr-note" style={{ flexBasis: '100%' }}>
+                  {extra ? <div className="sr-note" style={{ flexBasis: '100%' }}>
                     <div className="cluster" style={{ marginBottom: 6 }}>
                       <span className="sr-label">개인 숙제</span>
                       <label className="check-label" style={{ margin: 0 }}>
@@ -484,7 +501,11 @@ function Editor({ data, onSaved, onGoDate }) {
                         ))}
                       </div>
                     ) : <span className="muted">반 공통 숙제만 냅니다.</span>}
-                  </div>
+                  </div> : (
+                    <div className="sr-field">
+                      <button type="button" className="link-btn" onClick={() => setExtraOpen((o) => ({ ...o, [st.student_id]: true }))}>+ 개별 공지 · 개인 숙제</button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -499,7 +520,7 @@ function Editor({ data, onSaved, onGoDate }) {
         </span>
         <span className="cluster">
           {data.recorded_count || savedOnce ? <button type="button" className="btn secondary" onClick={() => setReports(true)} disabled={dirty}>일일 보고서</button> : null}
-          <button type="button" className="btn" onClick={save} disabled={saving || !data.students.length}>{saving ? '저장 중…' : '저장'}</button>
+          <button type="button" className="btn" onClick={save} disabled={saving || !data.students.length} title="저장 (Ctrl+S)">{saving ? '저장 중…' : '저장'}</button>
         </span>
       </div>
       {reports ? <DailyReportsModal classId={cls.class_id} className={cls.class_name} date={data.date} onClose={() => setReports(false)} /> : null}

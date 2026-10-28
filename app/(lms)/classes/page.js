@@ -2,13 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import ClassForm from '@/components/domain/class/ClassForm';
 import { api, useApi } from '@/lib/client-api';
 import { useBoot } from '@/components/shell/AppShell';
 import { relativeDay, shortDate, timeSpan } from '@/lib/format';
+import { useUrlState } from '@/components/ui/useUrlState';
+import { SortTh, useSort } from '@/components/ui/useSort';
 
 function NextCell({ next, today }) {
   if (!next) return <span className="muted">-</span>;
@@ -27,10 +29,57 @@ function ExamTag({ exam }) {
   return null;
 }
 
+const SORT = {
+  name: (c) => c.class_name,
+  students: (c) => c.student_count,
+  next: (c) => (c.next ? `${c.next.date} ${c.next.time || ''}` : null)
+};
+
+function ClassTable({ rows, today }) {
+  const router = useRouter();
+  const sort = useSort(rows, SORT);
+  return (
+    <div className="table-wrap">
+      <table className="data-table stack-mobile">
+        <thead>
+          <tr><SortTh sort={sort} col="name">반</SortTh><th>요일 · 시간</th><SortTh sort={sort} col="students" className="num">학생</SortTh><SortTh sort={sort} col="next">다음 수업</SortTh><th>현재 진도</th><th>교재</th></tr>
+        </thead>
+        <tbody>
+          {sort.rows.map((c) => (
+            <tr key={c.class_id} className="clickable" onClick={() => router.push(`/classes/${c.class_id}`)}>
+              <td className="primary">
+                <Link href={`/classes/${c.class_id}`} onClick={(e) => e.stopPropagation()}>{c.class_name}</Link>
+                <div className="cluster" style={{ marginTop: 4 }}>
+                  {c.grade ? <span className="tag muted">{c.grade}</span> : null}
+                  {c.status !== '운영' ? <span className="tag muted">{c.status}</span> : null}
+                  <ExamTag exam={c.exam} />
+                </div>
+              </td>
+              <td data-label="요일 · 시간">{c.schedule_label || <span className="tag warn">시간표 없음</span>}</td>
+              <td data-label="학생" className="num">{c.student_count}명</td>
+              <td data-label="다음 수업"><NextCell next={c.next} today={today} /></td>
+              <td data-label="현재 진도">{c.current_progress || <span className="muted">-</span>}</td>
+              <td data-label="교재">{c.textbook || <span className="muted">-</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ClassesPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClassesView />
+    </Suspense>
+  );
+}
+
+function ClassesView() {
   const router = useRouter();
   const { today } = useBoot();
-  const [status, setStatus] = useState('운영');
+  const [status, setStatus] = useUrlState('status', '운영');
   const [creating, setCreating] = useState(false);
   const state = useApi(() => api('getClassList', { class_type: '정규', status }), [status]);
 
@@ -50,32 +99,7 @@ export default function ClassesPage() {
       </div>
       <Async state={state}>
         {(rows) => rows.length ? (
-          <div className="table-wrap">
-            <table className="data-table stack-mobile">
-              <thead>
-                <tr><th>반</th><th>요일 · 시간</th><th className="num">학생</th><th>다음 수업</th><th>현재 진도</th><th>교재</th></tr>
-              </thead>
-              <tbody>
-                {rows.map((c) => (
-                  <tr key={c.class_id} className="clickable" onClick={() => router.push(`/classes/${c.class_id}`)}>
-                    <td className="primary">
-                      <Link href={`/classes/${c.class_id}`} onClick={(e) => e.stopPropagation()}>{c.class_name}</Link>
-                      <div className="cluster" style={{ marginTop: 4 }}>
-                        {c.grade ? <span className="tag muted">{c.grade}</span> : null}
-                        {c.status !== '운영' ? <span className="tag muted">{c.status}</span> : null}
-                        <ExamTag exam={c.exam} />
-                      </div>
-                    </td>
-                    <td data-label="요일 · 시간">{c.schedule_label || <span className="tag warn">시간표 없음</span>}</td>
-                    <td data-label="학생" className="num">{c.student_count}명</td>
-                    <td data-label="다음 수업"><NextCell next={c.next} today={today} /></td>
-                    <td data-label="현재 진도">{c.current_progress || <span className="muted">-</span>}</td>
-                    <td data-label="교재">{c.textbook || <span className="muted">-</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ClassTable rows={rows} today={today} />
         ) : (
           <div className="card">
             <EmptyState title={status === '종료' ? '종료된 반이 없습니다' : '등록된 반이 없습니다'}
