@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import CounselingLog from '@/components/domain/student/CounselingLog';
@@ -19,6 +19,8 @@ import { dDayLabel } from '@/lib/term';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useUrlState } from '@/components/ui/useUrlState';
 import { SortTh, useSort } from '@/components/ui/useSort';
+
+const QUERY_KEY = 'students.q';
 
 const TABS = [
   { key: 'list', label: '학생 목록' },
@@ -61,12 +63,16 @@ function StudentList({ onCreate }) {
   const [classId, setClassId] = useUrlState('class', '');
   const [flagged, setFlagged] = useUrlState('flagged', '');
   const onlyFlagged = flagged === '1';
-  const params = useSearchParams();
-  const [urlQuery, setUrlQuery] = useUrlState('q', '');
-  const [query, setQuery] = useState(() => params.get('q') || '');
+  // The search can hold names or parent-phone digits, so it stays out of the URL and browser history.
+  const [query, setQuery] = useState('');
   const startCreate = onCreate;
   const deferredQuery = useDeferredValue(query);
-  useEffect(() => { if (deferredQuery.trim() !== urlQuery) setUrlQuery(deferredQuery.trim()); }, [deferredQuery, urlQuery, setUrlQuery]);
+  useEffect(() => { setQuery(sessionStorage.getItem(QUERY_KEY) || ''); }, []);
+  useEffect(() => {
+    const q = deferredQuery.trim();
+    if (q) sessionStorage.setItem(QUERY_KEY, q);
+    else sessionStorage.removeItem(QUERY_KEY);
+  }, [deferredQuery]);
   const state = useApi(() => api('getStudentList', { status, grade, class_id: classId }), [status, grade, classId]);
   const classes = (boot.search.classes || []).filter((c) => c.status === '운영');
 

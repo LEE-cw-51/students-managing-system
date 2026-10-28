@@ -6,6 +6,7 @@ import { useDirty } from '@/components/ui/useDirty';
 import Modal from '@/components/ui/Modal';
 import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, shortDate } from '@/lib/format';
@@ -103,6 +104,7 @@ const UNDO_MS = 5000;
 const FOLLOW_TAG = { 예정: 'amber', 완료: 'ok', 취소: 'muted' };
 
 export default function CounselingTab({ studentId, onChanged }) {
+  const confirm = useConfirm();
   const toast = useToast();
   const { today } = useBoot();
   const [kind, setKind] = useState('');
@@ -112,7 +114,14 @@ export default function CounselingTab({ studentId, onChanged }) {
 
   // Hidden right away; the delete is sent after the undo window closes.
   const [pending, setPending] = useState([]);
-  const remove = (n) => {
+  const remove = async (n) => {
+    const ok = await confirm({
+      title: '상담일지 삭제',
+      message: `${formatDate(n.counsel_date)} 상담일지를 삭제할까요?${n.follow_up_status === '예정' ? ' 연결된 후속 할 일도 취소됩니다.' : ''}`,
+      confirmLabel: '삭제',
+      danger: true
+    });
+    if (!ok) return;
     let undone = false;
     const unhide = () => setPending((p) => p.filter((id) => id !== n.note_id));
     setPending((p) => [...p, n.note_id]);
