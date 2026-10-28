@@ -2572,7 +2572,8 @@ LMS.createService = function (store) {
       var gEnd = LMS.toStr(g.end_date) || period.end_date;
       var students = g.students.map(function (st) {
         var sid = LMS.toStr(st.student_id);
-        requireStudent(sid);
+        var stu = requireStudent(sid);
+        if (LMS.toStr(stu.status) !== '재원') throw new Error(stu.name + ' 학생은 재원생이 아니라 편성할 수 없습니다.');
         if (seen[sid]) throw new Error('같은 학생이 두 반에 들어 있습니다.');
         seen[sid] = true;
         var start = LMS.toStr(st.start_date) || gStart;
