@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
@@ -17,6 +18,7 @@ export default function PeriodForm({ initial, onClose, onSaved }) {
     title: '', start_date: '', end_date: '', exam_year: term.year, exam_semester: term.semester, exam_type: '기말', memo: '', ...(initial || {})
   }));
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const isEdit = !!form.exam_period_id;
@@ -37,7 +39,7 @@ export default function PeriodForm({ initial, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? '시험대비 기간 수정' : '새 시험대비 기간'} onClose={onClose}>
+    <Modal title={isEdit ? '시험대비 기간 수정' : '새 시험대비 기간'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="연결할 학교 시험" hint="학교별 수학 시험일을 임시 반 종료일로 씁니다." wide>{() => (

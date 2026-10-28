@@ -12,6 +12,7 @@ import { OverviewTab, ProgressTab, HomeworkTab, TestsTab, StudentsTab, StatsTab 
 import PlansTab from '@/components/domain/class/PlansTab';
 import { api, useApi } from '@/lib/client-api';
 import { useBoot } from '@/components/shell/AppShell';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const GROUPS = [
   { key: 'regular', label: '운영 중 · 정규', test: (c) => c.status === '운영' && c.class_type !== '시험대비' },
@@ -57,6 +58,7 @@ const TABS = [
 ];
 
 function Workspace() {
+  const confirm = useConfirm();
   const { id } = useParams();
   const tab = useTab(TABS);
   const router = useRouter();
@@ -66,7 +68,7 @@ function Workspace() {
   const overview = useApi(() => api('getClassOverview', id), [id]);
 
   const remove = async () => {
-    if (!window.confirm('이 반과 배정·강의 계획을 모두 삭제할까요? 되돌릴 수 없습니다.')) return;
+    if (!(await confirm({ message: '이 반과 배정·강의 계획을 모두 삭제할까요? 되돌릴 수 없습니다.', confirmLabel: '삭제', danger: true }))) return;
     try { await api('deleteClass', id); toast('삭제했습니다.'); boot.refresh(); router.push('/classes'); } catch (err) { toast(err.message, 'error'); }
   };
 

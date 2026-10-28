@@ -16,6 +16,7 @@ import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { relativeDay, shortDate } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const TABS = [
   { key: 'list', label: '학생 목록' },
@@ -154,6 +155,7 @@ const STATUSES = ['재원', '휴원', '퇴원'];
 
 /** "선택한 N명 → 반 배정 | 상태 변경" for the checked students. */
 function StudentBulkBar({ ids, onDone, onClear }) {
+  const confirm = useConfirm();
   const boot = useBoot();
   const toast = useToast();
   const [action, setAction] = useState('assign');
@@ -167,7 +169,7 @@ function StudentBulkBar({ ids, onDone, onClear }) {
   const run = async () => {
     setError('');
     if (action === 'assign' && !target) return setError('배정할 반을 골라 주세요.');
-    if (action === 'status' && status === '퇴원' && !window.confirm(`선택한 ${ids.length}명을 퇴원 처리할까요? 다니는 반 배정이 모두 종료됩니다.`)) return;
+    if (action === 'status' && status === '퇴원' && !(await confirm({ message: `선택한 ${ids.length}명을 퇴원 처리할까요? 다니는 반 배정이 모두 종료됩니다.`, confirmLabel: '퇴원 처리', danger: true }))) return;
     setSaving(true);
     try {
       if (action === 'assign') {

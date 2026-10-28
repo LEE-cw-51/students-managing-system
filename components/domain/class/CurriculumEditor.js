@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 /** "단원 / 횟수" per line → rows. Lines without a count get 1 meeting. */
 export function parseCurriculumText(text, textbook) {
@@ -16,6 +17,7 @@ export function parseCurriculumText(text, textbook) {
  * entered: every unit before it is stored as completed, so the first draft starts there.
  */
 export default function CurriculumEditor({ value, onChange, textbook }) {
+  const confirm = useConfirm();
   const rows = value || [];
   const [paste, setPaste] = useState('');
   const [pasting, setPasting] = useState(false);
@@ -27,8 +29,8 @@ export default function CurriculumEditor({ value, onChange, textbook }) {
     [next[i], next[j]] = [next[j], next[i]];
     onChange(next);
   };
-  const remove = (i) => {
-    if (rows[i].unit_id && !window.confirm(`‘${rows[i].title}’ 단원을 뺄까요? 이 단원으로 잡힌 계획은 단원 연결만 끊기고 남아 있습니다.`)) return;
+  const remove = async (i) => {
+    if (rows[i].unit_id && !(await confirm({ message: `‘${rows[i].title}’ 단원을 뺄까요? 이 단원으로 잡힌 계획은 단원 연결만 끊기고 남아 있습니다.`, confirmLabel: '빼기', danger: true }))) return;
     onChange(rows.filter((_, j) => j !== i));
   };
   const total = rows.reduce((n, r) => n + (Number(r.sessions) || 0), 0);

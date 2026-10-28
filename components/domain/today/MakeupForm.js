@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import TimeInput from '@/components/ui/TimeInput';
 import { useToast } from '@/components/ui/Toast';
@@ -14,6 +15,7 @@ export default function MakeupForm({ date, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState({ kind: '반', makeup_date: date, start_time: '', end_time: '', class_id: '', student_ids: [], title: '', memo: '' });
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('');
   const set = (key, v) => setForm((f) => ({ ...f, [key]: v }));
@@ -38,7 +40,7 @@ export default function MakeupForm({ date, onClose, onSaved }) {
   };
 
   return (
-    <Modal title="보강 추가" onClose={onClose}>
+    <Modal title="보강 추가" onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="segmented" role="group" aria-label="보강 종류">
           {[['반', '반 보강'], ['학생', '학생 보강']].map(([k, l]) => <button key={k} type="button" aria-pressed={form.kind === k} onClick={() => set('kind', k)}>{l}</button>)}

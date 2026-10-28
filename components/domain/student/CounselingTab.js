@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
+import { useDirty } from '@/components/ui/useDirty';
 import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, shortDate } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 function addDays(iso, delta) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -23,6 +25,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
   }));
   const [follow, setFollow] = useState(!!(note && note.follow_up_date));
   const [error, setError] = useState('');
+  const dirty = useDirty({ form, follow });
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -50,7 +53,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
   const quick = (days) => { setFollow(true); setForm((f) => ({ ...f, follow_up_date: addDays(f.counsel_date || today, days) })); };
 
   return (
-    <Modal title={note ? '상담일지 수정' : '상담일지 작성'} onClose={onClose}>
+    <Modal title={note ? '상담일지 수정' : '상담일지 작성'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="상담 대상">{() => (
@@ -93,6 +96,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
 const FOLLOW_TAG = { 예정: 'amber', 완료: 'ok', 취소: 'muted' };
 
 export default function CounselingTab({ studentId, onChanged }) {
+  const confirm = useConfirm();
   const toast = useToast();
   const { today } = useBoot();
   const [kind, setKind] = useState('');
@@ -101,7 +105,7 @@ export default function CounselingTab({ studentId, onChanged }) {
   const reload = () => { state.reload(); onChanged(); };
 
   const remove = async (n) => {
-    if (!window.confirm(`${formatDate(n.counsel_date)} 상담일지를 삭제할까요?${n.follow_up_status === '예정' ? '\n연결된 후속 할 일도 취소됩니다.' : ''}`)) return;
+    if (!(await confirm({ message: `${formatDate(n.counsel_date)} 상담일지를 삭제할까요?${n.follow_up_status === '예정' ? '\n연결된 후속 할 일도 취소됩니다.' : ''}`, confirmLabel: '삭제', danger: true }))) return;
     try {
       await api('deleteCounselingNote', n.note_id);
       toast('삭제했습니다.');

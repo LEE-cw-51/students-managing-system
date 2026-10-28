@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import WeekdaySchedule from '@/components/ui/WeekdaySchedule';
 import CurriculumEditor from './CurriculumEditor';
@@ -25,6 +26,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e && e.target ? e.target.value : e }));
   const isEdit = !!form.class_id;
 
@@ -62,7 +64,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? '반 정보 수정' : '반 등록'} onClose={onClose}>
+    <Modal title={isEdit ? '반 정보 수정' : '반 등록'} onClose={onClose} dirty={dirty}>
       <form onSubmit={submit} className="stack">
         <div className="form-grid">
           <Field label="반 이름" wide>{(id) => <input id={id} value={form.class_name} onChange={set('class_name')} placeholder="예: 중2 A반" />}</Field>

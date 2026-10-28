@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { formatDate } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 function addDays(iso, delta) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -24,6 +25,7 @@ export function openRegularClasses(boot, exceptIds = []) {
  * their records and become 미배정 if no class is left), or delete an assignment made by mistake.
  */
 export default function ClassChangeDialog({ studentId, studentName, rel, onClose, onDone }) {
+  const confirm = useConfirm();
   const boot = useBoot();
   const toast = useToast();
   const [mode, setMode] = useState('move');
@@ -42,7 +44,7 @@ export default function ClassChangeDialog({ studentId, studentName, rel, onClose
     e.preventDefault();
     setError('');
     if (mode === 'move' && !target) return setError('옮겨 갈 반을 골라 주세요.');
-    if (mode === 'delete' && !window.confirm(`${studentName} 학생의 ${rel.class_name} 배정을 지울까요? 배정 이력에서도 사라집니다.`)) return;
+    if (mode === 'delete' && !(await confirm({ message: `${studentName} 학생의 ${rel.class_name} 배정을 지울까요? 배정 이력에서도 사라집니다.`, confirmLabel: '배정 지우기', danger: true }))) return;
     setSaving(true);
     try {
       if (mode === 'move') {
