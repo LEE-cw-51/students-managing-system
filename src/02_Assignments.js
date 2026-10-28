@@ -801,7 +801,8 @@ LMS.createAssignments = function (ctx) {
     if (LMS.toStr(cls.class_type) !== '시험대비') throw new Error('시험대비 반이 아닙니다.');
     var period = requirePeriod(cls.exam_period_id);
     var sid = LMS.toStr(data.student_id);
-    requireStudent(sid);
+    var stu = requireStudent(sid);
+    if (LMS.toStr(stu.status) !== '재원') throw new Error(stu.name + ' 학생은 재원생이 아니라 편성할 수 없습니다.');
     var start = LMS.toStr(data.start_date) || period.start_date;
     var end = LMS.toStr(data.end_date) || period.end_date;
     if (start < period.start_date || end > period.end_date || end < start) throw new Error('날짜는 시험대비 기간 안이어야 합니다.');

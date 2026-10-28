@@ -13,9 +13,9 @@ export default function DailyReports({ date, classId, onChange }) {
   const boot = useBoot();
   const toast = useToast();
   const [open, setOpen] = useState(null);
-  const classes = (boot.search.classes || []).filter((c) => c.status === '운영');
-  const meeting = useApi(() => api('getTodayBoard', date), [date]);
-  const meetingIds = useMemo(() => new Set(((meeting.data && meeting.data.classes) || []).map((c) => c.class_id)), [meeting.data]);
+  const meeting = useApi(() => api('getDailyReportClasses', date), [date]);
+  const meetingIds = useMemo(() => new Set((meeting.data && meeting.data.class_ids) || []), [meeting.data]);
+  const classes = (boot.search.classes || []).filter((c) => c.status === '운영' || meetingIds.has(c.id) || c.id === classId);
   const board = useApi(() => (classId ? api('getDailyReportBoard', date, classId) : Promise.resolve(null)), [date, classId]);
   const copy = (text, label) => navigator.clipboard.writeText(text).then(() => toast(`${label} 복사했습니다.`), () => toast('복사하지 못했습니다.', 'error'));
 
