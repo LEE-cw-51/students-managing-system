@@ -187,6 +187,57 @@ describe('applying groups', () => {
   });
 });
 
+describe('same-name exam groups', () => {
+  const pick = (t, school) => t.proposal.groups.find((g) => g.target_school.startsWith(school) && g.target_grade === '중2');
+  const roster = (t, classId, date) => t.api.getTodayClassSession(date, classId).students.map((s) => s.student_id).sort();
+  const detailClass = (t, classId) => t.api.getExamPeriodDetail(t.period.exam_period_id).classes.find((c) => c.class_id === classId);
+
+  it('merges groups whose names differ only in spacing into one class', () => {
+    const t = setup();
+    const hanbit = pick(t, '한빛중');
+    const pureun = pick(t, '푸른중');
+    const groups = [
+      { ...hanbit, class_name: '중2 연합반' },
+      { ...pureun, class_name: '  중2   연합반 ', schedule: [] }
+    ];
+    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] });
+    assert.equal(res.classes.length, 1);
+    const cls = res.classes[0];
+    assert.equal(cls.class_name, '중2 연합반');
+    assert.deepEqual(LMS.normalizeSchedule(cls.schedule), LMS.normalizeSchedule(hanbit.schedule), 'first group schedule');
+    assert.equal(cls.target_school, [hanbit.target_school, pureun.target_school].join(' · '));
+    assert.equal(cls.target_grade, '중2');
+    const all = [...hanbit.students, ...pureun.students].map((s) => s.student_id).sort();
+    assert.deepEqual(roster(t, cls.class_id, '2026-11-02'), all);
+    const ends = Object.fromEntries(detailClass(t, cls.class_id).students.map((m) => [m.student_id, m.end_date]));
+    hanbit.students.forEach((s) => assert.equal(ends[s.student_id], hanbit.end_date));
+    pureun.students.forEach((s) => assert.equal(ends[s.student_id], pureun.end_date));
+    assert.notEqual(hanbit.end_date, pureun.end_date, 'fixture has distinct exam dates');
+  });
+
+  it('adds students to an existing class with the same name instead of creating one', () => {
+    const t = setup();
+    const hanbit = pick(t, '한빛중');
+    const first = t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...hanbit, class_name: '중2 연합반' }], suspended_class_ids: [] });
+    const classId = first.classes[0].class_id;
+    const countBefore = t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length;
+    const saesol = pick(t, '새솔중');
+    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...saesol, class_name: '중2  연합반', schedule: [] }] });
+    assert.deepEqual(res.classes.map((c) => c.class_id), [classId]);
+    assert.equal(t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length, countBefore, 'no new class');
+    const all = [...hanbit.students, ...saesol.students].map((s) => s.student_id).sort();
+    assert.deepEqual(roster(t, classId, '2026-11-02'), all);
+  });
+
+  it('keeps differently named groups as separate classes', () => {
+    const t = setup();
+    const groups = [{ ...pick(t, '한빛중'), class_name: '연합 A' }, { ...pick(t, '푸른중'), class_name: '연합 B' }];
+    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] });
+    assert.deepEqual(res.classes.map((c) => c.class_name), ['연합 A', '연합 B']);
+    assert.notEqual(res.classes[0].class_id, res.classes[1].class_id);
+  });
+});
+
 describe('resume dates follow regular assignment changes', () => {
   // A반 (월/수) and B반 (화/목) suspended 11-02 ~ 11-30. 가 (A반) is placed until 11-10, 나 (B반) until 11-20.
   // `extra` adds 가 to B반 from that date before the placement is made.

@@ -2563,11 +2563,6 @@ LMS.createService = function (store) {
     var prepared = groups.map(function (g) {
       var name = LMS.toStr(g.class_name);
       if (!name) throw new Error('시험대비 반 이름을 입력해 주세요.');
-      var schedule = LMS.normalizeSchedule(g.schedule);
-      if (!schedule.length) throw new Error(name + ': 수업 요일과 시간을 입력해 주세요.');
-      schedule.forEach(function (sl) {
-        if (!sl.start || !sl.end) throw new Error(name + ': ' + sl.day + '요일 시간을 입력해 주세요.');
-      });
       var gStart = LMS.toStr(g.start_date) || period.start_date;
       var gEnd = LMS.toStr(g.end_date) || period.end_date;
       var students = g.students.map(function (st) {
@@ -2583,21 +2578,54 @@ LMS.createService = function (store) {
         assignments.assertNoTempOverlap(sid, start, end);
         return { student_id: sid, source_class_id: LMS.toStr(st.source_class_id) || assignments.regularClassIdsDuring(sid, start, end)[0] || '', start_date: start, end_date: end };
       });
-      return { name: name, schedule: schedule, group: g, students: students };
+      return { name: name, group: g, students: students };
     });
 
-    var created = prepared.map(function (pg) {
+    var merged = [];
+    var byKey = {};
+    prepared.forEach(function (pg) {
+      var key = LMS.examClassNameKey(pg.name);
+      if (!byKey[key]) {
+        byKey[key] = { key: key, name: pg.name, group: pg.group, schools: [], grades: [], students: [] };
+        merged.push(byKey[key]);
+      }
+      var m = byKey[key];
+      m.schools.push(pg.group.target_school);
+      m.grades.push(LMS.toStr(pg.group.target_grade));
+      m.students = m.students.concat(pg.students);
+    });
+
+    var periodIds = periodClassIds_(period.exam_period_id);
+    var existingByKey = {};
+    table('Classes').forEach(function (c) {
+      if (periodIds.indexOf(LMS.toStr(c.class_id)) < 0) return;
+      var key = LMS.examClassNameKey(c.class_name);
+      if (!existingByKey[key]) existingByKey[key] = c;
+    });
+
+    var created = merged.map(function (m) {
+      var existing = existingByKey[m.key];
+      if (existing) {
+        assignments.placeTemp(existing.class_id, m.students);
+        return existing;
+      }
+      var schedule = LMS.normalizeSchedule(m.group.schedule);
+      if (!schedule.length) throw new Error(m.name + ': 수업 요일과 시간을 입력해 주세요.');
+      schedule.forEach(function (sl) {
+        if (!sl.start || !sl.end) throw new Error(m.name + ': ' + sl.day + '요일 시간을 입력해 주세요.');
+      });
+      var grade = m.grades.every(function (gr) { return gr === m.grades[0]; }) ? m.grades[0] : '';
       var input = LMS.validateClassInput({
-        class_name: pg.name,
-        grade: LMS.toStr(pg.group.target_grade),
-        teacher: LMS.toStr(pg.group.teacher),
+        class_name: m.name,
+        grade: grade,
+        teacher: LMS.toStr(m.group.teacher),
         school_year: LMS.toStr(period.exam_year) || period.start_date.slice(0, 4),
         semester: LMS.toStr(period.exam_semester),
-        schedule: pg.schedule,
+        schedule: schedule,
         class_type: '시험대비',
         exam_period_id: period.exam_period_id,
-        target_school: LMS.toStr(pg.group.target_school),
-        target_grade: LMS.toStr(pg.group.target_grade),
+        target_school: LMS.uniqueIds(m.schools).join(' · '),
+        target_grade: grade,
         status: '운영'
       }, false);
       delete input.schedule_from_legacy;
@@ -2606,7 +2634,7 @@ LMS.createService = function (store) {
       var classes = table('Classes');
       classes.push(cls);
       saveTable('Classes', classes);
-      assignments.placeTemp(cls.class_id, pg.students);
+      assignments.placeTemp(cls.class_id, m.students);
       return cls;
     });
 
