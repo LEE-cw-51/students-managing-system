@@ -5,7 +5,7 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import WeekdaySchedule from '@/components/ui/WeekdaySchedule';
 import { useToast } from '@/components/ui/Toast';
 import { api, useApi } from '@/lib/client-api';
-import { OUT, excludeGroup, includeGroup } from '@/lib/exam-planner';
+import { OUT, excludeGroup, includeGroup, mergeTargets } from '@/lib/exam-planner';
 import { shortDate } from '@/lib/format';
 
 /** Proposal → adjust → confirm. Students can move between groups or stay out. */
@@ -55,10 +55,13 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
 
   const active = groups.filter((g) => g.include && g.students.length);
   const studentCount = active.reduce((n, g) => n + g.students.length, 0);
+  const mergeInto = mergeTargets(groups);
+  const classCount = active.length - mergeInto.filter((t) => t >= 0).length;
 
   const apply = async () => {
     setError('');
-    const bad = active.find((g) => !g.schedule.length || g.schedule.some((s) => !s.start || !s.end || s.end <= s.start));
+    const bad = groups.find((g, i) => g.include && g.students.length && mergeInto[i] < 0
+      && (!g.schedule.length || g.schedule.some((s) => !s.start || !s.end || s.end <= s.start)));
     if (bad) return setError(`${bad.class_name}: 수업 요일과 시간을 확인해 주세요.`);
     setSaving(true);
     try {
@@ -70,7 +73,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
         })),
         suspended_class_ids: Array.from(suspended)
       });
-      toast(`시험대비 반 ${active.length}개, 학생 ${studentCount}명을 편성했습니다.`);
+      toast(`시험대비 반 ${classCount}개, 학생 ${studentCount}명을 편성했습니다.`);
       onApplied();
     } catch (err) {
       setError(err.message);
@@ -84,6 +87,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
     <div className="stack">
       <p className="muted" style={{ margin: 0 }}>
         재원생을 학교·학년별로 묶은 제안입니다. 반 이름·시간·날짜를 고치고, 학생을 다른 반으로 옮기거나 빼세요. 그룹 체크를 해제하면 학생은 「편성 안 된 학생」으로 이동합니다. 종료일은 그 학교 수학 시험일이 기본값입니다.
+        여러 학교를 한 반으로 묶으려면 반 이름을 같게 입력하세요. 이 기간에 이미 있는 시험대비 반과 이름이 같으면 그 반에 학생이 추가됩니다.
       </p>
       {groups.length ? groups.map((g, i) => (
         <section key={g.key} className={'card plan-group' + (g.include ? '' : ' is-off')}>
@@ -91,6 +95,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
             <label className="check-label"><input type="checkbox" checked={g.include} onChange={(e) => setInclude(i, e.target.checked)} /> {g.target_school} {g.target_grade} · {g.students.length}명</label>
             {g.exam_date ? <span className="tag">학교 시험 {shortDate(g.exam_date)}</span> : <span className="tag muted">학교 시험일 미등록</span>}
           </div>
+          {mergeInto[i] >= 0 ? <p className="hint" style={{ marginTop: 0 }}>‘{groups[mergeInto[i]].class_name.trim()}’ 반과 이름이 같아 한 반으로 편성됩니다. 요일·시간은 첫 그룹 것을 씁니다.</p> : null}
           {g.include ? (
             <div className="plan-grid">
               <div className="stack-sm">
@@ -153,7 +158,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime }) {
 
       {error ? <div className="error-box" role="alert">{error}</div> : null}
       <div className="save-bar">
-        <span className="save-state">시험대비 반 {active.length}개 · 학생 {studentCount}명 · 휴강 {suspended.size}개 반</span>
+        <span className="save-state">시험대비 반 {classCount}개 · 학생 {studentCount}명 · 휴강 {suspended.size}개 반</span>
         <button type="button" className="btn" onClick={apply} disabled={saving || (!active.length && firstTime)}>{saving ? '편성 중…' : '편성 확정'}</button>
       </div>
     </div>

@@ -457,6 +457,11 @@ LMS.validateExamPeriodInput = function (data) {
   };
 };
 
+/** Exam-prep groups whose names share this key become one class. */
+LMS.examClassNameKey = function (name) {
+  return LMS.toStr(name).replace(/\s+/g, ' ');
+};
+
 /** Array stored as JSON text or as an array; [] when blank or broken. */
 LMS.jsonList = function (value) {
   if (Array.isArray(value)) return value;
