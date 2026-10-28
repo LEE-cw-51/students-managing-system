@@ -2,19 +2,23 @@
 
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 /** Create / edit one school's math exam (date, textbook, scope). */
 export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
+  const confirm = useConfirm();
   const boot = useBoot();
   const toast = useToast();
   const [form, setForm] = useState(() => ({
     school: '', grade: '', exam_date: '', textbook: '', scope: '', memo: '', title: '', ...initial
   }));
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const isEdit = !!form.school_exam_id;
@@ -35,7 +39,7 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
   };
 
   const remove = async () => {
-    if (!window.confirm(`${form.school} ${form.grade} 시험 일정을 삭제할까요?`)) return;
+    if (!(await confirm({ message: `${form.school} ${form.grade} 시험 일정을 삭제할까요?`, confirmLabel: '삭제', danger: true }))) return;
     try {
       await api('deleteSchoolExam', form.school_exam_id);
       toast('삭제했습니다.');
@@ -46,7 +50,7 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? '시험 일정 수정' : '시험 일정 추가'} onClose={onClose}>
+    <Modal title={isEdit ? '시험 일정 수정' : '시험 일정 추가'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="학교" hint="재원생 학교 목록에서 고르거나 직접 입력하세요.">{(id) => (

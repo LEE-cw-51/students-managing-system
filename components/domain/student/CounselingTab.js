@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
+import { useDirty } from '@/components/ui/useDirty';
 import Modal from '@/components/ui/Modal';
-import Field from '@/components/ui/Field';
+import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, shortDate } from '@/lib/format';
@@ -23,13 +25,21 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
   }));
   const [follow, setFollow] = useState(!!(note && note.follow_up_date));
   const [error, setError] = useState('');
+  const [invalid, setInvalid] = useState({});
+  const dirty = useDirty({ form, follow });
   const [saving, setSaving] = useState(false);
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const set = (key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+    setInvalid((v) => ({ ...v, [key]: '' }));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.content.trim()) return setError('상담 내용을 입력해 주세요.');
-    if (follow && !form.follow_up_date) return setError('후속 조치 날짜를 입력해 주세요.');
+    const problems = {};
+    if (!form.content.trim()) problems.content = '상담 내용을 입력해 주세요.';
+    if (follow && !form.follow_up_date) problems.follow_up_date = '후속 조치 날짜를 입력해 주세요.';
+    setInvalid(problems);
+    if (Object.keys(problems).length) return focusInvalid(e.currentTarget);
     setSaving(true);
     setError('');
     try {
@@ -50,7 +60,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
   const quick = (days) => { setFollow(true); setForm((f) => ({ ...f, follow_up_date: addDays(f.counsel_date || today, days) })); };
 
   return (
-    <Modal title={note ? '상담일지 수정' : '상담일지 작성'} onClose={onClose}>
+    <Modal title={note ? '상담일지 수정' : '상담일지 작성'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="상담 대상">{() => (
@@ -60,7 +70,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
           )}</Field>
           <Field label="상담일">{(id) => <input id={id} type="date" value={form.counsel_date} onChange={set('counsel_date')} />}</Field>
           <Field label="제목" wide>{(id) => <input id={id} value={form.title} onChange={set('title')} placeholder="예: 숙제 이행 관련 통화" />}</Field>
-          <Field label="내용" wide>{(id) => <textarea id={id} rows={5} value={form.content} onChange={set('content')} />}</Field>
+          <Field label="내용" wide error={invalid.content}>{(id) => <textarea id={id} rows={5} value={form.content} aria-invalid={!!invalid.content} onChange={set('content')} />}</Field>
         </div>
         <fieldset className="follow-box">
           <legend>
@@ -71,8 +81,8 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
           </legend>
           {follow ? (
             <div className="form-grid">
-              <Field label="날짜" hint={<span className="cluster">{[[7, '1주 뒤'], [14, '2주 뒤'], [30, '한 달 뒤']].map(([d, l]) => <button key={d} type="button" className="link-btn" onClick={() => quick(d)}>{l}</button>)}</span>}>
-                {(id) => <input id={id} type="date" value={form.follow_up_date} onChange={set('follow_up_date')} />}
+              <Field label="날짜" error={invalid.follow_up_date} hint={<span className="cluster">{[[7, '1주 뒤'], [14, '2주 뒤'], [30, '한 달 뒤']].map(([d, l]) => <button key={d} type="button" className="link-btn" onClick={() => quick(d)}>{l}</button>)}</span>}>
+                {(id) => <input id={id} type="date" value={form.follow_up_date} aria-invalid={!!invalid.follow_up_date} onChange={set('follow_up_date')} />}
               </Field>
               <Field label="할 일">{(id) => <input id={id} value={form.follow_up_title} onChange={set('follow_up_title')} placeholder={form.kind === '학부모' ? '학부모 후속 연락' : '학생 후속 상담'} />}</Field>
             </div>
@@ -90,9 +100,11 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
   );
 }
 
+const UNDO_MS = 5000;
 const FOLLOW_TAG = { 예정: 'amber', 완료: 'ok', 취소: 'muted' };
 
 export default function CounselingTab({ studentId, onChanged }) {
+  const confirm = useConfirm();
   const toast = useToast();
   const { today } = useBoot();
   const [kind, setKind] = useState('');
@@ -100,15 +112,33 @@ export default function CounselingTab({ studentId, onChanged }) {
   const state = useApi(() => api('getCounselingNotes', studentId), [studentId]);
   const reload = () => { state.reload(); onChanged(); };
 
+  // Hidden right away; the delete is sent after the undo window closes.
+  const [pending, setPending] = useState([]);
   const remove = async (n) => {
-    if (!window.confirm(`${formatDate(n.counsel_date)} 상담일지를 삭제할까요?${n.follow_up_status === '예정' ? '\n연결된 후속 할 일도 취소됩니다.' : ''}`)) return;
-    try {
-      await api('deleteCounselingNote', n.note_id);
-      toast('삭제했습니다.');
-      reload();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
+    const ok = await confirm({
+      title: '상담일지 삭제',
+      message: `${formatDate(n.counsel_date)} 상담일지를 삭제할까요?${n.follow_up_status === '예정' ? ' 연결된 후속 할 일도 취소됩니다.' : ''}`,
+      confirmLabel: '삭제',
+      danger: true
+    });
+    if (!ok) return;
+    let undone = false;
+    const unhide = () => setPending((p) => p.filter((id) => id !== n.note_id));
+    setPending((p) => [...p, n.note_id]);
+    toast(`${formatDate(n.counsel_date)} 상담일지를 삭제했습니다.${n.follow_up_status === '예정' ? ' 연결된 후속 할 일도 취소됩니다.' : ''}`, 'ok', {
+      duration: UNDO_MS,
+      action: { label: '되돌리기', onClick: () => { undone = true; unhide(); } }
+    });
+    setTimeout(async () => {
+      if (undone) return;
+      try {
+        await api('deleteCounselingNote', n.note_id);
+        reload();
+      } catch (err) {
+        unhide();
+        toast(err.message, 'error');
+      }
+    }, UNDO_MS);
   };
   const complete = async (n) => {
     try {
@@ -130,7 +160,7 @@ export default function CounselingTab({ studentId, onChanged }) {
       </div>
       <Async state={state}>
         {(notes) => {
-          const list = notes.filter((n) => !kind || n.kind === kind);
+          const list = notes.filter((n) => !pending.includes(n.note_id) && (!kind || n.kind === kind));
           return list.length ? (
             <div className="stack-sm">
               {list.map((n) => (

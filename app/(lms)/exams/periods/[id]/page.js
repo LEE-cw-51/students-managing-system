@@ -11,10 +11,12 @@ import Planner from '@/components/domain/exam/Planner';
 import PeriodOperation from '@/components/domain/exam/PeriodOperation';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const STATE_TONE = { 예정: 'muted', '진행 중': 'ok', 끝남: 'muted', 마감: 'muted' };
 
 export default function PeriodPage() {
+  const confirm = useConfirm();
   const { id } = useParams();
   const router = useRouter();
   const boot = useBoot();
@@ -25,11 +27,11 @@ export default function PeriodPage() {
   const changed = () => { state.reload(); boot.refresh(); };
 
   const close = async () => {
-    if (!window.confirm('기간을 마감할까요? 시험대비 반이 ‘종료’로 바뀝니다. 기록은 그대로 남습니다.')) return;
+    if (!(await confirm({ message: '기간을 마감할까요? 시험대비 반이 ‘종료’로 바뀝니다. 기록은 그대로 남습니다.', confirmLabel: '마감' }))) return;
     try { await api('closeExamPeriod', id); toast('마감했습니다.'); changed(); } catch (err) { toast(err.message, 'error'); }
   };
   const remove = async () => {
-    if (!window.confirm('이 기간과 시험대비 반·배정을 모두 삭제할까요?')) return;
+    if (!(await confirm({ message: '이 기간과 시험대비 반·배정을 모두 삭제할까요?', confirmLabel: '삭제', danger: true }))) return;
     try { await api('deleteExamPeriod', id); toast('삭제했습니다.'); boot.refresh(); router.push('/exams?tab=periods'); } catch (err) { toast(err.message, 'error'); }
   };
 

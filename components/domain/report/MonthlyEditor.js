@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/client-api';
 import { downloadMonthlyPdf, generateMonthlyAi } from '@/lib/report-client';
@@ -9,6 +10,7 @@ import { downloadMonthlyPdf, generateMonthlyAi } from '@/lib/report-client';
 /** Edit one student's monthly report: regenerate (basic / AI), save draft, confirm, copy, PDF. */
 export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [text, setText] = useState('');
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState(row.status);
@@ -33,12 +35,12 @@ export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
     }
   };
   const regenerate = () => run('basic', async () => {
-    if (text !== saved && !window.confirm('지금 내용을 기본 보고서로 바꿀까요?')) return;
+    if (text !== saved && !(await confirm({ message: '지금 내용을 기본 보고서로 바꿀까요?', confirmLabel: '바꾸기' }))) return;
     const d = await api('generateMonthlyReport', row.student_id, year, month);
     setText(d.generated_text);
   });
   const regenerateAi = () => run('ai', async () => {
-    if (text !== saved && !window.confirm('지금 내용을 AI 분석 포함 보고서로 바꿀까요?')) return;
+    if (text !== saved && !(await confirm({ message: '지금 내용을 AI 분석 포함 보고서로 바꿀까요?', confirmLabel: '바꾸기' }))) return;
     const d = await generateMonthlyAi(row.student_id, year, month);
     setText(d.text);
   });
@@ -54,7 +56,7 @@ export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
   const dirty = text !== saved;
 
   return (
-    <Modal title={`${row.name} ${month}월 보고서`} onClose={() => { if (!dirty || window.confirm('저장하지 않은 내용이 있습니다. 닫을까요?')) onClose(); }} wide
+    <Modal title={`${row.name} ${month}월 보고서`} onClose={onClose} dirty={dirty} wide
       footer={(
         <>
           <span className={'save-state ' + (dirty ? 'dirty' : '')} style={{ marginRight: 'auto' }}>{dirty ? '● 저장 안 됨' : `상태: ${status}`}</span>

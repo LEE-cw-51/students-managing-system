@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
+import { useDirty } from '@/components/ui/useDirty';
 import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -10,6 +11,7 @@ import CancelDayDialog from './CancelDayDialog';
 import { api, useApi } from '@/lib/client-api';
 import { generatePlanAi } from '@/lib/report-client';
 import { formatDate, shortDate } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const ACTION_LABEL = { add: '추가', change: '변경', remove: '삭제' };
 const ACTION_TONE = { add: 'ok', change: 'amber', remove: 'danger' };
@@ -39,6 +41,7 @@ function planText(p) {
  * to the plans until the teacher confirms); without it, it edits the confirmed plan directly.
  */
 function PlanForm({ classId, target, curriculum, draft, onClose, onSaved }) {
+  const confirm = useConfirm();
   const toast = useToast();
   const plan = target.plan;
   const [form, setForm] = useState(() => ({
@@ -47,6 +50,7 @@ function PlanForm({ classId, target, curriculum, draft, onClose, onSaved }) {
     unit_ids: plan ? plan.unit_ids || [] : []
   }));
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const toggleUnit = (id) => setForm((f) => ({ ...f, unit_ids: f.unit_ids.includes(id) ? f.unit_ids.filter((u) => u !== id) : [...f.unit_ids, id] }));
@@ -79,7 +83,7 @@ function PlanForm({ classId, target, curriculum, draft, onClose, onSaved }) {
   };
 
   const remove = async () => {
-    if (!window.confirm('이 계획을 삭제할까요?')) return;
+    if (!(await confirm({ message: '이 계획을 삭제할까요?', confirmLabel: '삭제', danger: true }))) return;
     try {
       await api('deleteClassPlan', plan.plan_id);
       toast('삭제했습니다.');
@@ -91,7 +95,7 @@ function PlanForm({ classId, target, curriculum, draft, onClose, onSaved }) {
 
   const heading = target.period_type === '월간' ? `${monthLabel(target.period_key)} 목표` : `${formatDate(target.period_key)} 수업 계획`;
   return (
-    <Modal title={draft ? `${heading} (초안 고치기)` : heading} onClose={onClose}>
+    <Modal title={draft ? `${heading} (초안 고치기)` : heading} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="제목" wide>{(id) => <input id={id} value={form.title} onChange={set('title')} placeholder="예: 삼각형의 닮음 조건" />}</Field>
@@ -136,6 +140,7 @@ function SuggestionForm({ draft, item, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState({ kind: item.kind, title: item.title, reason: item.reason || '' });
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const submit = async (e) => {
     e.preventDefault();
     try {
@@ -147,7 +152,7 @@ function SuggestionForm({ draft, item, onClose, onSaved }) {
     }
   };
   return (
-    <Modal title={`${item.student_name} 제안 고치기`} onClose={onClose}>
+    <Modal title={`${item.student_name} 제안 고치기`} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
           <Field label="종류">{(id) => (

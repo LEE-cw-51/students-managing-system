@@ -2,13 +2,16 @@
 
 import { useState } from 'react';
 import Modal from '@/components/ui/Modal';
-import Field from '@/components/ui/Field';
+import { useDirty } from '@/components/ui/useDirty';
+import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 /** Register or edit a student. New students can be placed in a class right away. */
 export default function StudentForm({ initial, onClose, onSaved }) {
+  const confirm = useConfirm();
   const boot = useBoot();
   const toast = useToast();
   const isEdit = !!(initial && initial.student_id);
@@ -17,6 +20,8 @@ export default function StudentForm({ initial, onClose, onSaved }) {
     enrollment_date: boot.today, status: '재원', memo: '', class_id: '', ...(initial || {})
   }));
   const [error, setError] = useState('');
+  const [invalid, setInvalid] = useState({});
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const classes = (boot.search.classes || []).filter((c) => c.status === '운영' && c.class_type !== '시험대비');
@@ -24,7 +29,10 @@ export default function StudentForm({ initial, onClose, onSaved }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim()) return setError('이름을 입력해 주세요.');
+    if (!form.name.trim()) {
+      setInvalid({ name: '이름을 입력해 주세요.' });
+      return focusInvalid(e.currentTarget);
+    }
     setSaving(true);
     setError('');
     try {
@@ -35,7 +43,7 @@ export default function StudentForm({ initial, onClose, onSaved }) {
       };
       if (!isEdit && form.class_id) payload.class_id = form.class_id;
       if (isEdit && initial.enrollment_date && form.enrollment_date !== initial.enrollment_date && initial.first_class_start === initial.enrollment_date) {
-        payload.sync_class_start = window.confirm(`첫 반 배정도 등록일(${initial.enrollment_date})에 시작했습니다. 반 배정 시작일도 ${form.enrollment_date}로 같이 옮길까요?`);
+        payload.sync_class_start = (await confirm({ message: `첫 반 배정도 등록일(${initial.enrollment_date})에 시작했습니다. 반 배정 시작일도 ${form.enrollment_date}로 같이 옮길까요?`, title: '반 배정 시작일', confirmLabel: '같이 옮기기', cancelLabel: '그대로 두기' }));
       }
       const row = await api(isEdit ? 'updateStudent' : 'createStudent', payload);
       const sync = row.class_start_sync;
@@ -51,10 +59,10 @@ export default function StudentForm({ initial, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={isEdit ? '학생 정보 수정' : '학생 등록'} onClose={onClose}>
+    <Modal title={isEdit ? '학생 정보 수정' : '학생 등록'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
-          <Field label="이름">{(id) => <input id={id} value={form.name} onChange={set('name')} />}</Field>
+          <Field label="이름" error={invalid.name}>{(id) => <input id={id} value={form.name} aria-invalid={!!invalid.name} onChange={(e) => { set('name')(e); setInvalid({}); }} />}</Field>
           <Field label="학년">{(id) => (
             <select id={id} value={form.grade} onChange={set('grade')}>
               <option value="">선택</option>

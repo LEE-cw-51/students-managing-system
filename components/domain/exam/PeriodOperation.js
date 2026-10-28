@@ -10,6 +10,7 @@ import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { shortDate } from '@/lib/format';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 function ReturnModal({ member, period, onClose, onDone }) {
   const { today } = useBoot();
@@ -136,6 +137,7 @@ function SuspendModal({ detail, onClose, onDone }) {
 const STATE_TAG = { 예정: 'muted', '수업 중': 'ok', 복귀: '' };
 
 export default function PeriodOperation({ detail, onChanged }) {
+  const confirm = useConfirm();
   const toast = useToast();
   const [returning, setReturning] = useState(null);
   const [adding, setAdding] = useState(null);
@@ -144,7 +146,7 @@ export default function PeriodOperation({ detail, onChanged }) {
   const done = () => { setReturning(null); setAdding(null); setEditSuspend(false); onChanged(); };
 
   const remove = async (m) => {
-    if (!window.confirm(`${m.name} 학생을 이 시험대비 반에서 뺄까요?`)) return;
+    if (!(await confirm({ message: `${m.name} 학생을 이 시험대비 반에서 뺄까요?`, confirmLabel: '빼기', danger: true }))) return;
     try {
       await api('removeTempAssignment', m.rel_id);
       toast('뺐습니다.');

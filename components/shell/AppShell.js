@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { api } from '@/lib/client-api';
 import { ToastProvider } from '@/components/ui/Toast';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import GlobalSearch from './GlobalSearch';
 
 const BootContext = createContext(null);
@@ -67,6 +68,7 @@ export default function AppShell({ boot: initialBoot, children }) {
   return (
     <BootContext.Provider value={{ ...boot, refresh }}>
       <ToastProvider>
+      <ConfirmProvider>
         <a className="skip-link" href="#main">본문으로 건너뛰기</a>
         <div className="app">
           {open ? <div className="app-scrim" onClick={() => setOpen(false)} aria-hidden="true" /> : null}
@@ -106,6 +108,7 @@ export default function AppShell({ boot: initialBoot, children }) {
             <main className="app-content" id="main" tabIndex={-1}>{children}</main>
           </div>
         </div>
+      </ConfirmProvider>
       </ToastProvider>
     </BootContext.Provider>
   );

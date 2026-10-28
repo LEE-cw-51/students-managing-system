@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Modal from '@/components/ui/Modal';
+import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/client-api';
@@ -14,6 +15,7 @@ export default function SessionEditor({ classId, date, onClose, onSaved }) {
   const toast = useToast();
   const [form, setForm] = useState(null);
   const [error, setError] = useState('');
+  const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export default function SessionEditor({ classId, date, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={`${formatDate(date)} 수업 기록`} onClose={onClose}>
+    <Modal title={`${formatDate(date)} 수업 기록`} onClose={onClose} dirty={dirty}>
       {!form ? (error ? <div className="error-box">{error}</div> : <div className="loading"><span className="spinner" />불러오는 중…</div>) : (
         <form onSubmit={submit} className="stack">
           <div className="form-grid">
