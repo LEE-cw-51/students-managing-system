@@ -343,6 +343,71 @@ LMS.createService = function (store) {
     return updateClass(Object.assign({}, cls, { status: '종료' }));
   }
 
+  /** Delete a class made by mistake (no lessons or homework checks), with its assignments and plans. */
+  function deleteClass(classId) {
+    var cls = requireClass(classId);
+    var cid = LMS.toStr(cls.class_id);
+    var mine = function (r) { return LMS.toStr(r.class_id) === cid; };
+    var notMine = function (r) { return !mine(r); };
+    var items = table('HomeworkItems');
+    var itemIds = items.filter(mine).map(function (r) { return LMS.toStr(r.item_id); });
+    var checks = table('HomeworkChecks');
+    var used = table('Lessons').some(mine) ||
+      checks.some(function (c) { return itemIds.indexOf(LMS.toStr(c.item_id)) !== -1; });
+    if (used) throw new Error('수업 기록이 있는 반은 삭제할 수 없습니다. ‘정보 수정 > 상태: 종료’를 쓰세요.');
+    var rels = table('StudentClasses');
+    var source = rels.some(function (r) {
+      return LMS.toStr(r.status) === '임시' && LMS.toStr(r.source_class_id) === cid && !mine(r);
+    });
+    if (source) throw new Error('시험대비 편성의 원래 반으로 쓰이는 반은 삭제할 수 없습니다. 시험대비 기간에서 먼저 배정을 바꿔 주세요.');
+    var changes = rels.filter(function (r) { return mine(r) && LMS.toStr(r.status) !== '임시'; }).map(function (r) {
+      return { student_id: r.student_id, start: LMS.toStr(r.start_date), end: LMS.toStr(r.end_date) };
+    });
+    assignments.dropForClasses([cid]);
+    saveTable('Classes', table('Classes').filter(notMine));
+    saveTable('ClassSessions', table('ClassSessions').filter(notMine));
+    saveTable('ClassSessionNotices', table('ClassSessionNotices').filter(notMine));
+    saveTable('HomeworkItems', items.filter(notMine));
+    saveTable('HomeworkChecks', checks.filter(function (c) { return itemIds.indexOf(LMS.toStr(c.item_id)) === -1; }));
+    saveTable('ClassPlans', table('ClassPlans').filter(notMine));
+    saveTable('PlanDrafts', table('PlanDrafts').filter(notMine));
+    saveTable('MakeupSessions', table('MakeupSessions').filter(notMine));
+    var ts = now();
+    var tasks = table('Tasks');
+    tasks.forEach(function (t) {
+      if (!mine(t)) return;
+      t.class_id = '';
+      t.updated_at = ts;
+    });
+    saveTable('Tasks', tasks);
+    if (LMS.toStr(cls.class_type) === '시험대비') {
+      if (cls.exam_period_id) assignments.recomputeResume(cls.exam_period_id);
+    } else {
+      var periods = table('ExamPeriods');
+      var touched = false;
+      periods.forEach(function (p) {
+        var ids = LMS.suspendedClassIds(p);
+        var resume = p.class_resume_dates;
+        if (typeof resume === 'string') {
+          try { resume = JSON.parse(resume); } catch (e) { resume = null; }
+        }
+        var inResume = !!(resume && Object.prototype.hasOwnProperty.call(resume, cid));
+        if (ids.indexOf(cid) === -1 && !inResume) return;
+        p.suspended_class_ids = ids.filter(function (id) { return id !== cid; });
+        if (inResume) {
+          resume = Object.assign({}, resume);
+          delete resume[cid];
+          p.class_resume_dates = resume;
+        }
+        p.updated_at = ts;
+        touched = true;
+      });
+      if (touched) saveTable('ExamPeriods', periods);
+      assignments.syncExamPrep(changes);
+    }
+    return true;
+  }
+
   function getStudentClasses(studentId) {
     requireStudent(studentId);
     return enrichStudent(requireStudent(studentId)).class_history;
@@ -2960,6 +3025,7 @@ LMS.createService = function (store) {
     createClass: createClass,
     updateClass: updateClass,
     closeClass: closeClass,
+    deleteClass: deleteClass,
     getStudentClasses: getStudentClasses,
     getClassRoster: getClassRoster,
     assignStudentToClass: assignStudentToClass,

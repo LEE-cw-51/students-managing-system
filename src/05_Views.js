@@ -231,10 +231,15 @@ LMS.createViews = function (ctx) {
 
     var week = LMS.weekRange(today);
     var upcoming = LMS.toStr(cls.status) === '운영' ? nextMeeting(cls, today) : null;
+    var itemIds = {};
+    table('HomeworkItems').forEach(function (it) { if (LMS.toStr(it.class_id) === LMS.toStr(classId)) itemIds[LMS.toStr(it.item_id)] = true; });
+    var hasLessons = table('Lessons').some(function (l) { return LMS.toStr(l.class_id) === LMS.toStr(classId); }) ||
+      table('HomeworkChecks').some(function (c) { return itemIds[LMS.toStr(c.item_id)]; });
     return {
       exams: upcomingExamsFor(roster, 60),
       class: cls,
       today: today,
+      has_lessons: hasLessons,
       roster: roster.map(function (s) {
         return { student_id: s.student_id, name: s.name, grade: s.grade, school: s.school, status: s.status };
       }),

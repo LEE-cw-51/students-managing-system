@@ -44,7 +44,7 @@ describe('browser API allowlist', () => {
       assert.ok(used.has(n), n);
     });
     assert.deepEqual([...used].sort(), [...PUBLIC_API].sort());
-    assert.equal(PUBLIC_API.size, 81);
+    assert.equal(PUBLIC_API.size, 82);
   });
 
   it('only lists real service functions', () => {

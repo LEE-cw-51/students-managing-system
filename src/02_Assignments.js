@@ -912,6 +912,7 @@ LMS.createAssignments = function (ctx) {
     clampTempToPeriod: clampTempToPeriod,
     dropForClasses: dropForClasses,
     recomputeResume: recomputeResume,
+    syncExamPrep: syncExamPrep,
     forEachStudent: forEachStudent,
     // Row-level helpers kept for migrateToV4_.
     endForClosing: endForClosing,
