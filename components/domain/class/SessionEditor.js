@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/client-api';
 import { formatDate } from '@/lib/format';
 
-const FIELDS = ['progress', 'content', 'test_title', 'test_max_score', 'test_difficulty', 'class_notice', 'memo'];
+const FIELDS = ['progress', 'content', 'test_title', 'test_max_score', 'test_difficulty', 'test_scope', 'class_notice', 'memo'];
 
 /** Edit the class-level record of one lesson date (진도·수업 내용·테스트·공지). */
 export default function SessionEditor({ classId, date, onClose, onSaved }) {
@@ -55,6 +55,7 @@ export default function SessionEditor({ classId, date, onClose, onSaved }) {
                 <option value="">-</option><option>상</option><option>중</option><option>하</option>
               </select>
             )}</Field>
+            <Field label="시험 범위" wide hint="일일 보고서와 학생 기록에 들어갑니다.">{(id) => <input id={id} value={form.test_scope} onChange={set('test_scope')} placeholder="예: 3단원 함수 ~ 4단원" />}</Field>
             <Field label="반 공지" wide hint="이 날짜 일일 보고서의 공지사항으로 들어갑니다.">{(id) => <textarea id={id} rows={2} value={form.class_notice} onChange={set('class_notice')} />}</Field>
             <Field label="메모 (보고서에 들어가지 않음)" wide>{(id) => <textarea id={id} rows={2} value={form.memo} onChange={set('memo')} />}</Field>
           </div>

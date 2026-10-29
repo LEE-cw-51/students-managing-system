@@ -1,7 +1,7 @@
 /**
  * Class sessions (ClassSessions) are the source of the class values of a lesson date: progress,
- * test difficulty and max score, plus the homework text of the date's checklist. Student lessons
- * carry copies of them; every copy and write-back between the two goes through this module.
+ * test difficulty, max score and scope, plus the homework text of the date's checklist. Student
+ * lessons carry copies of them; every copy and write-back between the two goes through this module.
  * Terms follow GLOSSARY.md (반 기록, 학생 수업 기록). Server-only.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
@@ -48,6 +48,7 @@ LMS.createSessionSync = function (ctx) {
         test_title: '',
         test_max_score: '',
         test_difficulty: '',
+        test_scope: '',
         class_notice: '',
         memo: '',
         created_at: ts,
@@ -115,7 +116,8 @@ LMS.createSessionSync = function (ctx) {
 
   /**
    * Copy the class values of a date onto every student lesson of that date and class. Difficulty
-   * and max score go to tested rows only; untested rows carry neither. Rows with their own
+   * and max score go to tested rows only; untested rows carry neither. Test scope is the day's
+   * test, so every row of that day gets it (and a cleared scope clears them). Rows with their own
    * progress keep it.
    * options.prevMax: the session max before this save; options.homework: text to use when the date has
    * no checklist; options.realign: v4 migration (homework only from a checklist, untested rows and
@@ -151,6 +153,8 @@ LMS.createSessionSync = function (ctx) {
           next.test_difficulty = '';
           next.test_max_score = '';
         }
+        // Missing on old rows: leave student copies alone until a save sets the field.
+        if (session.test_scope !== undefined) next.test_scope = LMS.toStr(session.test_scope);
       }
       if (hasChecklist) {
         next.homework = effectiveHomeworkText(date, classId, row.student_id, row.homework_replace_class);

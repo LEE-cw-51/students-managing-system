@@ -54,10 +54,11 @@ function initialForm(d) {
       // No record yet → start from today's plan so the usual case is just a confirm.
       progress: ses.progress || (!d.recorded_count && d.daily_plan ? d.daily_plan.title || '' : ''),
       content: ses.content || '',
-      test_on: !!(ses.test_title || ses.test_max_score || anyTest),
+      test_on: !!(ses.test_title || ses.test_max_score || ses.test_scope || anyTest),
       test_title: ses.test_title || '',
       test_max_score: ses.test_max_score === null || ses.test_max_score === undefined ? '' : String(ses.test_max_score),
       test_difficulty: ses.test_difficulty || '',
+      test_scope: ses.test_scope || '',
       class_notice: ses.class_notice || d.class_notice || ''
     },
     // Nothing checked yet → start everyone at 완료 so only the exceptions need a click.
@@ -192,7 +193,8 @@ function Editor({ data, onSaved, onGoDate }) {
         class_id: cls.class_id,
         session: {
           progress: s.progress, content: s.content, class_notice: s.class_notice,
-          test_title: s.test_on ? s.test_title : '', test_max_score: s.test_on ? s.test_max_score : '', test_difficulty: s.test_on ? s.test_difficulty : ''
+          test_title: s.test_on ? s.test_title : '', test_max_score: s.test_on ? s.test_max_score : '', test_difficulty: s.test_on ? s.test_difficulty : '',
+          test_scope: s.test_on ? s.test_scope : ''
         },
         prior: hasPriorHomework ? {
           assigned_date: prior.assigned_date,
@@ -305,6 +307,7 @@ function Editor({ data, onSaved, onGoDate }) {
                 <div className="field"><label htmlFor="rec-tt">테스트 이름</label><input id="rec-tt" value={form.session.test_title} onChange={(e) => setSession('test_title', e.target.value)} placeholder="예: 단원 확인 테스트" /></div>
                 <div className="field"><label htmlFor="rec-tm">만점</label><input id="rec-tm" inputMode="numeric" value={form.session.test_max_score} aria-invalid={error === '테스트 만점을 입력해 주세요.'} onChange={(e) => setSession('test_max_score', e.target.value.replace(/[^\d.]/g, ''))} /></div>
                 <div className="field"><label>난이도</label><Chips value={form.session.test_difficulty} options={['상', '중', '하']} label="난이도" onChange={(v) => setSession('test_difficulty', v)} /></div>
+                <div className="field span-all"><label htmlFor="rec-scope">시험 범위</label><input id="rec-scope" value={form.session.test_scope} onChange={(e) => setSession('test_scope', e.target.value)} placeholder="예: 3단원 함수 ~ 4단원" /></div>
               </div>
             ) : null}
           </div>

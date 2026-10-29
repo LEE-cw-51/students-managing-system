@@ -15,6 +15,17 @@ import { api, useApi } from '@/lib/client-api';
 import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
 
+function textbookLine(cls) {
+  const history = Array.isArray(cls.textbook_history) ? cls.textbook_history : [];
+  const past = history.filter((h) => h && h.to);
+  return (
+    <>
+      {cls.textbook || '-'}
+      {past.length ? <div className="muted">{past.map((h) => `${h.textbook} (${h.from || '시작일 없음'} ~ ${h.to})`).join(' · ')}</div> : null}
+    </>
+  );
+}
+
 function ExamNotice({ exam }) {
   if (!exam || !exam.period) return null;
   const p = exam.period;
@@ -53,7 +64,7 @@ export function OverviewTab({ data }) {
                   <div className="when">{shortDate(r.date)}<br />{r.roster_count ? `출석 ${r.present_count}/${r.roster_count}` : ''}</div>
                   <div className="what">
                     <strong>{r.progress || <span className="muted">진도 미입력</span>}</strong>
-                    {r.test_title ? <span className="muted">테스트: {r.test_title}{r.test_max_score ? ` (${r.test_max_score}점 만점)` : ''}</span> : null}
+                    {r.test_title || r.test_scope ? <span className="muted">테스트: {r.test_title || '테스트'}{r.test_max_score ? ` (${r.test_max_score}점 만점)` : ''}{r.test_scope ? ` · 범위 ${r.test_scope}` : ''}</span> : null}
                   </div>
                 </li>
               ))}
@@ -76,7 +87,7 @@ export function OverviewTab({ data }) {
             <dd>{data.current_unit
               ? (data.current_unit.all_done ? '단원 목록을 모두 마쳤습니다' : `${data.current_unit.title}${data.current_unit.sessions > 1 ? ` (${data.current_unit.index}/${data.current_unit.sessions}회차)` : ''}`)
               : (cls.current_progress || <span className="muted">정보 수정에서 단원 목록을 넣으면 표시됩니다</span>)}</dd>
-            <dt>교재</dt><dd>{cls.textbook || '-'}</dd>
+            <dt>교재</dt><dd>{textbookLine(cls)}</dd>
           </dl>
         </section>
       </div>
@@ -188,7 +199,7 @@ export function ProgressTab({ classId, onChanged }) {
                       {r.content ? <div className="muted prewrap">{r.content}</div> : null}
                       {r.class_notice ? <div className="muted">공지: {r.class_notice}</div> : null}
                     </td>
-                    <td data-label="테스트">{r.test_title || r.test_max_score ? `${r.test_title || '테스트'}${r.test_max_score ? ` · ${r.test_max_score}점` : ''}${r.test_difficulty ? ` · ${r.test_difficulty}` : ''}` : <span className="muted">-</span>}</td>
+                    <td data-label="테스트">{r.test_title || r.test_max_score || r.test_scope ? <>{`${r.test_title || '테스트'}${r.test_max_score ? ` · ${r.test_max_score}점` : ''}${r.test_difficulty ? ` · ${r.test_difficulty}` : ''}`}{r.test_scope ? <div className="muted prewrap">범위: {r.test_scope}</div> : null}</> : <span className="muted">-</span>}</td>
                     <td data-label="기록">
                       {r.recorded_count ? <span className={'tag ' + (r.recorded_count >= r.roster_count ? 'ok' : 'amber')}>{r.recorded_count}/{r.roster_count}명</span>
                         : r.date <= today ? <span className="tag warn">미기록</span> : <span className="tag muted">예정</span>}
@@ -274,6 +285,7 @@ function TestDetail({ classId, date, onClose }) {
               <div className="cluster">
                 {d.session.test_title ? <strong>{d.session.test_title}</strong> : null}
                 <span className="tag muted">만점 {max}</span>
+                {d.session.test_scope ? <span className="muted">범위 {d.session.test_scope}</span> : null}
                 {d.session.test_difficulty ? <span className="tag muted">난이도 {d.session.test_difficulty}</span> : null}
               </div>
               <div className="kpis">
@@ -326,7 +338,7 @@ export function TestsTab({ classId }) {
                 {data.rows.map((r) => (
                   <tr key={r.date} className="clickable" onClick={() => setOpen(r.date)}>
                     <td className="primary">{shortDate(r.date)}</td>
-                    <td data-label="테스트"><button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setOpen(r.date); }}>{r.title || '테스트'}</button>{r.difficulty ? <span className="muted"> · {r.difficulty}</span> : null}</td>
+                    <td data-label="테스트"><button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setOpen(r.date); }}>{r.title || '테스트'}</button>{r.difficulty ? <span className="muted"> · {r.difficulty}</span> : null}{r.scope ? <div className="muted prewrap">범위: {r.scope}</div> : null}</td>
                     <td data-label="만점" className="num">{r.max_score || '-'}</td>
                     <td data-label="응시" className="num">{r.taken_count}{r.not_taken_count ? <span className="muted"> / {r.taken_count + r.not_taken_count}</span> : null}</td>
                     <td data-label="평균" className="num"><strong>{score(r.average)}</strong></td>
@@ -653,14 +665,14 @@ export function StatsTab({ classId, today }) {
       </Async>
       <section className="card">
         <div className="card-head">
-          <h2>학생별 월간 통계</h2>
+          <h2>학생별 월간 통계 <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}>100점 환산</span></h2>
           <input type="month" value={ym} onChange={(e) => setYm(e.target.value)} style={{ width: 'auto' }} aria-label="월 선택" />
         </div>
         <Async state={monthly}>
           {(s) => s.students.length ? (
             <div className="table-wrap">
               <table className="data-table stack-mobile">
-                <thead><tr><th>학생</th><th className="num">출석</th><th className="num">결석</th><th className="num">테스트 평균</th><th className="num">과제 A/B/C</th><th className="num">집중도 A/B/C/D</th></tr></thead>
+                <thead><tr><th>학생</th><th className="num">출석</th><th className="num">결석</th><th className="num">테스트 평균 (100점)</th><th className="num">과제 A/B/C</th><th className="num">집중도 A/B/C/D</th></tr></thead>
                 <tbody>
                   {s.students.map((r) => (
                     <tr key={r.student_id}>

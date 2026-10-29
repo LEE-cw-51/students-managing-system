@@ -129,7 +129,7 @@ describe('students classes and lessons', () => {
 });
 
 describe('reports and stats', () => {
-  it('excludes 미실시 tests from monthly average and uses raw scores', () => {
+  it('excludes 미실시 tests and averages student stats on a 100-point scale', () => {
     const api = svc();
     const seeded = seedDemo(api);
     api.saveLesson({
@@ -143,13 +143,13 @@ describe('reports and stats', () => {
     });
     const stats = api.getMonthlyStats(seeded.students[0].student_id, 2026, 9);
     assert.equal(stats.test_count, 2);
-    assert.equal(stats.test_average, 17);
-    assert.equal(stats.test_median, 17);
-    assert.equal(stats.test_high, 18);
-    assert.equal(stats.test_low, 16);
-    assert.equal(stats.test_median_display, '17.0');
+    assert.equal(stats.test_average, 85);
+    assert.equal(stats.test_median, 85);
+    assert.equal(stats.test_high, 90);
+    assert.equal(stats.test_low, 80);
+    assert.equal(stats.test_median_display, '85.0');
     const monthly = api.generateMonthlyReport(seeded.students[0].student_id, 2026, 9);
-    assert.match(monthly.text, /평균은 17\.0점입니다\. \(중간값 17\.0점, 최고 18\.0점, 최저 16\.0점\)/);
+    assert.match(monthly.generated_text, /100점 환산 평균은 85\.0점입니다\. \(중간값 85\.0점, 최고 90\.0점, 최저 80\.0점\)/);
     const none = api.getMonthlyStats(seeded.students[1].student_id, 2026, 9);
     assert.equal(none.test_count, 0);
     assert.equal(none.test_average_display, '-');
