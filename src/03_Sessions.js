@@ -114,11 +114,16 @@ LMS.createSessionSync = function (ctx) {
     return LMS.toStr(row.progress_own) === 'Y';
   }
 
+  /** A tested student lesson on its own paper: max score and difficulty are the student's. */
+  function ownPaper(row) {
+    return tested(row) && LMS.toStr(row.test_own) === 'Y';
+  }
+
   /**
    * Copy the class values of a date onto every student lesson of that date and class. Difficulty
    * and max score go to tested rows only; untested rows carry neither. Test scope is the day's
    * test, so every row of that day gets it (and a cleared scope clears them). Rows with their own
-   * progress keep it.
+   * progress keep it; rows on their own paper keep its max score and difficulty.
    * options.prevMax: the session max before this save; options.homework: text to use when the date has
    * no checklist; options.realign: v4 migration (homework only from a checklist, untested rows and
    * max scores left alone).
@@ -142,14 +147,14 @@ LMS.createSessionSync = function (ctx) {
       var next = {};
       if (session) {
         if (!ownProgress(row)) next.progress = LMS.toStr(session.progress);
-        if (tested(row)) {
+        if (tested(row) && !ownPaper(row)) {
           next.test_difficulty = LMS.toStr(session.test_difficulty);
           // Max score follows the session (a cleared one too) unless the row carries its own value.
           if (!options.realign && (LMS.isBlank(row.test_max_score) ||
               (!LMS.isBlank(prevMax) && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
             next.test_max_score = session.test_max_score;
           }
-        } else if (!options.realign) {
+        } else if (!tested(row) && !options.realign) {
           next.test_difficulty = '';
           next.test_max_score = '';
         }
@@ -227,7 +232,8 @@ LMS.createSessionSync = function (ctx) {
       if (!groups[key]) groups[key] = { date: row.lesson_date, classId: row.class_id, raws: [], classRaws: [], testedRaws: [] };
       groups[key].raws.push(rawList[i] || {});
       if (!ownProgress(row)) groups[key].classRaws.push(rawList[i] || {});
-      if (tested(row)) groups[key].testedRaws.push(rawList[i] || {});
+      // An own-paper row never sets the class max or difficulty.
+      if (tested(row) && !ownPaper(row)) groups[key].testedRaws.push(rawList[i] || {});
     });
     Object.keys(groups).forEach(function (key) {
       var g = groups[key];

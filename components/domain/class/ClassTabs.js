@@ -278,40 +278,48 @@ function TestDetail({ classId, date, onClose }) {
   return (
     <Modal title={`${formatDate(date)} 테스트`} onClose={onClose}>
       <Async state={state}>
-        {(d) => {
-          const max = Number(d.session.test_max_score) || Math.max(1, ...d.rows.map((r) => r.max_score || 0));
-          return (
-            <div className="stack">
-              <div className="cluster">
-                {d.session.test_title ? <strong>{d.session.test_title}</strong> : null}
-                <span className="tag muted">만점 {max}</span>
-                {d.session.test_scope ? <span className="muted">범위 {d.session.test_scope}</span> : null}
-                {d.session.test_difficulty ? <span className="tag muted">난이도 {d.session.test_difficulty}</span> : null}
-              </div>
-              <div className="kpis">
-                <Kpi label="응시" value={`${d.stats.count}명`} />
-                <Kpi label="평균" value={score(d.stats.average)} />
-                <Kpi label="최고" value={score(d.stats.high)} />
-                <Kpi label="최저" value={score(d.stats.low)} />
-              </div>
-              <div className="stack-sm" role="list" aria-label="학생별 점수">
-                {d.rows.map((r) => (
-                  <div className="score-bar" role="listitem" key={r.student_id}>
-                    <Link href={`/students/${r.student_id}`} style={{ width: 72 }}>{r.name}</Link>
-                    {r.score === null ? (
-                      <span className="muted">{r.attendance === '결석' ? '결석' : '미응시'}</span>
-                    ) : (
-                      <>
-                        <span className="track" aria-hidden="true"><span className="fill" style={{ width: `${Math.min(100, (r.score / max) * 100)}%`, display: 'block' }} /></span>
-                        <span className="val">{score(r.score)}</span>
-                      </>
-                    )}
+        {(d) => (
+          <div className="stack">
+            {d.papers.map((p) => {
+              const max = (p.own ? p.max : Number(d.session.test_max_score) || p.max) || Math.max(1, ...p.rows.map((r) => r.max_score || 0));
+              return (
+                <section className="stack" key={p.key} aria-label={p.title || (p.own ? '다른 시험지' : '반 테스트')}>
+                  <div className="cluster">
+                    {p.own ? <span className="tag">다른 시험지</span> : null}
+                    {p.title ? <strong>{p.title}</strong> : null}
+                    <span className="tag muted">만점 {max}</span>
+                    {!p.own && d.session.test_scope ? <span className="muted">범위 {d.session.test_scope}</span> : null}
+                    {p.difficulty ? <span className="tag muted">난이도 {p.difficulty}</span> : null}
                   </div>
-                ))}
-              </div>
-            </div>
-          );
-        }}
+                  <div className="kpis">
+                    <Kpi label="응시" value={`${p.stats.count}명`} />
+                    <Kpi label="평균" value={score(p.stats.average)} />
+                    <Kpi label="최고" value={score(p.stats.high)} />
+                    <Kpi label="최저" value={score(p.stats.low)} />
+                  </div>
+                  <div className="stack-sm" role="list" aria-label="학생별 점수">
+                    {p.rows.map((r) => (
+                      <div className="score-bar" role="listitem" key={r.student_id}>
+                        <span className="score-who">
+                          <Link href={`/students/${r.student_id}`}>{r.name}</Link>
+                          {r.rank != null ? <span className="grade-rank">{r.rank}등 / {p.stats.count}명</span> : null}
+                        </span>
+                        {r.score === null ? (
+                          <span className="muted">{r.attendance === '결석' ? '결석' : '미응시'}</span>
+                        ) : (
+                          <>
+                            <span className="track" aria-hidden="true"><span className="fill" style={{ width: `${Math.min(100, (r.score / max) * 100)}%`, display: 'block' }} /></span>
+                            <span className="val">{score(r.score)}</span>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </Async>
     </Modal>
   );
@@ -338,7 +346,7 @@ export function TestsTab({ classId }) {
                 {data.rows.map((r) => (
                   <tr key={r.date} className="clickable" onClick={() => setOpen(r.date)}>
                     <td className="primary">{shortDate(r.date)}</td>
-                    <td data-label="테스트"><button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setOpen(r.date); }}>{r.title || '테스트'}</button>{r.difficulty ? <span className="muted"> · {r.difficulty}</span> : null}{r.scope ? <div className="muted prewrap">범위: {r.scope}</div> : null}</td>
+                    <td data-label="테스트"><button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setOpen(r.date); }}>{r.title || '테스트'}</button>{r.difficulty ? <span className="muted"> · {r.difficulty}</span> : null}{r.other_paper_count ? <span className="muted"> + 다른 시험지 {r.other_paper_count}명</span> : null}{r.scope ? <div className="muted prewrap">범위: {r.scope}</div> : null}</td>
                     <td data-label="만점" className="num">{r.max_score || '-'}</td>
                     <td data-label="응시" className="num">{r.taken_count}{r.not_taken_count ? <span className="muted"> / {r.taken_count + r.not_taken_count}</span> : null}</td>
                     <td data-label="평균" className="num"><strong>{score(r.average)}</strong></td>

@@ -256,6 +256,37 @@ describe('reports and stats', () => {
     assert.equal(avg.test_median_display, '-');
   });
 
+  it('averages the daily class test only over students on the same paper', () => {
+    const rows = [
+      { test_status: '실시', test_score: 18, test_max_score: 20 },
+      { test_status: '실시', test_score: 12, test_max_score: 20 },
+      { test_status: '실시', test_score: 45, test_max_score: 50, test_own: 'Y', test_title: '심화', test_difficulty: '상' }
+    ];
+    const classPaper = LMS.computeDailyClassTestAverage(rows, rows[0]);
+    assert.equal(classPaper.comparable, true);
+    assert.equal(classPaper.test_count, 2);
+    assert.equal(classPaper.test_average, 15);
+    const ownPaper = LMS.computeDailyClassTestAverage(rows, rows[2]);
+    assert.equal(ownPaper.test_count, 1);
+    assert.equal(ownPaper.test_average, 45);
+    assert.equal(ownPaper.test_max_score, 50);
+    assert.equal(LMS.computeDailyClassTestAverage(rows).comparable, false);
+
+    const api = svc();
+    const c = api.createClass({ class_name: 'P반' });
+    const a = api.createStudent({ name: '가학생', class_id: c.class_id });
+    const b = api.createStudent({ name: '나학생', class_id: c.class_id });
+    const d = api.createStudent({ name: '다학생', class_id: c.class_id });
+    const base = { lesson_date: '2026-03-02', class_id: c.class_id, test_status: '실시', attendance: '출석' };
+    api.saveLesson(Object.assign({ student_id: a.student_id, test_score: 18, test_max_score: 20 }, base));
+    api.saveLesson(Object.assign({ student_id: b.student_id, test_score: 12, test_max_score: 20 }, base));
+    api.saveLesson(Object.assign({ student_id: d.student_id, test_score: 45, test_max_score: 50, test_own: 'Y', test_title: '심화' }, base));
+    const own = api.getStudentLessons(d.student_id, '2026-03-01', '2026-03-31')[0];
+    assert.equal(own.class_test_average.test_average, 45);
+    const cls = api.getStudentLessons(a.student_id, '2026-03-01', '2026-03-31')[0];
+    assert.equal(cls.class_test_average.test_average, 15);
+  });
+
   it('computes median for odd and even score lists', () => {
     assert.equal(LMS.median([10, 30, 20]), 20);
     assert.equal(LMS.median([10, 40, 20, 30]), 25);
@@ -594,6 +625,27 @@ describe('student extras counseling makeup and calendar', () => {
     api.cancelMakeupSession(classMakeup.makeup_id);
     const after = api.getCalendar('2026-09-14', '2026-09-17');
     assert.equal(after.events.filter((e) => e.event_type === '반보강').length, 0);
+  });
+
+  it('keeps a makeup bound to its student on update', () => {
+    const api = svc();
+    const seeded = seedDemo(api);
+    const row = api.saveMakeupSession({
+      kind: '학생',
+      student_id: seeded.students[0].student_id,
+      makeup_date: '2026-09-17',
+      start_time: '19:00',
+      end_time: '20:00'
+    });
+    assert.throws(() => api.updateMakeupSession({
+      ...row,
+      student_ids: [seeded.students[1].student_id],
+      student_id: seeded.students[1].student_id
+    }), /다른 학생의 보강으로 바꿀 수 없습니다/);
+    const done = api.updateMakeupSession({ ...row, student_ids: [row.student_id], status: '완료' });
+    assert.equal(done.status, '완료');
+    assert.equal(done.student_id, seeded.students[0].student_id);
+    api.cancelMakeupSession(row.makeup_id);
   });
 
   it('computes monday-based week range', () => {

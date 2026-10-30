@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import LMS from '../../../src/00_Core.js';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import Badges from '@/components/domain/Badges';
 import DailyReportsModal from './DailyReportsModal';
 import CancelDayDialog from '@/components/domain/class/CancelDayDialog';
@@ -24,6 +25,12 @@ function Chips({ value, options, onChange, label, disabled }) {
       ))}
     </div>
   );
+}
+
+/** Number for a plain decimal like "8" or "8.5"; NaN for blanks and malformed input such as "8.5.5". */
+function toNumber(v) {
+  const t = String(v).trim();
+  return /^\d+(\.\d+)?$/.test(t) ? Number(t) : NaN;
 }
 
 function priorItemsForStudent(prior, studentId) {
@@ -86,7 +93,12 @@ function initialForm(d) {
           title: it.title || ''
         })),
         progress_own: l.progress_own === 'Y',
-        own_progress: l.progress_own === 'Y' ? l.progress || '' : ''
+        own_progress: l.progress_own === 'Y' ? l.progress || '' : '',
+        test_own: l.test_own === 'Y',
+        class_test_score: '',
+        own_test_title: l.test_own === 'Y' ? l.test_title || '' : '',
+        own_test_max: l.test_own === 'Y' && l.test_max_score !== null && l.test_max_score !== undefined ? String(l.test_max_score) : '',
+        own_test_difficulty: l.test_own === 'Y' ? l.test_difficulty || '' : ''
       }];
     }))
   };
@@ -98,7 +110,8 @@ function useUnsavedGuard(dirty) {
     const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
     const onClick = (e) => {
       const a = e.target.closest && e.target.closest('a[href]');
-      if (!a || a.target === '_blank' || a.getAttribute('href').startsWith('#') || a.getAttribute('href').startsWith('tel:')) return;
+      const href = a ? a.getAttribute('href') || '' : '';
+      if (!a || a.target === '_blank' || !href || href.startsWith('#') || href.startsWith('tel:')) return;
       if (!window.confirm('저장하지 않은 수업 기록이 있습니다. 이 화면을 떠날까요?')) {
         e.preventDefault();
         e.stopPropagation();
@@ -113,8 +126,9 @@ function useUnsavedGuard(dirty) {
   }, [dirty]);
 }
 
-function Editor({ data, onSaved, onGoDate }) {
+function Editor({ data, onSaved, onGoDate, onGuard }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [form, setForm] = useState(() => initialForm(data));
   const [baseline, setBaseline] = useState(() => JSON.stringify(initialForm(data)));
   const [saving, setSaving] = useState(false);
@@ -124,6 +138,21 @@ function Editor({ data, onSaved, onGoDate }) {
   const [cancelling, setCancelling] = useState(false);
   const dirty = JSON.stringify(form) !== baseline;
   useUnsavedGuard(dirty);
+
+  // Anything that reloads `data` rebuilds the form below, so ask before throwing edits away.
+  const discardOk = async () => !dirty || confirm({
+    title: '저장하지 않은 수업 기록',
+    message: '저장하지 않은 수업 기록이 있습니다. 계속하면 입력한 내용이 사라집니다.',
+    confirmLabel: '버리고 계속',
+    danger: true
+  });
+  const discardRef = useRef(discardOk);
+  discardRef.current = discardOk;
+  useEffect(() => {
+    if (!onGuard) return undefined;
+    onGuard(() => discardRef.current());
+    return () => onGuard(null);
+  }, [onGuard]);
 
   useEffect(() => {
     const next = initialForm(data);
@@ -141,6 +170,17 @@ function Editor({ data, onSaved, onGoDate }) {
     ...f,
     students: { ...f.students, [id]: { ...f.students[id], progress_own: on, own_progress: on ? f.session.progress : '' } }
   }));
+  const setOwnTest = (id, on) => setForm((f) => {
+    const v = f.students[id];
+    // A score typed against the other paper's max would be wrong on this one; the class score is kept aside.
+    const score = on ? { test_score: '', class_test_score: v.test_score } : { test_score: v.class_test_score, class_test_score: '' };
+    return {
+      ...f,
+      students: { ...f.students, [id]: { ...v, ...score, test_own: on, own_test_title: '', own_test_max: '', own_test_difficulty: '' } }
+    };
+  });
+  const clearErrorFor = (name) => setError((e) => (e.startsWith(`${name} 학생 `) ? '' : e));
+  const clearClassMaxError = () => setError((e) => (e.startsWith('테스트 만점') ? '' : e));
   const setCheck = (sid, itemId, done) => setForm((f) => ({ ...f, checks: { ...f.checks, [sid]: { ...f.checks[sid], [itemId]: done ? '완료' : '미완료' } } }));
   const setAllChecks = (sid, done) => setForm((f) => ({
     ...f,
@@ -170,6 +210,7 @@ function Editor({ data, onSaved, onGoDate }) {
   const presentCount = data.students.filter((s) => form.students[s.student_id].attendance !== '결석').length;
 
   const restore = async () => {
+    if (!(await discardOk())) return;
     try {
       await api('restoreClassDate', { class_id: cls.class_id, date: data.date });
       toast('휴강을 취소했습니다.');
@@ -178,6 +219,7 @@ function Editor({ data, onSaved, onGoDate }) {
       toast(err.message, 'error');
     }
   };
+  const goDate = async (d) => { if (await discardOk()) onGoDate(d); };
 
   const save = async () => {
     setError('');
@@ -185,6 +227,54 @@ function Editor({ data, onSaved, onGoDate }) {
     if (s.test_on && !String(s.test_max_score).trim()) {
       setError('테스트 만점을 입력해 주세요.');
       return document.getElementById('rec-tm')?.focus();
+    }
+    if (s.test_on && !(toNumber(s.test_max_score) > 0)) {
+      setError('테스트 만점은 0보다 커야 합니다.');
+      return document.getElementById('rec-tm')?.focus();
+    }
+    const ownTested = (v) => s.test_on && v.test_own && v.attendance !== '결석' && String(v.test_score).trim() !== '';
+    // Saving an open other paper without a score would drop an earlier 실시 record on it.
+    const noScore = data.students.find((st) => {
+      const v = form.students[st.student_id];
+      return s.test_on && v.test_own && v.attendance !== '결석' && String(v.test_score).trim() === '';
+    });
+    if (noScore) {
+      setError(`${noScore.name} 학생 다른 시험지 점수를 입력해 주세요.`);
+      return document.getElementById(`rec-ts-${noScore.student_id}`)?.focus();
+    }
+    const noMax = data.students.find((st) => {
+      const v = form.students[st.student_id];
+      return ownTested(v) && !String(v.own_test_max).trim();
+    });
+    if (noMax) {
+      setError(`${noMax.name} 학생 시험지 만점을 입력해 주세요.`);
+      return document.getElementById(`rec-otm-${noMax.student_id}`)?.focus();
+    }
+    const badMax = data.students.find((st) => {
+      const v = form.students[st.student_id];
+      return ownTested(v) && !(toNumber(v.own_test_max) > 0);
+    });
+    if (badMax) {
+      setError(`${badMax.name} 학생 시험지 만점은 0보다 커야 합니다.`);
+      return document.getElementById(`rec-otm-${badMax.student_id}`)?.focus();
+    }
+    const badScore = data.students.find((st) => {
+      const v = form.students[st.student_id];
+      return s.test_on && v.attendance !== '결석' && String(v.test_score).trim() !== '' && Number.isNaN(toNumber(v.test_score));
+    });
+    if (badScore) {
+      setError(`${badScore.name} 학생 점수를 숫자로 입력해 주세요.`);
+      return document.getElementById(`rec-ts-${badScore.student_id}`)?.focus();
+    }
+    const overMax = data.students.find((st) => {
+      const v = form.students[st.student_id];
+      if (!s.test_on || v.attendance === '결석' || String(v.test_score).trim() === '') return false;
+      const max = Number(v.test_own ? v.own_test_max : s.test_max_score);
+      return max > 0 && Number(v.test_score) > max;
+    });
+    if (overMax) {
+      setError(`${overMax.name} 학생 점수가 만점보다 클 수 없습니다.`);
+      return document.getElementById(`rec-ts-${overMax.student_id}`)?.focus();
     }
     setSaving(true);
     try {
@@ -212,6 +302,12 @@ function Editor({ data, onSaved, onGoDate }) {
           const own = v.progress_own && v.own_progress.trim() !== '' && v.own_progress.trim() !== s.progress.trim();
           return {
             ...(own ? { progress_own: 'Y', progress: v.own_progress.trim() } : { progress_own: '' }),
+            ...(ownTested(v) ? {
+              test_own: 'Y',
+              test_title: v.own_test_title.trim(),
+              test_max_score: v.own_test_max,
+              test_difficulty: v.own_test_difficulty
+            } : { test_own: '' }),
             student_id: st.student_id,
             attendance: v.attendance,
             test_status: tested ? '실시' : '미실시',
@@ -264,16 +360,16 @@ function Editor({ data, onSaved, onGoDate }) {
               <button type="button" className="link-btn" onClick={restore}>휴강 취소</button>{' · '}
             </>
           ) : data.suspension ? `${data.suspension.title} 기간이라 이 반은 휴강입니다. ` : '이 날은 이 반의 정규 수업일이 아닙니다. 보강이면 그대로 기록하세요. '}
-          {data.prev_meeting ? <button type="button" className="link-btn" onClick={() => onGoDate(data.prev_meeting)}>최근 수업일 {shortDate(data.prev_meeting)}</button> : null}
+          {data.prev_meeting ? <button type="button" className="link-btn" onClick={() => goDate(data.prev_meeting)}>최근 수업일 {shortDate(data.prev_meeting)}</button> : null}
           {data.prev_meeting && data.next_meeting ? ' · ' : null}
-          {data.next_meeting ? <button type="button" className="link-btn" onClick={() => onGoDate(data.next_meeting)}>다음 수업일 {shortDate(data.next_meeting)}</button> : null}
+          {data.next_meeting ? <button type="button" className="link-btn" onClick={() => goDate(data.next_meeting)}>다음 수업일 {shortDate(data.next_meeting)}</button> : null}
         </div>
       ) : null}
 
       <section className="card">
         <div className="card-head">
           <h2>① 반 공통</h2>
-          {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={() => setCancelling(true)}>이 날 휴강</button> : null}
+          {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={async () => { if (await discardOk()) setCancelling(true); }}>이 날 휴강</button> : null}
         </div>
         {cancelling ? (
           <CancelDayDialog classId={cls.class_id} className={cls.class_name} date={data.date}
@@ -305,7 +401,7 @@ function Editor({ data, onSaved, onGoDate }) {
             {form.session.test_on ? (
               <div className="form-grid" style={{ marginTop: 8 }}>
                 <div className="field"><label htmlFor="rec-tt">테스트 이름</label><input id="rec-tt" value={form.session.test_title} onChange={(e) => setSession('test_title', e.target.value)} placeholder="예: 단원 확인 테스트" /></div>
-                <div className="field"><label htmlFor="rec-tm">만점</label><input id="rec-tm" inputMode="numeric" value={form.session.test_max_score} aria-invalid={error === '테스트 만점을 입력해 주세요.'} onChange={(e) => setSession('test_max_score', e.target.value.replace(/[^\d.]/g, ''))} /></div>
+                <div className="field"><label htmlFor="rec-tm">만점</label><input id="rec-tm" inputMode="numeric" value={form.session.test_max_score} aria-invalid={error.startsWith('테스트 만점')} onChange={(e) => { clearClassMaxError(); setSession('test_max_score', e.target.value.replace(/[^\d.]/g, '')); }} /></div>
                 <div className="field"><label>난이도</label><Chips value={form.session.test_difficulty} options={['상', '중', '하']} label="난이도" onChange={(v) => setSession('test_difficulty', v)} /></div>
                 <div className="field span-all"><label htmlFor="rec-scope">시험 범위</label><input id="rec-scope" value={form.session.test_scope} onChange={(e) => setSession('test_scope', e.target.value)} placeholder="예: 3단원 함수 ~ 4단원" /></div>
               </div>
@@ -414,6 +510,7 @@ function Editor({ data, onSaved, onGoDate }) {
               const v = form.students[st.student_id];
               const absent = v.attendance === '결석';
               const grade = v.assignment_manual || autoGrade(st.student_id);
+              const testMax = v.test_own ? v.own_test_max : form.session.test_max_score;
               const extra = extraOpen[st.student_id] || !!v.student_notice || !!v.homework_replace_class || !!(v.personal_homework || []).length;
               return (
                 <div key={st.student_id} className={'student-row' + (absent ? ' is-absent' : '')}>
@@ -421,6 +518,7 @@ function Editor({ data, onSaved, onGoDate }) {
                     <Link href={`/students/${st.student_id}`}>{st.name}</Link>
                     {st.off_roster ? <span className="tag muted">명단 밖</span> : null}
                     {v.progress_own ? <span className="tag">개인 진도</span> : null}
+                    {form.session.test_on && v.test_own ? <span className="tag">다른 시험지</span> : null}
                     <Badges badges={st.badges} quiet />
                   </div>
                   <div className="sr-field">
@@ -432,9 +530,23 @@ function Editor({ data, onSaved, onGoDate }) {
                   {form.session.test_on ? (
                     <div className="sr-field">
                       <span className="sr-label">점수</span>
-                      <input className="score-input" inputMode="decimal" disabled={absent} value={absent ? '' : v.test_score} aria-label={`${st.name} 점수`}
-                        placeholder={absent ? '결석' : '미응시'} onChange={(e) => setStudent(st.student_id, 'test_score', e.target.value.replace(/[^\d.]/g, ''))} />
-                      {form.session.test_max_score ? <span className="muted">/ {form.session.test_max_score}</span> : null}
+                      <input id={`rec-ts-${st.student_id}`} className="score-input" inputMode="decimal" disabled={absent} value={absent ? '' : v.test_score} aria-label={`${st.name} 점수`}
+                        aria-invalid={error === `${st.name} 학생 점수가 만점보다 클 수 없습니다.` || error === `${st.name} 학생 다른 시험지 점수를 입력해 주세요.` || error === `${st.name} 학생 점수를 숫자로 입력해 주세요.`}
+                        placeholder={absent ? '결석' : '미응시'} onChange={(e) => { clearErrorFor(st.name); setStudent(st.student_id, 'test_score', e.target.value.replace(/[^\d.]/g, '')); }} />
+                      {testMax ? <span className="muted">/ {testMax}</span> : null}
+                      {!v.test_own ? <button type="button" className="link-btn" onClick={() => { clearErrorFor(st.name); setOwnTest(st.student_id, true); }}>다른 시험지</button> : null}
+                    </div>
+                  ) : null}
+                  {form.session.test_on && v.test_own ? (
+                    <div className="sr-field sr-paper">
+                      <span className="sr-label">시험지</span>
+                      <input value={v.own_test_title} aria-label={`${st.name} 시험지 이름`} placeholder="테스트 이름"
+                        onChange={(e) => setStudent(st.student_id, 'own_test_title', e.target.value)} />
+                      <input id={`rec-otm-${st.student_id}`} className="score-input" inputMode="numeric" value={v.own_test_max} aria-label={`${st.name} 시험지 만점`} placeholder="만점"
+                        aria-invalid={error === `${st.name} 학생 시험지 만점을 입력해 주세요.` || error === `${st.name} 학생 시험지 만점은 0보다 커야 합니다.`}
+                        onChange={(e) => { clearErrorFor(st.name); setStudent(st.student_id, 'own_test_max', e.target.value.replace(/[^\d.]/g, '')); }} />
+                      <Chips value={v.own_test_difficulty} options={['상', '중', '하']} label={`${st.name} 시험지 난이도`} onChange={(x) => setStudent(st.student_id, 'own_test_difficulty', x)} />
+                      <button type="button" className="link-btn" onClick={() => { clearErrorFor(st.name); setOwnTest(st.student_id, false); }}>반 시험지로</button>
                     </div>
                   ) : null}
                   <div className="sr-field">
@@ -531,7 +643,8 @@ function Editor({ data, onSaved, onGoDate }) {
   );
 }
 
-export default function LessonRecorder({ classId, date, onGoDate }) {
+/** `onGuard(fn)` registers an async "ok to leave?" check for the page's own date buttons; `onGuard(null)` on unmount. */
+export default function LessonRecorder({ classId, date, onGoDate, onGuard }) {
   const state = useApi(() => api('getTodayClassSession', date, classId), [classId, date]);
   return (
     <Async state={state}>
@@ -543,7 +656,7 @@ export default function LessonRecorder({ classId, date, onGoDate }) {
               <div className="muted">{formatDate(d.date, true)} {d.time ? timeSpan(d.time) : ''} · {d.class.schedule_label}</div>
             </div>
           </div>
-          <Editor data={d} onSaved={state.reload} onGoDate={onGoDate} />
+          <Editor data={d} onSaved={state.reload} onGoDate={onGoDate} onGuard={onGuard} />
         </>
       )}
     </Async>

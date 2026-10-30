@@ -208,6 +208,11 @@ LMS.createViews = function (ctx) {
     };
   }
 
+  /** Class-level score stats leave out students who sat their own paper. */
+  function classPaperLessons_(lessons) {
+    return lessons.filter(function (l) { return !LMS.lessonTestPaper(l).own; });
+  }
+
   /** Header + overview tab data. */
   function getClassOverview(classId) {
     var cls = classRow(classId);
@@ -216,7 +221,7 @@ LMS.createViews = function (ctx) {
     var monthStart = today.slice(0, 8) + '01';
     var lessons = classLessons(classId, monthStart, today);
     var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
-    var collected = LMS.collectRawScoresForStats(lessons);
+    var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
     var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
 
     var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: monthStart, to: today }));
@@ -399,16 +404,19 @@ LMS.createViews = function (ctx) {
         var session = ctx.getClassSession(d, classId);
         var lessons = testRowsFor(classId, d);
         var taken = lessons.filter(function (l) { return LMS.toStr(l.test_status) === '실시'; });
-        var scores = taken.map(function (l) { return LMS.toNum(l.test_score); }).filter(function (n) { return n !== null; });
+        var onClassPaper = taken.filter(function (l) { return !LMS.lessonTestPaper(l, session).own; });
+        // Average / high / low are of the class paper; students on another paper are counted apart.
+        var scores = onClassPaper.map(function (l) { return LMS.toNum(l.test_score); }).filter(function (n) { return n !== null; });
         var stats = LMS.computeScoreStats(scores);
         return {
           date: d,
           weekday: LMS.weekdayName(d),
           title: session.test_title,
           scope: session.test_scope,
-          max_score: session.test_max_score || LMS.modeValue(taken.map(function (l) { return LMS.toStr(l.test_max_score); })),
+          max_score: session.test_max_score || LMS.modeValue(onClassPaper.map(function (l) { return LMS.toStr(l.test_max_score); })),
           difficulty: session.test_difficulty,
           taken_count: taken.length,
+          other_paper_count: taken.length - onClassPaper.length,
           not_taken_count: lessons.length - taken.length,
           average: stats.average,
           high: stats.high,
@@ -418,33 +426,62 @@ LMS.createViews = function (ctx) {
     };
   }
 
+  function byScoreDesc_(a, b) {
+    if (a.score === null && b.score !== null) return 1;
+    if (b.score === null && a.score !== null) return -1;
+    return (b.score || 0) - (a.score || 0) || LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko');
+  }
+
   function getClassTestDetail(classId, date) {
     classRow(classId);
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
     var session = ctx.getClassSession(date, classId);
     var students = table('Students');
     var lessons = testRowsFor(classId, date);
+    var papers = {};
     var rows = lessons.map(function (l) {
       var s = LMS.findById(students, 'student_id', l.student_id);
-      return {
+      // Not-taken rows carry no own paper, so they list under the class paper.
+      var paper = LMS.lessonTestPaper(l, session);
+      if (!papers[paper.key]) {
+        papers[paper.key] = { key: paper.key, own: paper.own, title: paper.title, max: paper.max, difficulty: paper.difficulty, rows: [] };
+      }
+      var row = {
         student_id: l.student_id,
         name: s ? s.name : l.student_id,
         attendance: l.attendance,
         test_status: l.test_status,
         score: LMS.toStr(l.test_status) === '실시' ? LMS.toNum(l.test_score) : null,
-        max_score: LMS.toNum(l.test_max_score)
+        max_score: LMS.toNum(l.test_max_score),
+        paper_key: paper.key,
+        paper_title: paper.title,
+        own_paper: paper.own
       };
+      papers[paper.key].rows.push(row);
+      return row;
+    }).sort(byScoreDesc_);
+    // Same competition rank as getStudentGrades, among the students on the same paper. Ties share a rank.
+    // Absent and not-taken rows have a null score, so they get no rank.
+    var list = Object.keys(papers).map(function (k) {
+      var p = papers[k];
+      var scores = p.rows.map(function (r) { return r.score; }).filter(function (n) { return n !== null; });
+      p.rows.forEach(function (r) {
+        r.rank = r.score === null ? null : scores.filter(function (n) { return n > r.score; }).length + 1;
+      });
+      p.rows.sort(byScoreDesc_);
+      p.stats = LMS.computeScoreStats(scores);
+      return p;
     }).sort(function (a, b) {
-      if (a.score === null && b.score !== null) return 1;
-      if (b.score === null && a.score !== null) return -1;
-      return (b.score || 0) - (a.score || 0) || LMS.toStr(a.name).localeCompare(LMS.toStr(b.name), 'ko');
+      if (a.own !== b.own) return a.own ? 1 : -1;
+      return LMS.toStr(a.title).localeCompare(LMS.toStr(b.title), 'ko');
     });
-    var scores = rows.map(function (r) { return r.score; }).filter(function (n) { return n !== null; });
+    var classPaper = papers['class'];
     return {
       date: date,
       session: session,
-      stats: LMS.computeScoreStats(scores),
-      rows: rows
+      stats: classPaper ? classPaper.stats : LMS.computeScoreStats([]),
+      rows: rows,
+      papers: list
     };
   }
 
@@ -463,7 +500,7 @@ LMS.createViews = function (ctx) {
       var range = LMS.monthRange(yy, mm);
       var lessons = classLessons(classId, range.start, range.end);
       var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
-      var collected = LMS.collectRawScoresForStats(lessons);
+      var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
       var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
       var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: range.start, to: range.end }));
       var assignTotal = 0;
@@ -988,23 +1025,33 @@ LMS.createViews = function (ctx) {
       var same = all.filter(function (o) {
         return o.lesson_date === l.lesson_date && LMS.toStr(o.class_id) === LMS.toStr(l.class_id) && LMS.toStr(o.test_status) === '실시';
       });
-      var classScores = same.map(function (o) { return LMS.toNum(o.test_score); }).filter(function (n) { return n !== null; });
       var session = ctx.getClassSession(l.lesson_date, l.class_id);
+      var paper = LMS.lessonTestPaper(l, session);
+      // Rank, taken and the raw average are among the same paper; the 100-point average spans the whole class.
+      var samePaper = same.filter(function (o) { return LMS.lessonTestPaper(o, session).key === paper.key; });
+      var classScores = samePaper.map(function (o) { return LMS.toNum(o.test_score); }).filter(function (n) { return n !== null; });
+      var normalized = same.map(function (o) {
+        return LMS.normalizedScore(o.test_score, o.test_max_score);
+      }).filter(function (n) { return n !== null; });
       var c = LMS.findById(classes, 'class_id', l.class_id);
       var score = LMS.toNum(l.test_score);
+      var maxScore = LMS.toNum(l.test_max_score);
       var avg = LMS.averageOf(classScores);
       return {
         date: l.lesson_date,
         class_id: l.class_id,
         class_name: c ? c.class_name : '',
-        title: session.test_title,
+        title: paper.title,
         scope: LMS.toStr(session.test_scope) || LMS.toStr(l.test_scope),
-        difficulty: l.test_difficulty || session.test_difficulty,
+        own_paper: paper.own,
+        difficulty: paper.difficulty,
         score: score,
-        max_score: LMS.toNum(l.test_max_score),
-        normalized: LMS.normalizedScore(score, l.test_max_score),
+        max_score: maxScore,
+        normalized: LMS.normalizedScore(score, maxScore),
         class_average: avg,
-        rank: classScores.filter(function (n) { return n > score; }).length + 1,
+        score_100: LMS.normalizedScore(score, maxScore),
+        class_average_100: LMS.averageOf(normalized),
+        rank: score === null ? null : classScores.filter(function (n) { return n > score; }).length + 1,
         taken: classScores.length
       };
     });
