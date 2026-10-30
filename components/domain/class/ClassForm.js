@@ -9,11 +9,17 @@ import CurriculumEditor from './CurriculumEditor';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
+import { shortDate } from '@/lib/format';
 
 const EMPTY = {
   class_name: '', grade: '', school_year: String(new Date().getFullYear()), semester: '',
-  teacher: '', textbook: '', memo: '', status: '운영', schedule: [], curriculum: []
+  teacher: '', textbook: '', textbook_started_on: '', memo: '', status: '운영', schedule: [], curriculum: []
 };
+
+function textbookSpan(row) {
+  const from = row.from ? shortDate(row.from) : '시작일 없음';
+  return row.to ? `${row.textbook} (${from} ~ ${shortDate(row.to)})` : `${row.textbook} (${from} ~ 사용 중)`;
+}
 
 /** Create or edit a class. onSaved(row) after a successful save. */
 export default function ClassForm({ initial, onClose, onSaved }) {
@@ -22,13 +28,18 @@ export default function ClassForm({ initial, onClose, onSaved }) {
   const [form, setForm] = useState(() => ({
     ...EMPTY, ...(initial || {}),
     schedule: (initial && initial.schedule) || [],
-    curriculum: Array.isArray(initial && initial.curriculum) ? initial.curriculum : []
+    curriculum: Array.isArray(initial && initial.curriculum) ? initial.curriculum : [],
+    textbook_history: Array.isArray(initial && initial.textbook_history) ? initial.textbook_history : [],
+    textbook_started_on: boot.today
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const dirty = useDirty(form);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e && e.target ? e.target.value : e }));
   const isEdit = !!form.class_id;
+  const storedTextbook = String((initial && initial.textbook) || '').trim();
+  const textbookChanged = isEdit && form.textbook.trim() !== storedTextbook;
+  const askTextbookStart = (!isEdit && !!form.textbook.trim()) || textbookChanged;
 
   const scheduleProblem = form.schedule.find((s) => !s.start || !s.end || s.end <= s.start);
   const unitProblem = form.curriculum.findIndex((u) => u.title.trim() && !(Number(u.sessions) >= 1 && Number(u.sessions) <= 20));
@@ -39,6 +50,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
     if (!form.schedule.length) return setError('수업 요일을 하나 이상 선택해 주세요.');
     if (scheduleProblem) return setError(`${scheduleProblem.day}요일 시간을 확인해 주세요. (예: 1800 ~ 2000)`);
     if (unitProblem !== -1) return setError(`${unitProblem + 1}번째 단원의 수업 횟수는 1~20회로 입력해 주세요.`);
+    if (askTextbookStart && !form.textbook_started_on) return setError('교재 시작일을 입력해 주세요.');
     setError('');
     setSaving(true);
     try {
@@ -46,6 +58,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
         class_id: form.class_id, class_name: form.class_name.trim(), grade: form.grade,
         school_year: form.school_year, semester: form.semester, teacher: form.teacher,
         textbook: form.textbook, memo: form.memo, status: form.status, schedule: form.schedule,
+        ...(askTextbookStart ? { textbook_started_on: form.textbook_started_on } : {}),
         curriculum: form.curriculum.filter((u) => u.title.trim()).map((u) => ({ ...u, title: u.title.trim(), sessions: Number(u.sessions) }))
       };
       if (isEdit) {
@@ -81,7 +94,19 @@ export default function ClassForm({ initial, onClose, onSaved }) {
               <option value="">-</option><option value="1">1학기</option><option value="2">2학기</option>
             </select>
           )}</Field>
-          <Field label="교재" wide>{(id) => <input id={id} value={form.textbook} onChange={set('textbook')} />}</Field>
+          <Field label="교재" wide hint={isEdit ? '이름을 바꾸면 이전 교재는 기록으로 남습니다.' : ''}>{(id) => <input id={id} value={form.textbook} onChange={set('textbook')} />}</Field>
+          {askTextbookStart ? (
+            <Field label={form.textbook.trim() ? '이 교재 시작일' : '교재를 끝내는 날'} hint="이전 교재는 그 전날까지로 남습니다.">
+              {(id) => <input id={id} type="date" value={form.textbook_started_on} onChange={set('textbook_started_on')} />}
+            </Field>
+          ) : null}
+          {isEdit && form.textbook_history.length ? (
+            <Field label="교재 기록" wide>{() => (
+              <ul className="stack-sm" style={{ margin: 0 }}>
+                {form.textbook_history.map((h, i) => <li key={i}>{textbookSpan(h)}</li>)}
+              </ul>
+            )}</Field>
+          ) : null}
           <Field label="수업 요일 · 시간" wide hint="요일을 누른 뒤 시간을 숫자로 입력하세요. 1800 → 18:00">
             {() => <WeekdaySchedule value={form.schedule} onChange={set('schedule')} />}
           </Field>

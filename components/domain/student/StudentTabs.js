@@ -82,6 +82,32 @@ function useRange(initial, today) {
 
 const CONC = { A: 'A', B: 'B', C: 'C', D: 'D', ABSENT: '결석' };
 
+/** Flip one lesson between 출석 and 결석. Other fields on that lesson stay put. */
+function AttendanceSwitch({ lessonId, value, onSaved }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const set = async (attendance) => {
+    if (attendance === value || saving) return;
+    setSaving(true);
+    try {
+      await api('updateLessonAttendance', { lesson_id: lessonId, attendance });
+      toast(attendance === '결석' ? '결석으로 바꿨습니다.' : '출석으로 바꿨습니다.');
+      await onSaved();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="chips" role="group" aria-label="출결">
+      {['출석', '결석'].map((a) => (
+        <button key={a} type="button" className={'chip' + (a === '결석' ? ' danger' : '')} aria-pressed={value === a} disabled={saving} onClick={() => set(a)}>{a}</button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- 개요
 
 export function OverviewTab({ data, onChanged }) {
@@ -97,7 +123,7 @@ export function OverviewTab({ data, onChanged }) {
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${next.class_name} · ${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회 · 결석 ${month.absent_count}`} />
         <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
-        <Kpi label="테스트 평균" value={month.test_average_display} note={`이번 달 ${month.test_count}회`} />
+        <Kpi label="테스트 평균" value={month.test_average_display} note={month.test_count ? `이번 달 ${month.test_count}회 · 100점 환산` : '이번 달 테스트 없음'} />
         <Kpi label="과제 이행 A 비율" value={percent(month.assignment_a_rate)} />
       </div>
       {exams.length ? (
@@ -265,14 +291,17 @@ export function AttendanceTab({ studentId, today }) {
                   <div className="stack-sm">
                     {sel.entries.map((e, j) => (
                       <div key={j} className="split" style={{ alignItems: 'flex-start' }}>
-                        <span><span className={'tag ' + (e.kind === 'absent' ? 'danger' : e.kind === 'missing' ? 'warn' : e.kind === 'makeup' ? 'amber' : e.kind === 'present' ? 'ok' : 'muted')}>{KIND[e.kind].label}</span> <strong>{e.class_name}</strong> {e.time ? <span className="muted">{timeSpan(e.time)}</span> : null}</span>
-                        <span className="muted">{[e.test && `테스트 ${e.test}`, e.assignment && `과제 ${e.assignment}`, e.concentration && e.kind === 'present' && `집중도 ${CONC[e.concentration] || e.concentration}`].filter(Boolean).join(' · ')}</span>
+                        <span className="cluster" style={{ alignItems: 'center' }}>
+                          {e.lesson_id ? <AttendanceSwitch lessonId={e.lesson_id} value={e.kind === 'absent' ? '결석' : '출석'} onSaved={state.reload} /> : <span className={'tag ' + (e.kind === 'absent' ? 'danger' : e.kind === 'missing' ? 'warn' : e.kind === 'makeup' ? 'amber' : e.kind === 'present' ? 'ok' : 'muted')}>{KIND[e.kind].label}</span>}
+                          <strong>{e.class_name}</strong> {e.time ? <span className="muted">{timeSpan(e.time)}</span> : null}
+                        </span>
+                        <span className="muted">{[e.test && `테스트 ${e.test}`, e.test_scope && `범위 ${e.test_scope}`, e.assignment && `과제 ${e.assignment}`, e.concentration && e.kind === 'present' && `집중도 ${CONC[e.concentration] || e.concentration}`].filter(Boolean).join(' · ')}</span>
                         {e.special_note ? <div className="prewrap" style={{ flexBasis: '100%' }}>{e.special_note}</div> : null}
                       </div>
                     ))}
                   </div>
                 </section>
-              ) : <p className="muted" style={{ margin: 0 }}>날짜를 누르면 그날의 수업 기록이 보입니다.</p>}
+              ) : <p className="muted" style={{ margin: 0 }}>날짜를 누르면 그날의 기록이 보이고, 기록된 수업의 출결만 바꿀 수 있습니다.</p>}
             </>
           );
         }}
@@ -290,7 +319,7 @@ export function LessonsTab({ studentId }) {
   const classNames = useMemo(() => Object.fromEntries((boot.search.classes || []).map((c) => [c.id, c.name])), [boot.search.classes]);
   return (
     <div className="stack">
-      <div className="split"><span className="muted">수업일별 출결·테스트·과제·집중도와 특이사항입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">출결만 여기서 바꿀 수 있습니다. 점수와 숙제는 그대로 둡니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(rows) => rows.length ? (
           <div className="table-wrap">
@@ -301,8 +330,8 @@ export function LessonsTab({ studentId }) {
                   <tr key={l.lesson_id}>
                     <td className="primary">{shortDate(l.lesson_date)}</td>
                     <td data-label="반">{classNames[l.class_id] || l.class_id}</td>
-                    <td data-label="출결">{l.attendance === '결석' ? <span className="tag danger">결석</span> : <span className="tag ok">출석</span>}</td>
-                    <td data-label="테스트">{l.test_status === '실시' ? <>{score(l.test_score)}/{l.test_max_score} <span className="muted">({l.class_test_average ? l.class_test_average.test_average_display : '-'})</span></> : <span className="muted">-</span>}</td>
+                    <td data-label="출결"><AttendanceSwitch lessonId={l.lesson_id} value={l.attendance === '결석' ? '결석' : '출석'} onSaved={state.reload} /></td>
+                    <td data-label="테스트">{l.test_status === '실시' ? <>{score(l.test_score)}/{l.test_max_score} <span className="muted">({l.class_test_average ? l.class_test_average.test_average_display : '-'})</span></> : <span className="muted">-</span>}{l.test_scope ? <div className="muted prewrap">범위: {l.test_scope}</div> : null}</td>
                     <td data-label="과제" className="center">{l.assignment_completion || '-'}</td>
                     <td data-label="집중도" className="center">{CONC[l.concentration] || l.concentration || '-'}</td>
                     <td data-label="진도 · 특이사항">
@@ -420,15 +449,15 @@ export function GradesTab({ studentId }) {
   const state = useApi(() => api('getStudentGrades', studentId, { start: r.start, end: r.end }), [studentId, r.range]);
   return (
     <div className="stack">
-      <div className="split"><span className="muted">본 테스트와 같은 날 반 평균입니다. 막대의 세로선이 반 평균입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">평균·최고·최저는 100점 환산입니다. 각 시험은 원점수이고, 막대의 세로선은 같은 날 반 평균입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => d.rows.length ? (
           <>
             <div className="kpis">
               <Kpi label="응시" value={`${d.rows.length}회`} />
-              <Kpi label="평균" value={d.comparable ? score(d.stats.average) : '만점 다름'} />
-              <Kpi label="최고" value={d.comparable ? score(d.stats.high) : '-'} />
-              <Kpi label="최저" value={d.comparable ? score(d.stats.low) : '-'} />
+              <Kpi label="평균" value={score(d.stats.average)} note="100점 환산" />
+              <Kpi label="최고" value={score(d.stats.high)} note="100점 환산" />
+              <Kpi label="최저" value={score(d.stats.low)} note="100점 환산" />
             </div>
             <section className="card">
               <div className="stack-sm" role="list" aria-label="테스트별 점수">
@@ -436,13 +465,13 @@ export function GradesTab({ studentId }) {
                   const max = t.max_score || 100;
                   return (
                     <div key={t.date + t.class_id} role="listitem" className="grade-row">
-                      <div className="grade-meta"><strong>{shortDate(t.date)}</strong> <span className="muted">{t.title || t.class_name}{t.difficulty ? ` · ${t.difficulty}` : ''}</span></div>
+                      <div className="grade-meta"><strong>{shortDate(t.date)}</strong> <span className="muted">{t.title || t.class_name}{t.difficulty ? ` · ${t.difficulty}` : ''}{t.scope ? ` · 범위 ${t.scope}` : ''}</span></div>
                       <div className="score-bar">
                         <span className="track" aria-hidden="true" style={{ position: 'relative' }}>
                           <span className="fill" style={{ width: `${Math.min(100, (t.score / max) * 100)}%`, display: 'block' }} />
                           {t.class_average !== null ? <span className="avg-tick" style={{ left: `${Math.min(100, (t.class_average / max) * 100)}%` }} /> : null}
                         </span>
-                        <span className="val">{score(t.score)}/{max}</span>
+                        <span className="val">{score(t.score)}/{max}{t.normalized !== null && t.normalized !== undefined ? <span className="muted"> · 환산 {score(t.normalized)}</span> : null}</span>
                       </div>
                       <div className="muted grade-avg">반 평균 {score(t.class_average)} · {t.rank}/{t.taken}등</div>
                     </div>

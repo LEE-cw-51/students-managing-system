@@ -33,7 +33,7 @@ LMS.TABLES = {
   ],
   Classes: [
     'class_id', 'school_year', 'semester', 'grade', 'class_name', 'teacher',
-    'weekday', 'start_time', 'end_time', 'textbook', 'current_progress',
+    'weekday', 'start_time', 'end_time',     'textbook', 'textbook_history', 'current_progress',
     'class_homework', 'memo', 'status', 'created_at', 'updated_at',
     'schedule', 'class_type', 'exam_period_id', 'target_school', 'target_grade',
     'curriculum', 'cancel_dates'
@@ -46,7 +46,7 @@ LMS.TABLES = {
     'lesson_id', 'lesson_date', 'student_id', 'class_id', 'attendance',
     'test_status', 'test_score', 'test_max_score', 'test_difficulty',
     'assignment_completion', 'concentration', 'progress', 'homework',
-    'special_note', 'student_notice', 'homework_replace_class',
+    'special_note', 'student_notice', 'homework_replace_class', 'test_scope',
     'created_at', 'updated_at', 'progress_own'
   ],
   ClassSessionNotices: [
@@ -54,7 +54,7 @@ LMS.TABLES = {
   ],
   ClassSessions: [
     'session_id', 'lesson_date', 'class_id', 'progress', 'content',
-    'test_title', 'test_max_score', 'test_difficulty', 'class_notice', 'memo',
+    'test_title', 'test_max_score', 'test_difficulty', 'test_scope', 'class_notice', 'memo',
     'created_at', 'updated_at'
   ],
   ExamPeriods: [
@@ -117,7 +117,7 @@ LMS.CLASS_TYPES = ['정규', '시험대비'];
 LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
 LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
 LMS.SCHOOL_EXAM_TYPES = ['중간', '기말', '기타'];
-LMS.SCHEMA_VERSION = 5;
+LMS.SCHEMA_VERSION = 6;
 LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
 LMS.DIFFICULTY = ['상', '중', '하'];
@@ -770,8 +770,8 @@ LMS.buildRegularClassEvents = function (classes, start, end, examPeriods) {
   return events;
 };
 
+/** Student-level stats use this 100-point scale. One test's raw score stays as entered. */
 LMS.normalizedScore = function (score, maxScore) {
-  // Kept for compatibility; averages no longer use 100-point conversion.
   var max = LMS.toNum(maxScore);
   var s = LMS.toNum(score);
   if (max === null || max <= 0) return null;
@@ -819,8 +819,16 @@ LMS.collectRawScoresForStats = function (lessons) {
   };
 };
 
+/** 100-point scores for every conducted test, including tests whose max scores differ. */
 LMS.collectNormalizedScores = function (lessons) {
-  return LMS.collectRawScoresForStats(lessons).scores;
+  var scores = [];
+  (lessons || []).forEach(function (row) {
+    if (LMS.toStr(row.test_status) !== '실시') return;
+    var n = LMS.normalizedScore(row.test_score, row.test_max_score);
+    if (n === null) return;
+    scores.push(n);
+  });
+  return scores;
 };
 
 LMS.averageOf = function (values) {
@@ -1090,7 +1098,6 @@ LMS.summarizeLessonStats = function (lessons) {
 
   var present = 0;
   var absent = 0;
-  var scores = [];
   var assign = { A: 0, B: 0, C: 0 };
   var conc = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
 
@@ -1106,22 +1113,7 @@ LMS.summarizeLessonStats = function (lessons) {
     if (conc[cv] !== undefined) conc[cv] += 1;
   });
 
-  var collected = LMS.collectRawScoresForStats(rows);
-  scores = collected.comparable ? collected.scores : [];
-  var scoreStats = LMS.computeScoreStats(scores);
-  if (!collected.comparable) {
-    scoreStats = {
-      count: collected.test_count,
-      average: null,
-      median: null,
-      high: null,
-      low: null,
-      average_display: '-',
-      median_display: '-',
-      high_display: '-',
-      low_display: '-'
-    };
-  }
+  var scoreStats = LMS.computeScoreStats(LMS.collectNormalizedScores(rows));
 
   return {
     total_lessons: rows.length,
@@ -1218,6 +1210,9 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
     '1. 테스트: ' + LMS.formatDailyTestLine(lesson)
   ];
 
+  var scope = LMS.toStr(lesson.test_scope);
+  if (scope) lines.push('   범위: ' + scope);
+
   if (LMS.toStr(lesson.test_status) === '실시' && classStats && classStats.test_count) {
     lines.push('   ' + LMS.formatClassTestStatsLine(classStats));
   }
@@ -1262,7 +1257,7 @@ LMS.buildMonthlyReport = function (stats, student, settings) {
     (stats.present_count || 0) + '회, 결석 ' + (stats.absent_count || 0) + '회)');
 
   if (stats.test_count) {
-    lines.push('테스트는 ' + stats.test_count + '회 실시되었고, 평균은 ' +
+    lines.push('테스트는 ' + stats.test_count + '회 실시되었고, 100점 환산 평균은 ' +
       stats.test_average_display + '점입니다. (중간값 ' + stats.test_median_display +
       '점, 최고 ' + stats.test_high_display + '점, 최저 ' + stats.test_low_display + '점)');
   } else {
@@ -1464,7 +1459,7 @@ LMS.modeValue = function (values) {
 };
 
 LMS.CLASS_SESSION_FIELDS = [
-  'progress', 'content', 'test_title', 'test_max_score', 'test_difficulty', 'class_notice', 'memo'
+  'progress', 'content', 'test_title', 'test_max_score', 'test_difficulty', 'test_scope', 'class_notice', 'memo'
 ];
 
 /** Partial input: only the session fields present in data are returned. */
@@ -1483,7 +1478,59 @@ LMS.validateClassSessionInput = function (data) {
     out.test_max_score = max;
   }
   if (out.test_difficulty) LMS.assertEnum(out.test_difficulty, LMS.DIFFICULTY, '난이도', true);
+  if (out.test_scope !== undefined) out.test_scope = LMS.clipText(out.test_scope, 500);
   return out;
+};
+
+LMS.normalizeTextbookHistory = function (list) {
+  return LMS.jsonList(list).map(function (row) {
+    if (!row) return null;
+    var textbook = LMS.toStr(row.textbook);
+    if (!textbook) return null;
+    var from = LMS.toStr(row.from);
+    var to = LMS.toStr(row.to);
+    if (from && !LMS.isIsoDate(from)) return null;
+    if (to && !LMS.isIsoDate(to)) return null;
+    return { textbook: textbook, from: from, to: to };
+  }).filter(Boolean);
+};
+
+/** First open period for a new class. An empty name stores no history. */
+LMS.initialTextbookHistory = function (name, startDate) {
+  var textbook = LMS.toStr(name);
+  if (!textbook) return [];
+  var from = LMS.toStr(startDate);
+  if (from && !LMS.isIsoDate(from)) throw new Error('교재 시작일 형식이 올바르지 않습니다.');
+  return [{ textbook: textbook, from: from, to: '' }];
+};
+
+/**
+ * Keep the previous textbook when the name changes. startDate is the first day of the new
+ * name (or the first day with no textbook). The previous open period ends the day before.
+ */
+LMS.applyTextbookChange = function (previousName, history, nextName, startDate) {
+  var prev = LMS.toStr(previousName);
+  var next = LMS.toStr(nextName);
+  var rows = LMS.normalizeTextbookHistory(history);
+  if (prev === next) {
+    if (next && !rows.some(function (r) { return !r.to; })) {
+      rows.push({ textbook: next, from: '', to: '' });
+    }
+    return { textbook: next, textbook_history: rows };
+  }
+  var start = LMS.toStr(startDate);
+  if (!LMS.isIsoDate(start)) throw new Error('교재를 바꿀 때는 시작일을 입력해 주세요.');
+  if (!rows.length && prev) rows.push({ textbook: prev, from: '', to: '' });
+  var end = LMS.addDays(start, -1);
+  rows.forEach(function (r) {
+    if (r.to) return;
+    if (r.from && end < r.from) {
+      throw new Error('새 교재 시작일은 이전 교재가 시작된 다음 날부터 고를 수 있습니다.');
+    }
+    r.to = end;
+  });
+  if (next) rows.push({ textbook: next, from: start, to: '' });
+  return { textbook: next, textbook_history: rows };
 };
 
 LMS.validateSchoolExamInput = function (data) {

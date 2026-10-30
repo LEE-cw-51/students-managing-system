@@ -241,6 +241,6 @@ describe('schema v5', () => {
     assert.equal(api.ensureSchema(), true);
     assert.equal(api.ensureSchema(), false);
     const Core = require('../src/00_Core.js');
-    assert.equal(Core.SCHEMA_VERSION, 5);
+    assert.equal(Core.SCHEMA_VERSION, 6);
   });
 });

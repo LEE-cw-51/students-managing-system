@@ -198,6 +198,7 @@ LMS.createViews = function (ctx) {
       test_title: session.test_title,
       test_max_score: session.test_max_score,
       test_difficulty: session.test_difficulty,
+      test_scope: session.test_scope,
       class_notice: session.class_notice,
       recorded_count: lessons.length,
       present_count: lessons.length - absent,
@@ -302,7 +303,7 @@ LMS.createViews = function (ctx) {
         return Object.assign(summary, {
           weekday: LMS.weekdayName(d),
           time: LMS.classTimeOn(cls, d),
-          has_record: summary.recorded_count > 0 || !!(summary.progress || summary.content || summary.test_title),
+          has_record: summary.recorded_count > 0 || !!(summary.progress || summary.content || summary.test_title || summary.test_scope),
           plan: plan ? { plan_id: plan.plan_id, title: plan.title, content: plan.content, objectives: plan.objectives } : null
         });
       })
@@ -404,6 +405,7 @@ LMS.createViews = function (ctx) {
           date: d,
           weekday: LMS.weekdayName(d),
           title: session.test_title,
+          scope: session.test_scope,
           max_score: session.test_max_score || LMS.modeValue(taken.map(function (l) { return LMS.toStr(l.test_max_score); })),
           difficulty: session.test_difficulty,
           taken_count: taken.length,
@@ -777,16 +779,15 @@ LMS.createViews = function (ctx) {
     });
     var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
     var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
-    var collected = LMS.collectRawScoresForStats(lessons);
-    var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
+    var scores = LMS.computeScoreStats(LMS.collectNormalizedScores(lessons));
     var assign = lessons.map(function (l) { return LMS.assignmentCode(l.assignment_completion); }).filter(Boolean);
     return {
       lesson_count: lessons.length,
       absent_count: absent,
       attendance_rate: pct(lessons.length - absent, lessons.length),
       homework_rate: homework.rate,
-      test_count: collected.test_count,
-      test_average_display: collected.comparable ? scores.average_display : (collected.test_count ? '만점 다름' : '-'),
+      test_count: scores.count,
+      test_average_display: scores.average_display,
       assignment_a_rate: pct(assign.filter(function (a) { return a === 'A'; }).length, assign.length)
     };
   }
@@ -870,6 +871,7 @@ LMS.createViews = function (ctx) {
           class_name: c ? c.class_name : '',
           special_note: l.special_note,
           test: LMS.toStr(l.test_status) === '실시' ? LMS.formatScoreDisplay(l.test_status, l.test_score, l.test_max_score) : '',
+          test_scope: LMS.toStr(l.test_scope),
           assignment: LMS.assignmentCode(l.assignment_completion),
           concentration: l.concentration
         };
@@ -996,19 +998,18 @@ LMS.createViews = function (ctx) {
         class_id: l.class_id,
         class_name: c ? c.class_name : '',
         title: session.test_title,
+        scope: LMS.toStr(session.test_scope) || LMS.toStr(l.test_scope),
         difficulty: l.test_difficulty || session.test_difficulty,
         score: score,
         max_score: LMS.toNum(l.test_max_score),
+        normalized: LMS.normalizedScore(score, l.test_max_score),
         class_average: avg,
         rank: classScores.filter(function (n) { return n > score; }).length + 1,
         taken: classScores.length
       };
     });
-    var collected = LMS.collectRawScoresForStats(rows.map(function (r) {
-      return { test_status: '실시', test_score: r.score, test_max_score: r.max_score };
-    }));
-    var stats = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
-    return { start: start, end: end, rows: rows.reverse(), comparable: collected.comparable, stats: stats };
+    var stats = LMS.computeScoreStats(rows.map(function (r) { return r.normalized; }).filter(function (n) { return n !== null; }));
+    return { start: start, end: end, rows: rows.reverse(), stats: stats };
   }
 
   /** Monthly reports and recent lessons (for daily reports) of a student. */

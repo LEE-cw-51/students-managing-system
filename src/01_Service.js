@@ -301,6 +301,7 @@ LMS.createService = function (store) {
     var ts = now();
     var row = Object.assign({}, input, {
       class_id: id,
+      textbook_history: LMS.initialTextbookHistory(input.textbook, data.textbook_started_on),
       created_at: ts,
       updated_at: ts
     });
@@ -328,10 +329,21 @@ LMS.createService = function (store) {
     }
     delete input.schedule_from_legacy;
     var closing = input.status === '종료' && LMS.toStr(row.status) !== '종료';
+    var prevTextbook = LMS.toStr(row.textbook);
+    var prevHistory = row.textbook_history;
+    var sentTextbook = Object.prototype.hasOwnProperty.call(data, 'textbook') && data.textbook !== undefined;
     Object.keys(input).forEach(function (k) {
       if (k === 'class_id') return;
       row[k] = input[k];
     });
+    if (sentTextbook) {
+      var applied = LMS.applyTextbookChange(prevTextbook, prevHistory, input.textbook, data.textbook_started_on);
+      row.textbook = applied.textbook;
+      row.textbook_history = applied.textbook_history;
+    } else {
+      row.textbook = prevTextbook;
+      row.textbook_history = prevHistory;
+    }
     row.updated_at = now();
     saveTable('Classes', rows);
     if (closing && LMS.toStr(row.class_type) !== '시험대비') assignments.endForClassClose(row.class_id);
@@ -568,9 +580,11 @@ LMS.createService = function (store) {
       test_title: '',
       test_max_score: '',
       test_difficulty: '',
+      test_scope: '',
       class_notice: '',
       memo: ''
     };
+    if (base.test_scope === undefined || base.test_scope === null) base.test_scope = '';
     if (!LMS.toStr(base.class_notice)) base.class_notice = getClassSessionNotice(date, classId);
     return base;
   }
@@ -668,6 +682,24 @@ LMS.createService = function (store) {
 
   function saveLesson(data) {
     return saveLessonsBatch([data])[0];
+  }
+
+  /** Change only attendance. Scores, homework, progress and notes stay as they are. */
+  function updateLessonAttendance(data) {
+    data = data || {};
+    var id = LMS.toStr(data.lesson_id);
+    if (!id) throw new Error('수업 기록을 찾을 수 없습니다.');
+    var attendance = LMS.toStr(data.attendance);
+    LMS.assertEnum(attendance, LMS.ATTENDANCE, '출석');
+    var lessons = table('Lessons');
+    var row = LMS.findById(lessons, 'lesson_id', id);
+    if (!row) throw new Error('수업 기록을 찾을 수 없습니다.');
+    if (LMS.toStr(row.attendance) !== attendance) {
+      row.attendance = attendance;
+      row.updated_at = now();
+      saveTable('Lessons', lessons);
+    }
+    return row;
   }
 
   function updateLesson(data) {
@@ -1646,7 +1678,8 @@ LMS.createService = function (store) {
       concentration: row.concentration,
       progress: row.progress,
       homework: row.homework,
-      special_note: row.special_note
+      special_note: row.special_note,
+      test_scope: row.test_scope
     };
   }
 
@@ -2882,6 +2915,19 @@ LMS.createService = function (store) {
     if (lessonsChanged) saveTable('Lessons', lessons);
   }
 
+  /** v6: one open textbook period for classes that already have a current textbook. Safe to re-run. */
+  function migrateToV6_() {
+    var classes = table('Classes');
+    var changed = false;
+    classes.forEach(function (cls) {
+      if (Array.isArray(cls.textbook_history)) return;
+      var name = LMS.toStr(cls.textbook);
+      cls.textbook_history = name ? [{ textbook: name, from: '', to: '' }] : [];
+      changed = true;
+    });
+    if (changed) saveTable('Classes', classes);
+  }
+
   /**
    * v4: re-align copies that drifted before saves kept them in sync. Safe to re-run.
    * - Student lessons take their date's class record (progress, difficulty on tested rows, checklist homework).
@@ -2936,6 +2982,7 @@ LMS.createService = function (store) {
     if (schemaVersion_() < 3) migrateToV3_();
     if (schemaVersion_() < 4) migrateToV4_();
     if (schemaVersion_() < 5) migrateToV5_();
+    if (schemaVersion_() < 6) migrateToV6_();
     var meta = table('_Meta');
     var row = LMS.findById(meta, 'prefix', LMS.SCHEMA_META_KEY);
     if (!row) {
@@ -3073,6 +3120,7 @@ LMS.createService = function (store) {
     saveLesson: saveLesson,
     saveLessonsBatch: saveLessonsBatch,
     updateLesson: updateLesson,
+    updateLessonAttendance: updateLessonAttendance,
     getClassSessionNotice: getClassSessionNotice,
     saveClassSessionNotice: saveClassSessionNotice,
     getTodayClassSession: getTodayClassSession,
