@@ -11,6 +11,7 @@ import {
   OverviewTab, AttendanceTab, LessonsTab, HomeworkTab, GradesTab, ReportsTab, HistoryTab
 } from '@/components/domain/student/StudentTabs';
 import CounselingTab from '@/components/domain/student/CounselingTab';
+import ClassmateNav from '@/components/domain/student/ClassmateNav';
 import { api, useApi } from '@/lib/client-api';
 
 const TABS = [
@@ -48,6 +49,7 @@ function Workspace() {
                 </>
               )}
             />
+            <ClassmateNav studentId={id} classes={data.classes} disabled={editing} />
             <Tabs tabs={TABS} current={tab} />
             {tab === 'overview' ? <OverviewTab data={data} onChanged={overview.reload} /> : null}
             {tab === 'attendance' ? <AttendanceTab studentId={id} today={data.today} /> : null}
