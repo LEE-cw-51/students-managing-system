@@ -646,8 +646,17 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
 /** `onGuard(fn)` registers an async "ok to leave?" check for the page's own date buttons; `onGuard(null)` on unmount. */
 export default function LessonRecorder({ classId, date, onGoDate, onGuard }) {
   const state = useApi(() => api('getTodayClassSession', date, classId), [classId, date]);
+  // The error box's retry reloads `data`, which rebuilds the editor form, so it goes through the same guard.
+  const guardRef = useRef(null);
+  const registerGuard = useCallback((fn) => {
+    guardRef.current = fn;
+    if (onGuard) onGuard(fn);
+  }, [onGuard]);
+  const retry = async () => {
+    if (!guardRef.current || (await guardRef.current())) state.reload();
+  };
   return (
-    <Async state={state}>
+    <Async state={{ ...state, reload: retry }}>
       {(d) => (
         <>
           <div className="recorder-head">
@@ -656,7 +665,7 @@ export default function LessonRecorder({ classId, date, onGoDate, onGuard }) {
               <div className="muted">{formatDate(d.date, true)} {d.time ? timeSpan(d.time) : ''} · {d.class.schedule_label}</div>
             </div>
           </div>
-          <Editor data={d} onSaved={state.reload} onGoDate={onGoDate} onGuard={onGuard} />
+          <Editor data={d} onSaved={state.reload} onGoDate={onGoDate} onGuard={registerGuard} />
         </>
       )}
     </Async>

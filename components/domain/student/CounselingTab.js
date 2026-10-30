@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useDirty } from '@/components/ui/useDirty';
 import Modal, { ModalCancel } from '@/components/ui/Modal';
@@ -112,8 +112,13 @@ export default function CounselingTab({ studentId, onChanged }) {
   const state = useApi(() => api('getCounselingNotes', studentId), [studentId]);
   const reload = () => { state.reload(); onChanged(); };
 
-  // Hidden right away; the delete is sent after the undo window closes.
+  // Hidden right away; the delete is sent after the undo window closes, even if the tab is left meanwhile.
   const [pending, setPending] = useState([]);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const remove = async (n) => {
     const ok = await confirm({
       title: '상담일지 삭제',
@@ -134,9 +139,10 @@ export default function CounselingTab({ studentId, onChanged }) {
       try {
         await api('deleteCounselingNote', n.note_id);
         toast(`${formatDate(n.counsel_date)} 상담일지를 삭제했습니다.`);
-        reload();
+        if (mounted.current) reload();
+        else onChanged();
       } catch (err) {
-        unhide();
+        if (mounted.current) unhide();
         toast(`상담일지를 삭제하지 못해 다시 표시했습니다. ${err.message}`, 'error');
       }
     }, UNDO_MS);
