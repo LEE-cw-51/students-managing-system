@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useDirty } from '@/components/ui/useDirty';
-import Modal from '@/components/ui/Modal';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -92,7 +92,7 @@ function NoteForm({ studentId, note, onClose, onSaved }) {
         </fieldset>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
         </div>
       </form>
@@ -124,8 +124,8 @@ export default function CounselingTab({ studentId, onChanged }) {
     if (!ok) return;
     let undone = false;
     const unhide = () => setPending((p) => p.filter((id) => id !== n.note_id));
-    setPending((p) => [...p, n.note_id]);
-    toast(`${formatDate(n.counsel_date)} 상담일지를 삭제했습니다.${n.follow_up_status === '예정' ? ' 연결된 후속 할 일도 취소됩니다.' : ''}`, 'ok', {
+    setPending((p) => (p.includes(n.note_id) ? p : [...p, n.note_id]));
+    toast(`${formatDate(n.counsel_date)} 상담일지를 ${UNDO_MS / 1000}초 뒤 삭제합니다.${n.follow_up_status === '예정' ? ' 연결된 후속 할 일도 취소됩니다.' : ''}`, 'ok', {
       duration: UNDO_MS,
       action: { label: '되돌리기', onClick: () => { undone = true; unhide(); } }
     });
@@ -133,10 +133,11 @@ export default function CounselingTab({ studentId, onChanged }) {
       if (undone) return;
       try {
         await api('deleteCounselingNote', n.note_id);
+        toast(`${formatDate(n.counsel_date)} 상담일지를 삭제했습니다.`);
         reload();
       } catch (err) {
         unhide();
-        toast(err.message, 'error');
+        toast(`상담일지를 삭제하지 못해 다시 표시했습니다. ${err.message}`, 'error');
       }
     }, UNDO_MS);
   };
@@ -197,7 +198,7 @@ export default function CounselingTab({ studentId, onChanged }) {
           );
         }}
       </Async>
-      {editing ? <NoteForm studentId={studentId} note={editing.note} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} /> : null}
+      {editing ? <NoteForm key={editing.note?.note_id ?? 'new'} studentId={studentId} note={editing.note} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} /> : null}
     </div>
   );
 }

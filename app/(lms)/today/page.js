@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useCallback, useRef } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import TodayBoard from '@/components/domain/today/TodayBoard';
 import LessonRecorder from '@/components/domain/today/LessonRecorder';
@@ -23,12 +23,19 @@ function TodayView() {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : boot.today;
   const classId = params.get('class') || '';
 
-  const go = (next) => {
+  const navigate = (next) => {
     const q = new URLSearchParams(params.toString());
     Object.entries(next).forEach(([k, v]) => (v ? q.set(k, v) : q.delete(k)));
     if (q.get('date') === boot.today) q.delete('date');
     const qs = q.toString();
     router.push(pathname + (qs ? '?' + qs : ''), { scroll: false });
+  };
+  // Set by LessonRecorder while it is mounted; asks before unsaved edits are thrown away.
+  const guardRef = useRef(null);
+  const registerGuard = useCallback((fn) => { guardRef.current = fn; }, []);
+  const go = async (next) => {
+    if (guardRef.current && !(await guardRef.current())) return;
+    navigate(next);
   };
 
   const rel = relativeDay(date, boot.today);
@@ -48,7 +55,7 @@ function TodayView() {
         )}
       />
       {classId ? (
-        <LessonRecorder classId={classId} date={date} onGoDate={(d) => go({ date: d })} />
+        <LessonRecorder classId={classId} date={date} onGoDate={(d) => navigate({ date: d })} onGuard={registerGuard} />
       ) : (
         <>
           <WeekStrip date={date} today={boot.today} onPick={(d) => go({ date: d })} />

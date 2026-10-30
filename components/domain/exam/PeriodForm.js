@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Modal from '@/components/ui/Modal';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -61,7 +61,7 @@ export default function PeriodForm({ initial, onClose, onSaved }) {
         {isEdit ? <p className="hint" style={{ margin: 0 }}>기간을 줄이면 범위를 벗어난 임시 배정 날짜도 함께 줄어듭니다.</p> : null}
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : isEdit ? '저장' : '만들고 편성하기'}</button>
         </div>
       </form>
