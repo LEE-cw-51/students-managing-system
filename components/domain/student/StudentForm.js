@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Modal from '@/components/ui/Modal';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import { useDirty } from '@/components/ui/useDirty';
 import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -96,7 +96,7 @@ export default function StudentForm({ initial, onClose, onSaved }) {
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
         </div>
       </form>

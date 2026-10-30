@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Modal from '@/components/ui/Modal';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import { useDirty } from '@/components/ui/useDirty';
 import Field from '@/components/ui/Field';
 import TimeInput from '@/components/ui/TimeInput';
@@ -78,7 +78,7 @@ export default function MakeupForm({ date, onClose, onSaved }) {
         <Field label="메모">{(id) => <textarea id={id} rows={2} value={form.memo} onChange={(e) => set('memo', e.target.value)} />}</Field>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '등록'}</button>
         </div>
       </form>

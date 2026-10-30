@@ -299,6 +299,38 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .minibars-x { display: flex; margin-top: 6px; }
 .minibars-x span { text-align: center; font-size: 12px; color: var(--muted); }
 
+/* ---------- Grade trend (student vs class average, 0–100) ---------- */
+.grade-trend { margin: 0; }
+.grade-trend-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+.grade-trend-legend { display: flex; gap: 14px; color: var(--ink); font-weight: 600; }
+.grade-trend-legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.grade-trend-legend i.student { background: var(--navy); }
+.grade-trend-legend i.avg { background: var(--terracotta); }
+.grade-trend-plot { display: flex; gap: 6px; }
+.grade-trend-y { position: relative; width: 28px; flex: none; }
+.grade-trend-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.grade-trend-canvas { position: relative; flex: 1; min-width: 0; }
+.grade-trend-canvas svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.grade-trend-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.grade-trend-grid.is-axis { stroke: var(--muted); }
+.grade-trend-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.grade-trend-line.student { stroke: var(--navy); }
+.grade-trend-line.avg { stroke: var(--terracotta); }
+.grade-trend-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; border: 2px solid #fff; }
+.grade-trend-dot.student { background: var(--navy); }
+.grade-trend-dot.avg { background: var(--terracotta); }
+.grade-trend-dot.is-hover { width: 10px; height: 10px; }
+.grade-trend-hit { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); background: transparent; border: 0; padding: 0; cursor: default; }
+.grade-trend-hit:focus-visible { outline: 2px solid var(--navy); outline-offset: -2px; }
+.grade-trend-tip {
+  position: absolute; top: 0; transform: translate(-50%, -100%); background: var(--ink); color: #fff;
+  border-radius: 8px; padding: 6px 10px; font-size: 12px; display: grid; gap: 2px; white-space: nowrap; pointer-events: none; z-index: 2;
+}
+.grade-trend-tip.is-start { transform: translate(0, -100%); }
+.grade-trend-tip.is-end { transform: translate(-100%, -100%); }
+.grade-trend-x { display: flex; margin-top: 6px; margin-left: 34px; }
+.grade-trend-x span { text-align: center; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+
 /* ---------- Class workspace ---------- */
 .hw-matrix th.student, .hw-matrix td.student { text-align: center; min-width: 64px; }
 .hw-matrix td.sticky, .hw-matrix th.sticky { position: sticky; left: 0; background: #fff; z-index: 1; min-width: 200px; }
@@ -312,6 +344,8 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .score-bar .track { flex: 1; height: 10px; background: #efe9de; border-radius: 4px; overflow: hidden; }
 .score-bar .fill { height: 100%; background: var(--navy); border-radius: 0 4px 4px 0; }
 .score-bar .val { width: 52px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.score-who { display: inline-flex; align-items: baseline; gap: 6px; min-width: 7.5rem; flex: none; }
+.grade-rank { font-weight: 700; color: var(--navy); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .plan-vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .plan-vs .label { font-size: 12px; color: var(--muted); }
 .notice-bar { border-radius: var(--radius); padding: 12px 14px; background: var(--amber-soft); color: var(--amber); border: 1px solid #ecd9a5; }
@@ -346,7 +380,8 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .follow-box { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px 14px; margin: 0; }
 .follow-box legend { padding: 0 6px; }
 .follow-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 14px; }
-.grade-row { display: grid; grid-template-columns: 220px 1fr 150px; gap: 12px; align-items: center; }
+.grade-row { display: grid; grid-template-columns: 220px 1fr 120px; gap: 12px; align-items: center; }
+.grade-row .val { width: auto; min-width: 52px; }
 .grade-avg { font-size: 13px; text-align: right; }
 .avg-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--terracotta); border-radius: 1px; }
 @media (max-width: 640px) {
@@ -413,6 +448,8 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .score-input { width: 72px; text-align: center; }
 .sr-progress { flex: 1 1 260px; min-width: 220px; }
 .sr-progress input { flex: 1; min-width: 0; min-height: 38px; }
+.sr-paper { flex: 1 1 100%; flex-wrap: wrap; }
+.sr-paper input:not(.score-input) { flex: 1 1 160px; min-width: 0; min-height: 38px; }
 .sr-note { flex: 1 1 240px; min-width: 240px; }
 .sr-note input { min-height: 38px; }
 .save-bar {
@@ -432,7 +469,7 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
   .week-day { padding: 6px 2px; }
   .week-day .wd-count { font-size: 10px; white-space: normal; text-align: center; }
   .student-row { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 4px; }
-  .sr-name, .sr-note, .sr-progress { flex: none; min-width: 0; }
+  .sr-name, .sr-note, .sr-progress, .sr-paper { flex: none; min-width: 0; }
   .sr-field { justify-content: space-between; }
   .save-bar { bottom: 8px; }
 }

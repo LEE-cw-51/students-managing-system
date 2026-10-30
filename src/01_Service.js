@@ -502,19 +502,21 @@ LMS.createService = function (store) {
       return LMS.inRange(row.lesson_date, startDate, endDate);
     });
     var cache = {};
-    function classAvg(date, classId) {
-      var key = LMS.toStr(date) + '|' + LMS.toStr(classId);
+    function classAvg(lesson) {
+      var date = LMS.toStr(lesson.lesson_date);
+      var classId = LMS.toStr(lesson.class_id);
+      var key = date + '|' + classId + '|' + LMS.lessonTestPaper(lesson).key;
       if (!Object.prototype.hasOwnProperty.call(cache, key)) {
         cache[key] = LMS.computeDailyClassTestAverage(all.filter(function (row) {
-          return LMS.toStr(row.lesson_date) === LMS.toStr(date) &&
-            LMS.toStr(row.class_id) === LMS.toStr(classId);
-        }));
+          return LMS.toStr(row.lesson_date) === date &&
+            LMS.toStr(row.class_id) === classId;
+        }), lesson);
       }
       return cache[key];
     }
     return rows.map(function (row) {
       return Object.assign({}, row, {
-        class_test_average: classAvg(row.lesson_date, row.class_id)
+        class_test_average: classAvg(row)
       });
     }).sort(function (a, b) {
       return LMS.toStr(b.lesson_date).localeCompare(LMS.toStr(a.lesson_date));
@@ -597,6 +599,31 @@ LMS.createService = function (store) {
     return Object.assign({}, row);
   }
 
+  /**
+   * Fills test max / difficulty into a lesson input before validation, given the stored row.
+   * A tested row leaving its own paper takes both from the class record, so stale own-paper values
+   * sent along never survive the switch; the input's values are kept only when the class has no max.
+   */
+  function applyTestPaper_(input, stored) {
+    var ownStored = !!stored && LMS.toStr(stored.test_own) === 'Y';
+    if (ownStored && input.test_own === undefined) {
+      // An input silent about the paper keeps the student's own paper and its values.
+      if (LMS.isBlank(input.test_max_score)) input.test_max_score = stored.test_max_score;
+      if (LMS.isBlank(input.test_difficulty)) input.test_difficulty = stored.test_difficulty;
+      return input;
+    }
+    if (LMS.toStr(input.test_status) !== '실시' || LMS.toStr(input.test_own).toUpperCase() === 'Y') return input;
+    var session = sessionSync.find(input.lesson_date, input.class_id);
+    if (!session || LMS.isBlank(session.test_max_score)) return input;
+    if (ownStored) {
+      input.test_max_score = session.test_max_score;
+      input.test_difficulty = LMS.toStr(session.test_difficulty);
+    } else if (LMS.isBlank(input.test_max_score)) {
+      input.test_max_score = session.test_max_score;
+    }
+    return input;
+  }
+
   function saveLessonsBatch(payload) {
     var list;
     var classNotice;
@@ -610,14 +637,15 @@ LMS.createService = function (store) {
     } else {
       list = [payload];
     }
-    var validated = list.map(function (item) {
-      var input = Object.assign({}, item);
-      if (LMS.toStr(input.test_status) === '실시' && LMS.isBlank(input.test_max_score)) {
-        var session = sessionSync.find(input.lesson_date, input.class_id);
-        if (session && !LMS.isBlank(session.test_max_score)) input.test_max_score = session.test_max_score;
-      }
-      return LMS.validateLessonInput(input);
+    var storedByKey = {};
+    table('Lessons').forEach(function (row) {
+      storedByKey[LMS.lessonKey(row.lesson_date, row.student_id, row.class_id)] = row;
     });
+    var prepared = list.map(function (item) {
+      var input = Object.assign({}, item);
+      return applyTestPaper_(input, storedByKey[LMS.lessonKey(input.lesson_date, input.student_id, input.class_id)]);
+    });
+    var validated = prepared.map(LMS.validateLessonInput);
     var students = table('Students');
     var classes = table('Classes');
     validated.forEach(function (row) {
@@ -653,10 +681,14 @@ LMS.createService = function (store) {
           updated_at: ts
         });
         // Fields left out of the input keep their stored text; the class record re-aligns them below.
-        ['progress', 'homework', 'progress_own'].forEach(function (k) {
+        ['progress', 'homework', 'progress_own', 'test_own', 'test_title'].forEach(function (k) {
           if ((list[i] || {})[k] === undefined) merged[k] = prev[k];
         });
         if (!LMS.toStr(merged.progress)) merged.progress_own = '';
+        if (LMS.toStr(merged.test_status) !== '실시' || LMS.toStr(merged.test_own) !== 'Y') {
+          merged.test_own = '';
+          merged.test_title = '';
+        }
         lessons[existingIndex] = merged;
         saved.push(merged);
       } else {
@@ -671,7 +703,8 @@ LMS.createService = function (store) {
       }
     });
     saveTable('Lessons', lessons);
-    sessionSync.afterLessonsSaved(list, saved);
+    // Paper-adjusted inputs, so a stale own-paper value never becomes the class record.
+    sessionSync.afterLessonsSaved(prepared, saved);
     if (classNotice !== undefined && saved.length) {
       saveClassSessionNotice(saved[0].lesson_date, saved[0].class_id, classNotice);
     }
@@ -709,13 +742,17 @@ LMS.createService = function (store) {
     var lessons = table('Lessons');
     var prev = LMS.findById(lessons, 'lesson_id', data.lesson_id);
     if (!prev) throw new Error('수업 기록을 찾을 수 없습니다.');
-    var merged = LMS.validateLessonInput(Object.assign({}, prev, data, {
+    var input = applyTestPaper_(Object.assign({}, prev, data, {
       lesson_id: prev.lesson_id
-    }));
+    }), prev);
+    var merged = LMS.validateLessonInput(input);
+    var raw = Object.assign({}, data);
+    if (data.test_max_score !== undefined) raw.test_max_score = input.test_max_score;
+    if (data.test_difficulty !== undefined) raw.test_difficulty = input.test_difficulty;
     prev = Object.assign(prev, merged, { updated_at: now(), lesson_id: prev.lesson_id, created_at: prev.created_at });
     saveTable('Lessons', lessons);
     // Progress / homework / difficulty are class values: an edit on one row edits the class record.
-    sessionSync.afterLessonsSaved([data], [prev]);
+    sessionSync.afterLessonsSaved([raw], [prev]);
     return LMS.findById(table('Lessons'), 'lesson_id', prev.lesson_id) || prev;
   }
 
@@ -1275,23 +1312,34 @@ LMS.createService = function (store) {
     };
   }
 
-  function getTodayClassSession(date, classId) {
-    var cls = requireClass(classId);
-    var periods = examPeriods_();
+  /** Students recorded for a class date: the roster plus anyone already recorded that day off it. */
+  function recordStudents_(date, classId, lessons) {
     var targets = assignments.recordTargets(classId, date);
-    var students = targets.students;
-    var onLeave = targets.onLeave.map(function (s) { return { student_id: s.student_id, name: s.name }; });
-    var lessons = getLessons(date, classId);
-    var byStudent = {};
-    lessons.forEach(function (l) {
-      byStudent[l.student_id] = Object.assign({}, l, { progress_own: LMS.toStr(l.progress_own) === 'Y' ? 'Y' : '' });
-    });
-    // Keep students who already have a record that day even if no longer on the roster.
+    var students = targets.students.slice();
     var allStudents = table('Students');
     lessons.forEach(function (l) {
       if (students.some(function (s) { return s.student_id === l.student_id; })) return;
       var extra = LMS.findById(allStudents, 'student_id', l.student_id);
       if (extra) students.push(Object.assign({}, extra, { off_roster: true }));
+    });
+    return { students: students, onLeave: targets.onLeave };
+  }
+
+  function getTodayClassSession(date, classId) {
+    var cls = requireClass(classId);
+    var periods = examPeriods_();
+    var lessons = getLessons(date, classId);
+    var targets = recordStudents_(date, classId, lessons);
+    var students = targets.students;
+    var onLeave = targets.onLeave.map(function (s) { return { student_id: s.student_id, name: s.name }; });
+    var byStudent = {};
+    lessons.forEach(function (l) {
+      var testOwn = LMS.toStr(l.test_own) === 'Y';
+      byStudent[l.student_id] = Object.assign({}, l, {
+        progress_own: LMS.toStr(l.progress_own) === 'Y' ? 'Y' : '',
+        test_own: testOwn ? 'Y' : '',
+        test_title: testOwn ? LMS.toStr(l.test_title) : ''
+      });
     });
     var prevMeeting = LMS.previousMeetingDateFor(cls, date, periods);
     var lastSession = table('ClassSessions').filter(function (r) {
@@ -1423,8 +1471,13 @@ LMS.createService = function (store) {
     var buildRow = function (s, grade) {
       var absent = LMS.toStr(s.attendance) === '결석';
       var tested = !absent && LMS.toStr(s.test_status) === '실시';
-      if (tested && LMS.isBlank(maxScore)) throw new Error('테스트 만점을 입력해 주세요.');
+      var ownPaper = tested && LMS.toStr(s.test_own) === 'Y';
       var sid = LMS.toStr(s.student_id);
+      if (ownPaper && LMS.isBlank(s.test_max_score)) {
+        var who = LMS.findById(table('Students'), 'student_id', sid);
+        throw new Error((who ? who.name : sid) + ' 학생 시험지 만점을 입력해 주세요.');
+      }
+      if (tested && !ownPaper && LMS.isBlank(maxScore)) throw new Error('테스트 만점을 입력해 주세요.');
       var replace = LMS.normalizeHomeworkReplaceClass(s.homework_replace_class);
       var hwTitles = replace ? (personalByStudent[sid] || []) : classHwTitles.concat(personalByStudent[sid] || []);
       var ownText = LMS.toStr(s.progress).trim();
@@ -1437,8 +1490,10 @@ LMS.createService = function (store) {
         attendance: absent ? '결석' : '출석',
         test_status: tested ? '실시' : '미실시',
         test_score: tested ? s.test_score : '',
-        test_max_score: tested ? maxScore : '',
-        test_difficulty: tested ? difficulty : '',
+        test_max_score: !tested ? '' : (ownPaper ? s.test_max_score : maxScore),
+        test_difficulty: !tested ? '' : (ownPaper ? LMS.toStr(s.test_difficulty) : difficulty),
+        test_own: ownPaper ? 'Y' : '',
+        test_title: ownPaper ? LMS.toStr(s.test_title) : '',
         assignment_completion: LMS.toStr(s.assignment_completion) || grade || '',
         concentration: absent ? 'ABSENT' : LMS.toStr(s.concentration),
         homework: hwTitles.join('\n'),
@@ -1452,14 +1507,22 @@ LMS.createService = function (store) {
       return row;
     };
     // Validate every row up front so a bad score never leaves a half-saved lesson.
+    var allowed = recordStudents_(date, classId, getLessons(date, classId)).students;
+    var requireAllowed = function (studentId) {
+      var student = requireStudent(studentId);
+      if (!allowed.some(function (a) { return LMS.toStr(a.student_id) === LMS.toStr(studentId); })) {
+        throw new Error('이 반 명단에 없는 학생입니다: ' + student.name);
+      }
+    };
     students.forEach(function (s) {
-      requireStudent(s.student_id);
+      requireAllowed(s.student_id);
       LMS.validateLessonInput(buildRow(s, ''));
     });
 
     var grades = {};
     var prior = p.prior || {};
     var checks = Array.isArray(prior.checks) ? prior.checks : [];
+    checks.forEach(function (c) { requireAllowed(c && c.student_id); });
     if (LMS.isIsoDate(LMS.toStr(prior.assigned_date)) && checks.length) {
       var checked = saveHomeworkChecks({ lesson_date: prior.assigned_date, class_id: classId, check_date: date, checks: checks });
       (checked.grades || []).forEach(function (g) { grades[g.student_id] = g.assignment_completion; });
@@ -1632,7 +1695,7 @@ LMS.createService = function (store) {
   function generateDailyReport(lessonId) {
     var lesson = getLesson(lessonId);
     var student = requireStudent(lesson.student_id);
-    var classAvg = LMS.computeDailyClassTestAverage(getLessons(lesson.lesson_date, lesson.class_id));
+    var classAvg = LMS.computeDailyClassTestAverage(getLessons(lesson.lesson_date, lesson.class_id), lesson);
     var notice = getClassSessionNotice(lesson.lesson_date, lesson.class_id);
     var text = LMS.buildDailyReport(lesson, student, settings(), classAvg, notice);
     return { lesson: lesson, student: student, text: text, class_test_average: classAvg };
@@ -1642,7 +1705,6 @@ LMS.createService = function (store) {
     var lessons = getLessons(date, classId);
     var set = settings();
     var students = table('Students');
-    var classAvg = LMS.computeDailyClassTestAverage(lessons);
     var notice = getClassSessionNotice(date, classId);
     var reports = lessons.map(function (lesson) {
       var student = LMS.findById(students, 'student_id', lesson.student_id) || { name: '학생' };
@@ -1650,13 +1712,13 @@ LMS.createService = function (store) {
         lesson_id: lesson.lesson_id,
         student_id: lesson.student_id,
         student_name: student.name,
-        text: LMS.buildDailyReport(lesson, student, set, classAvg, notice)
+        text: LMS.buildDailyReport(lesson, student, set, LMS.computeDailyClassTestAverage(lessons, lesson), notice)
       };
     }).sort(function (a, b) {
       return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
     });
     return {
-      class_test_average: classAvg,
+      class_test_average: LMS.computeDailyClassTestAverage(lessons, {}),
       reports: reports
     };
   }
@@ -1845,6 +1907,7 @@ LMS.createService = function (store) {
     if (isUpdate) {
       row = LMS.findById(rows, 'note_id', input.note_id);
       if (!row) throw new Error('상담일지를 찾을 수 없습니다.');
+      if (LMS.toStr(row.student_id) !== input.student_id) throw new Error('다른 학생의 상담일지는 수정할 수 없습니다.');
       row.kind = input.kind;
       row.counsel_date = input.counsel_date;
       row.title = input.title;
@@ -1960,6 +2023,7 @@ LMS.createService = function (store) {
     if (isUpdate) {
       var prev = LMS.findById(rows, 'makeup_id', input.makeup_id);
       if (!prev) throw new Error('보강 일정을 찾을 수 없습니다.');
+      if (LMS.toStr(prev.student_id) !== input.student_id) throw new Error('다른 학생의 보강으로 바꿀 수 없습니다.');
       var updated = makeupRecord(input, input.student_id, prev.makeup_id, ts, prev);
       Object.keys(updated).forEach(function (k) {
         prev[k] = updated[k];

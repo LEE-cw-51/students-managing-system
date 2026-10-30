@@ -1,13 +1,21 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 // Open modals, innermost last. Only the top one reacts to Escape and Tab.
 const stack = [];
 const FOCUSABLE = 'a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** `dirty` asks before Escape, backdrop click or ✕ throws away unsaved input. */
+const CloseContext = createContext(null);
+
+/** Cancel button for a modal's body or footer; goes through the same `dirty` check as ✕. */
+export function ModalCancel({ children = '취소', className = 'btn secondary' }) {
+  const requestClose = useContext(CloseContext);
+  return <button type="button" className={className} onClick={requestClose}>{children}</button>;
+}
+
+/** `dirty` asks before Escape, backdrop click, ✕ or <ModalCancel> throws away unsaved input. */
 export default function Modal({ title, onClose, children, footer, wide, dirty }) {
   const ref = useRef(null);
   const confirm = useConfirm();
@@ -57,16 +65,18 @@ export default function Modal({ title, onClose, children, footer, wide, dirty })
   }, []);
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}
-        style={wide ? { width: 'min(880px, 100%)' } : undefined}>
-        <div className="modal-head">
-          <h2>{title}</h2>
-          <button type="button" className="btn ghost modal-close" onClick={requestClose} aria-label="닫기">✕</button>
+    <CloseContext.Provider value={requestClose}>
+      <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}
+          style={wide ? { width: 'min(880px, 100%)' } : undefined}>
+          <div className="modal-head">
+            <h2>{title}</h2>
+            <button type="button" className="btn ghost modal-close" onClick={requestClose} aria-label="닫기">✕</button>
+          </div>
+          <div className="modal-body">{children}</div>
+          {footer ? <div className="modal-foot">{footer}</div> : null}
         </div>
-        <div className="modal-body">{children}</div>
-        {footer ? <div className="modal-foot">{footer}</div> : null}
       </div>
-    </div>
+    </CloseContext.Provider>
   );
 }

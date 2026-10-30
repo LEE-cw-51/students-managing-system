@@ -47,7 +47,7 @@ LMS.TABLES = {
     'test_status', 'test_score', 'test_max_score', 'test_difficulty',
     'assignment_completion', 'concentration', 'progress', 'homework',
     'special_note', 'student_notice', 'homework_replace_class', 'test_scope',
-    'created_at', 'updated_at', 'progress_own'
+    'created_at', 'updated_at', 'progress_own', 'test_title', 'test_own'
   ],
   ClassSessionNotices: [
     'id', 'lesson_date', 'class_id', 'class_notice', 'created_at', 'updated_at'
@@ -865,7 +865,14 @@ LMS.computeScoreStats = function (scores) {
   };
 };
 
-LMS.computeDailyClassTestAverage = function (lessons) {
+/** With `lesson`, only students who sat the same paper (LMS.lessonTestPaper key) are averaged. */
+LMS.computeDailyClassTestAverage = function (lessons, lesson) {
+  if (lesson) {
+    var paperKey = LMS.lessonTestPaper(lesson).key;
+    lessons = (lessons || []).filter(function (row) {
+      return LMS.lessonTestPaper(row).key === paperKey;
+    });
+  }
   var collected = LMS.collectRawScoresForStats(lessons);
   if (!collected.comparable) {
     return {
@@ -1748,8 +1755,10 @@ LMS.validateLessonInput = function (data) {
     var s = LMS.toNum(score);
     var m = LMS.toNum(max);
     if (s === null) throw new Error('테스트 점수는 숫자여야 합니다.');
+    if (s < 0) throw new Error('테스트 점수는 0 이상이어야 합니다.');
     if (m === null) throw new Error('테스트 만점은 숫자여야 합니다.');
     if (m <= 0) throw new Error('테스트 만점은 0보다 커야 합니다.');
+    if (s > m) throw new Error('테스트 점수가 만점보다 클 수 없습니다.');
     score = s;
     max = m;
   } else {
@@ -1773,6 +1782,8 @@ LMS.validateLessonInput = function (data) {
   var progress = LMS.toStr(data.progress);
   // A student's own progress needs text; an empty one follows the class progress again.
   var progressOwn = LMS.toStr(data.progress_own).toUpperCase() === 'Y' && progress ? 'Y' : '';
+  // Only a tested row can carry its own paper; title / max / difficulty then belong to the student.
+  var testOwn = LMS.toStr(data.test_own).toUpperCase() === 'Y' && testStatus === '실시' ? 'Y' : '';
 
   return {
     lesson_id: LMS.toStr(data.lesson_id),
@@ -1784,6 +1795,8 @@ LMS.validateLessonInput = function (data) {
     test_score: score,
     test_max_score: max,
     test_difficulty: difficulty,
+    test_own: testOwn,
+    test_title: testOwn ? LMS.toStr(data.test_title) : '',
     assignment_completion: assignment,
     concentration: concentration,
     progress: progress,
@@ -1792,6 +1805,35 @@ LMS.validateLessonInput = function (data) {
     special_note: LMS.toStr(data.special_note),
     student_notice: LMS.toStr(data.student_notice),
     homework_replace_class: LMS.normalizeHomeworkReplaceClass(data.homework_replace_class)
+  };
+};
+
+/**
+ * The paper a student lesson was tested on: the student's own (test_own 'Y') or the class session's.
+ * key groups students who sat the same paper; every class-paper row shares 'class'.
+ */
+LMS.lessonTestPaper = function (lesson, session) {
+  lesson = lesson || {};
+  session = session || {};
+  if (LMS.toStr(lesson.test_own) === 'Y') {
+    var title = LMS.toStr(lesson.test_title);
+    var max = LMS.toNum(lesson.test_max_score);
+    var difficulty = LMS.toStr(lesson.test_difficulty);
+    return {
+      own: true,
+      title: title,
+      max: max,
+      difficulty: difficulty,
+      key: ['own', title, max === null ? '' : max, difficulty].join('|')
+    };
+  }
+  var classMax = LMS.toNum(lesson.test_max_score);
+  return {
+    own: false,
+    title: LMS.toStr(session.test_title),
+    max: classMax === null ? LMS.toNum(session.test_max_score) : classMax,
+    difficulty: LMS.toStr(lesson.test_difficulty) || LMS.toStr(session.test_difficulty),
+    key: 'class'
   };
 };
 

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { Async, EmptyState, Kpi } from '@/components/ui/Feedback';
+import GradeTrend from '@/components/ui/GradeTrend';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
@@ -449,10 +450,20 @@ export function GradesTab({ studentId }) {
   const state = useApi(() => api('getStudentGrades', studentId, { start: r.start, end: r.end }), [studentId, r.range]);
   return (
     <div className="stack">
-      <div className="split"><span className="muted">평균·최고·최저는 100점 환산입니다. 각 시험은 원점수이고, 막대의 세로선은 같은 날 반 평균입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">그래프와 평균·최고·최저는 100점 환산입니다. 각 시험은 원점수이고, 막대의 세로선은 같은 날 반 평균입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => d.rows.length ? (
           <>
+            <section className="card">
+              <GradeTrend points={[...d.rows].reverse().map((t) => ({
+                date: t.date,
+                title: (t.title || t.class_name) + (t.own_paper ? ' (다른 시험지)' : ''),
+                score: t.score_100,
+                average: t.class_average_100,
+                rank: t.rank,
+                taken: t.taken
+              }))} />
+            </section>
             <div className="kpis">
               <Kpi label="응시" value={`${d.rows.length}회`} />
               <Kpi label="평균" value={score(d.stats.average)} note="100점 환산" />
@@ -465,15 +476,16 @@ export function GradesTab({ studentId }) {
                   const max = t.max_score || 100;
                   return (
                     <div key={t.date + t.class_id} role="listitem" className="grade-row">
-                      <div className="grade-meta"><strong>{shortDate(t.date)}</strong> <span className="muted">{t.title || t.class_name}{t.difficulty ? ` · ${t.difficulty}` : ''}{t.scope ? ` · 범위 ${t.scope}` : ''}</span></div>
+                      <div className="grade-meta"><strong>{shortDate(t.date)}</strong> <span className="muted">{t.title || t.class_name}{t.difficulty ? ` · ${t.difficulty}` : ''}{t.scope && !t.own_paper ? ` · 범위 ${t.scope}` : ''}</span>{t.own_paper ? <> <span className="tag">다른 시험지</span></> : null}</div>
                       <div className="score-bar">
                         <span className="track" aria-hidden="true" style={{ position: 'relative' }}>
                           <span className="fill" style={{ width: `${Math.min(100, (t.score / max) * 100)}%`, display: 'block' }} />
                           {t.class_average !== null ? <span className="avg-tick" style={{ left: `${Math.min(100, (t.class_average / max) * 100)}%` }} /> : null}
                         </span>
                         <span className="val">{score(t.score)}/{max}{t.normalized !== null && t.normalized !== undefined ? <span className="muted"> · 환산 {score(t.normalized)}</span> : null}</span>
+                        {t.rank != null ? <span className="grade-rank">{t.rank}등 / {t.taken}명</span> : null}
                       </div>
-                      <div className="muted grade-avg">반 평균 {score(t.class_average)} · {t.rank}/{t.taken}등</div>
+                      <div className="muted grade-avg">{t.own_paper ? '같은 시험지 평균' : '반 평균'} {score(t.class_average)}</div>
                     </div>
                   );
                 })}

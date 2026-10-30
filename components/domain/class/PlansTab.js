@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useDirty } from '@/components/ui/useDirty';
-import Modal from '@/components/ui/Modal';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
@@ -128,7 +128,7 @@ function PlanForm({ classId, target, curriculum, draft, onClose, onSaved }) {
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
           {plan && plan.plan_id && !draft ? <button type="button" className="btn ghost" onClick={remove} style={{ marginRight: 'auto' }}>삭제</button> : null}
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : draft ? '초안에 반영' : '저장'}</button>
         </div>
       </form>
@@ -165,7 +165,7 @@ function SuggestionForm({ draft, item, onClose, onSaved }) {
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <ModalCancel />
           <button type="submit" className="btn">초안에 반영</button>
         </div>
       </form>
