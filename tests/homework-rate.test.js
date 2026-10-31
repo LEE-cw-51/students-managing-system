@@ -30,7 +30,7 @@ const logRow = (api, classId, date) => api.getClassHomeworkLog(classId, MONTH).r
 
 describe('LMS.homeworkRate', () => {
   it('counts only check rows and returns null when nothing was checked', () => {
-    assert.deepEqual(LMS.homeworkRate([{ status: '완료' }, { status: '미완료' }, { status: '완료' }]), { done: 2, checked: 3, rate: 67 });
+    assert.deepEqual(LMS.homeworkRate([{ status: 'A' }, { status: 'F' }, { status: 'A' }]), { done: 2, checked: 3, rate: 83 });
     assert.deepEqual(LMS.homeworkRate([]), { done: 0, checked: 0, rate: null });
     assert.deepEqual(LMS.homeworkRate(undefined), { done: 0, checked: 0, rate: null });
   });
@@ -45,50 +45,53 @@ describe('숙제 완료율 across screens', () => {
     const stay = api.createStudent({ name: '남음', class_id: a.class_id, enrollment_date: '2026-03-01' });
     const mover = api.createStudent({ name: '이동', class_id: a.class_id, enrollment_date: '2026-03-01' });
     api.moveStudent({ student_id: mover.student_id, class_id: b.class_id, start_date: '2026-09-15' });
-    giveHomework(api, a.class_id, '2026-09-02', ['p1'], [[stay, 0, '완료'], [mover, 0, '완료']]);
-    giveHomework(api, a.class_id, '2026-09-09', ['p2'], [[stay, 0, '미완료'], [mover, 0, '완료']]);
+    giveHomework(api, a.class_id, '2026-09-02', ['p1'], [[stay, 0, 'A'], [mover, 0, 'A']]);
+    giveHomework(api, a.class_id, '2026-09-09', ['p2'], [[stay, 0, 'F'], [mover, 0, 'A']]);
     // A stray check for a student who had already left A must not count anywhere.
-    giveHomework(api, a.class_id, '2026-09-21', ['p3'], [[stay, 0, '완료'], [mover, 0, '완료']]);
-    giveHomework(api, b.class_id, '2026-09-22', ['q1'], [[mover, 0, '미완료']]);
+    giveHomework(api, a.class_id, '2026-09-21', ['p3'], [[stay, 0, 'A'], [mover, 0, 'A']]);
+    giveHomework(api, b.class_id, '2026-09-22', ['q1'], [[mover, 0, 'F']]);
     return { api, a, b, stay, mover };
   }
 
   it('gives the same class rate on the overview and the stats tab when a student left mid-month', () => {
     const { api, a } = leaverSetup();
-    // stay 2/3 + mover's two A-days before leaving 2/2 = 4/5.
-    assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 80);
-    assert.equal(trendRate(api, a.class_id), 80);
+    // stay A,F,A (100+50+100) + mover's two A's before leaving = 450/5.
+    assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 90);
+    assert.equal(trendRate(api, a.class_id), 90);
   });
 
   it('counts the leaver in the new class only from the move date', () => {
     const { api, b, mover } = leaverSetup();
-    assert.equal(api.getClassOverview(b.class_id).month.homework_rate, 0);
-    assert.equal(trendRate(api, b.class_id), 0);
-    // A 09-02 완료, A 09-09 완료, B 09-22 미완료; the stray A 09-21 check is left out.
-    assert.equal(api.getStudentOverview(mover.student_id).month.homework_rate, 67);
+    assert.equal(api.getClassOverview(b.class_id).month.homework_rate, 50);
+    assert.equal(trendRate(api, b.class_id), 50);
+    // A 09-02 A, A 09-09 A, B 09-22 F; the stray A 09-21 check is left out. (100+100+50)/3.
+    assert.equal(api.getStudentOverview(mover.student_id).month.homework_rate, 83);
     const tab = api.getStudentHomework(mover.student_id, MONTH);
-    assert.equal(tab.rate, 67);
+    assert.equal(tab.rate, 83);
     assert.equal(tab.checked, 3);
   });
 
   it('keeps counting a student who is on leave now', () => {
     const { api, a, stay } = leaverSetup();
     api.updateStudent(Object.assign({}, api.getStudent(stay.student_id), { status: '휴원' }));
-    assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 80);
-    assert.equal(trendRate(api, a.class_id), 80);
+    assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 90);
+    assert.equal(trendRate(api, a.class_id), 90);
   });
 
   it('leaves unchecked items out of every rate', () => {
     const api = service('2026-09-28');
     const a = api.createClass({ class_name: 'A반', weekday: '월/수', start_time: '18:00', end_time: '20:00' });
     const s = api.createStudent({ name: '부분', class_id: a.class_id, enrollment_date: '2026-03-01' });
-    giveHomework(api, a.class_id, '2026-09-21', ['p1', 'p2'], [[s, 0, '완료']]);
+    giveHomework(api, a.class_id, '2026-09-21', ['p1', 'p2'], [[s, 0, 'A']]);
     assert.equal(api.getStudentOverview(s.student_id).month.homework_rate, 100);
     assert.equal(api.getStudentHomework(s.student_id, MONTH).rate, 100);
     const row = logRow(api, a.class_id, '2026-09-21');
     assert.equal(row.rate, 100);
     assert.equal(row.checked, true);
-    assert.deepEqual(row.cells[s.student_id], { done: 1, total: 2, checked: 1, missing: [], replace_class: false });
+    assert.deepEqual(row.cells[s.student_id], {
+      done: 1, total: 2, checked: 1, missing: [], replace_class: false, letter: 'A',
+      grades: [{ title: 'p1', grade: 'A' }, { title: 'p2', grade: '' }]
+    });
     assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 100);
     assert.equal(trendRate(api, a.class_id), 100);
   });
@@ -118,18 +121,18 @@ describe('AI plan input homework_rate', () => {
     const [hong, kim, lee] = ['홍', '김', '이'].map((name) => api.createStudent({ name, grade: '중2', class_id: cls.class_id, enrollment_date: '2026-03-01' }));
     const other = api.createClass({ class_name: '다른반', weekday: '화/목', start_time: '18:00', end_time: '20:00' });
     api.moveStudent({ student_id: lee.student_id, class_id: other.class_id, start_date: '2026-09-08' });
-    giveHomework(api, cls.class_id, '2026-09-07', ['p1', 'p2'], [[hong, 0, '완료'], [lee, 0, '미완료'], [lee, 1, '미완료']]);
-    giveHomework(api, cls.class_id, '2026-09-09', ['p3'], [[hong, 0, '미완료'], [lee, 0, '완료']]);
+    giveHomework(api, cls.class_id, '2026-09-07', ['p1', 'p2'], [[hong, 0, 'A'], [lee, 0, 'F'], [lee, 1, 'F']]);
+    giveHomework(api, cls.class_id, '2026-09-09', ['p3'], [[hong, 0, 'F'], [lee, 0, 'A']]);
 
     const context = api.getClassPlanContext(cls.class_id, '2026-09');
     const input = context.input;
     const byId = {};
     Object.entries(context.aliases).forEach(([ref, id]) => { byId[id] = input.students.find((s) => s.ref === ref); });
     assert.equal(byId[lee.student_id], undefined);
-    // hong: p1 완료, p3 미완료; p2 was never checked.
-    assert.equal(byId[hong.student_id].homework_rate, 50);
+    // hong: p1 A, p3 F; p2 was never graded. (100+50)/2.
+    assert.equal(byId[hong.student_id].homework_rate, 75);
     assert.equal(byId[kim.student_id].homework_rate, null);
-    // The class keeps lee's checks from while lee was in it (09-07), not the stray 09-09 one.
-    assert.equal(input.class_stats_last_4_weeks.homework_rate, 25);
+    // The class keeps lee's checks from while lee was in it (09-07), plus hong's 09-09 F. (100+50+50+50)/4.
+    assert.equal(input.class_stats_last_4_weeks.homework_rate, 63);
   });
 });

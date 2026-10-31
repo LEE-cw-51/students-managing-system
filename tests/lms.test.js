@@ -180,7 +180,7 @@ describe('reports and stats', () => {
     assert.doesNotMatch(text, /집중도:/);
     assert.match(text, /1\. 테스트: 미실시/);
     assert.doesNotMatch(text, /반 평균/);
-    assert.match(text, /2\. 과제 이행률: B\(89~70%\)/);
+    assert.match(text, /2\. 과제 이행률: B\(89~80%\)/);
     assert.match(text, /3\. 학습 진도:/);
     assert.match(text, /4\. 과제 안내:/);
     assert.doesNotMatch(text, /과제이행률/);
@@ -665,11 +665,11 @@ describe('teacher features', () => {
       { lesson_date: '2026-09-08', test_status: '실시', test_score: 17, test_max_score: 20, assignment_completion: 'A', concentration: 'A' },
       { lesson_date: '2026-09-10', test_status: '실시', test_score: 16, test_max_score: 20, assignment_completion: 'A', concentration: 'A' },
       { lesson_date: '2026-09-11', test_status: '실시', test_score: 15, test_max_score: 20, assignment_completion: 'B', concentration: 'B' },
-      { lesson_date: '2026-09-12', test_status: '실시', test_score: 10, test_max_score: 20, assignment_completion: 'C', concentration: 'D' },
-      { lesson_date: '2026-09-14', test_status: '실시', test_score: 9, test_max_score: 20, assignment_completion: 'C', concentration: 'D' }
+      { lesson_date: '2026-09-12', test_status: '실시', test_score: 10, test_max_score: 20, assignment_completion: 'D', concentration: 'D' },
+      { lesson_date: '2026-09-14', test_status: '실시', test_score: 9, test_max_score: 20, assignment_completion: 'F', concentration: 'D' }
     ];
     const signals = LMS.detectLearningSignals(lessons);
-    assert.ok(signals.some((s) => s.code === 'assignment_c_streak'));
+    assert.ok(signals.some((s) => s.code === 'assignment_low_streak'));
     assert.ok(signals.some((s) => s.code === 'concentration_low_streak'));
     assert.ok(signals.some((s) => s.code === 'test_score_drop'));
   });
@@ -802,7 +802,7 @@ describe('agenda and tasks', () => {
       class_id: c.class_id,
       attendance: '출석',
       test_status: '미실시',
-      assignment_completion: 'C',
+      assignment_completion: 'D',
       concentration: 'D'
     });
     api.saveLesson({
@@ -811,7 +811,7 @@ describe('agenda and tasks', () => {
       class_id: c.class_id,
       attendance: '출석',
       test_status: '미실시',
-      assignment_completion: 'C',
+      assignment_completion: 'F',
       concentration: 'D'
     });
     const todayAgenda = api.getDayAgenda('2026-09-14');
@@ -1005,6 +1005,15 @@ describe('homework checklist and weekly dashboard', () => {
     assert.equal(LMS.assignmentGradeFromChecks(1, 2), 'C');
     assert.equal(LMS.assignmentGradeFromChecks(7, 10), 'B');
     assert.equal(LMS.assignmentGradeFromChecks(0, 0), '');
+    assert.equal(LMS.aggregateAssignmentGrades(['A', 'F']).grade, 'C');
+    assert.equal(LMS.aggregateAssignmentGrades(['A', 'A', 'F']).grade, 'B');
+    assert.equal(LMS.aggregateAssignmentGrades(['A', 'B']).grade, 'A');
+    assert.equal(LMS.aggregateAssignmentGrades(['E']).grade, 'E');
+    assert.equal(LMS.aggregateAssignmentGrades(['F']).grade, 'F');
+    assert.equal(LMS.aggregateAssignmentGrades(['A', '']).grade, 'A');
+    assert.equal(LMS.aggregateAssignmentGrades([]).grade, '');
+    assert.equal(LMS.assignmentGradeFromScore(50), 'F');
+    assert.equal(LMS.assignmentGradeFromScore(51), 'E');
   });
 
   it('saves homework slots and checks them next class with A/B/C', () => {
@@ -1027,10 +1036,10 @@ describe('homework checklist and weekly dashboard', () => {
       class_id: c.class_id,
       check_date: checkDate,
       checks: [
-        { student_id: a.student_id, item_id: saved.items[0].item_id, status: '완료' },
-        { student_id: a.student_id, item_id: saved.items[1].item_id, status: '완료' },
-        { student_id: b.student_id, item_id: saved.items[0].item_id, status: '완료' },
-        { student_id: b.student_id, item_id: saved.items[1].item_id, status: '미완료' }
+        { student_id: a.student_id, item_id: saved.items[0].item_id, status: 'A' },
+        { student_id: a.student_id, item_id: saved.items[1].item_id, status: 'A' },
+        { student_id: b.student_id, item_id: saved.items[0].item_id, status: 'A' },
+        { student_id: b.student_id, item_id: saved.items[1].item_id, status: 'F' }
       ]
     });
     const byStudent = Object.fromEntries(result.grades.map((g) => [g.student_id, g]));
@@ -1040,7 +1049,38 @@ describe('homework checklist and weekly dashboard', () => {
     const session = api.getTodayClassSession(checkDate, c.class_id);
     assert.equal(session.prior_homework.assigned_date, assigned);
     assert.equal(session.prior_homework.items.length, 2);
-    assert.equal(session.prior_homework.checks_by_student[a.student_id][saved.items[0].item_id], '완료');
+    assert.equal(session.prior_homework.checks_by_student[a.student_id][saved.items[0].item_id], 'A');
+  });
+
+  it('averages item grades onto the lesson and lists them in the daily report', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: '화목토반', weekday: '화/목/토' });
+    const student = api.createStudent({ name: '김동우', class_id: c.class_id });
+    const assigned = '2026-09-12';
+    const checkDate = '2026-09-15';
+    const saved = api.saveSessionHomework({
+      lesson_date: assigned, class_id: c.class_id, titles: ['워크북 10쪽', '오답노트', '프린트']
+    });
+    api.saveLessonsBatch([{
+      lesson_date: checkDate, class_id: c.class_id, student_id: student.student_id,
+      attendance: '출석', assignment_completion: ''
+    }]);
+    const gradeOf = (statuses) => {
+      api.saveHomeworkChecks({
+        lesson_date: assigned,
+        class_id: c.class_id,
+        check_date: checkDate,
+        checks: statuses.map((status, index) => ({ student_id: student.student_id, item_id: saved.items[index].item_id, status }))
+      });
+      return api.getLessons(checkDate, c.class_id)[0].assignment_completion;
+    };
+    assert.equal(gradeOf(['F', '', '']), 'F', 'an ungraded sibling is left out of the average');
+    assert.equal(gradeOf(['A', 'A', 'F']), 'B');
+    const text = api.generateDailyReport(api.getLessons(checkDate, c.class_id)[0].lesson_id).text;
+    assert.match(text, /2\. 과제 이행률: B\(89~80%\)/);
+    assert.match(text, /워크북 10쪽: A/);
+    assert.match(text, /오답노트: A/);
+    assert.match(text, /프린트: F/);
   });
 
   it('builds weekly must-complete slots for 화목토 and 월수금', () => {
@@ -1108,8 +1148,8 @@ describe('homework checklist and weekly dashboard', () => {
       class_id: c.class_id,
       check_date: '2026-09-14',
       checks: [
-        { student_id: s.student_id, index: 0, status: '완료' },
-        { student_id: s.student_id, index: 1, status: '완료' }
+        { student_id: s.student_id, index: 0, status: 'A' },
+        { student_id: s.student_id, index: 1, status: 'A' }
       ]
     });
     assert.equal(checked.items.length, 2);
@@ -1134,8 +1174,8 @@ describe('homework checklist and weekly dashboard', () => {
       class_id: c.class_id,
       check_date: '2026-09-15',
       checks: [
-        { student_id: s.student_id, item_id: id0, status: '완료' },
-        { student_id: s.student_id, item_id: id1, status: '미완료' }
+        { student_id: s.student_id, item_id: id0, status: 'A' },
+        { student_id: s.student_id, item_id: id1, status: 'F' }
       ]
     });
 
@@ -1163,6 +1203,6 @@ describe('homework checklist and weekly dashboard', () => {
       row.item_id === id0 && row.student_id === s.student_id
     );
     assert.ok(check);
-    assert.equal(check.status, '완료');
+    assert.equal(check.status, 'A');
   });
 });

@@ -117,11 +117,11 @@ LMS.CLASS_TYPES = ['정규', '시험대비'];
 LMS.ASSIGNMENT_TYPES = ['정규', '임시'];
 LMS.EXAM_STATUS = ['준비', '진행', '종료', '취소'];
 LMS.SCHOOL_EXAM_TYPES = ['중간', '기말', '기타'];
-LMS.SCHEMA_VERSION = 6;
+LMS.SCHEMA_VERSION = 7;
 LMS.SCHEMA_META_KEY = 'SCHEMA';
 LMS.TEST_STATUS = ['미실시', '실시'];
 LMS.DIFFICULTY = ['상', '중', '하'];
-LMS.ASSIGNMENT = ['A', 'B', 'C'];
+LMS.ASSIGNMENT = ['A', 'B', 'C', 'D', 'E', 'F'];
 LMS.CONCENTRATION = ['A', 'B', 'C', 'D', 'ABSENT'];
 LMS.ATTENDANCE = ['출석', '결석'];
 LMS.REPORT_STATUS = ['임시', '확정'];
@@ -138,7 +138,9 @@ LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
 LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
 LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
 LMS.CURRICULUM_MAX_SESSIONS = 20;
-LMS.HOMEWORK_CHECK_STATUS = ['완료', '미완료'];
+LMS.HOMEWORK_CHECK_STATUS = LMS.ASSIGNMENT;
+/** Points a teacher-entered item grade contributes. The average maps back through the bands below. */
+LMS.ASSIGNMENT_POINTS = { A: 100, B: 89, C: 79, D: 69, E: 59, F: 50 };
 LMS.WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 LMS.DEFAULT_SETTINGS = {
@@ -148,8 +150,11 @@ LMS.DEFAULT_SETTINGS = {
   report_greeting: '안녕하세요.',
   report_closing: '궁금하신 점이 있으시면 언제든지 문의해주시길 바랍니다.\n항상 최선을 다해 지도하겠습니다. 감사합니다.',
   assignment_A: '100~90%',
-  assignment_B: '89~70%',
-  assignment_C: '70% 미만',
+  assignment_B: '89~80%',
+  assignment_C: '79~70%',
+  assignment_D: '69~60%',
+  assignment_E: '59~51%',
+  assignment_F: '50% 이하',
   allowed_emails: ''
 };
 
@@ -600,32 +605,77 @@ LMS.normalizeHomeworkReplaceClass = function (value) {
   return LMS.isHomeworkReplaceClass(value) ? 'Y' : '';
 };
 
-/** Map checklist completion ratio to A/B/C (90%+ A, 70%+ B, else C). */
+/** Letter stored on a homework check. Legacy 완료/미완료 map to A/F. */
+LMS.homeworkGrade = function (value) {
+  var raw = LMS.toStr(value);
+  if (raw === '완료') return 'A';
+  if (raw === '미완료') return 'F';
+  return LMS.assignmentCode(raw);
+};
+
+/** Average of item points → A 90+, B 80+, C 70+, D 60+, E 51+, otherwise F (50 and below). */
+LMS.assignmentGradeFromScore = function (score) {
+  var n = Number(score);
+  if (!isFinite(n)) return '';
+  if (n >= 90) return 'A';
+  if (n >= 80) return 'B';
+  if (n >= 70) return 'C';
+  if (n >= 60) return 'D';
+  if (n >= 51) return 'E';
+  return 'F';
+};
+
+/**
+ * Average the entered item grades. Ungraded values are left out.
+ * Returns { grade, score, count }; grade is '' when nothing was entered.
+ */
+LMS.aggregateAssignmentGrades = function (grades) {
+  var points = [];
+  (grades || []).forEach(function (g) {
+    var code = LMS.homeworkGrade(g);
+    if (!code || LMS.ASSIGNMENT_POINTS[code] === undefined) return;
+    points.push(LMS.ASSIGNMENT_POINTS[code]);
+  });
+  if (!points.length) return { grade: '', score: null, count: 0 };
+  var sum = 0;
+  points.forEach(function (p) { sum += p; });
+  var score = sum / points.length;
+  return { grade: LMS.assignmentGradeFromScore(score), score: score, count: points.length };
+};
+
+/** Done items count as A (100) and the rest as F (50), then the same average bands. */
 LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
   var total = Number(totalCount) || 0;
   if (total <= 0) return '';
   var done = Number(doneCount) || 0;
   if (done < 0) done = 0;
   if (done > total) done = total;
-  var pct = (done / total) * 100;
-  if (pct >= 90) return 'A';
-  if (pct >= 70) return 'B';
-  return 'C';
+  var grades = [];
+  var i;
+  for (i = 0; i < done; i++) grades.push('A');
+  for (i = done; i < total; i++) grades.push('F');
+  return LMS.aggregateAssignmentGrades(grades).grade;
 };
 
 /**
- * 숙제 완료율 over homework check rows. Unchecked (미확인) cells have no row and are left out;
+ * 숙제 완료율 over homework check rows. Ungraded cells have no row and are left out;
  * callers pass only rows of students who were in the item's class on its lesson date.
- * Returns { done, checked, rate }; rate is null when nothing was checked.
+ * rate is the rounded average of item points (A 100 … F 50). done counts items at D or better (60+).
+ * Returns { done, checked, rate }; rate is null when nothing was graded.
  */
 LMS.homeworkRate = function (cells) {
   var checked = 0;
   var done = 0;
+  var sum = 0;
   (cells || []).forEach(function (c) {
+    var code = LMS.homeworkGrade(c && c.status);
+    if (!code) return;
+    var points = LMS.ASSIGNMENT_POINTS[code];
     checked += 1;
-    if (LMS.toStr(c.status) === '완료') done += 1;
+    sum += points;
+    if (points >= 60) done += 1;
   });
-  return { done: done, checked: checked, rate: checked ? Math.round((done / checked) * 100) : null };
+  return { done: done, checked: checked, rate: checked ? Math.round(sum / checked) : null };
 };
 
 LMS.addDays = function (isoDate, delta) {
@@ -913,12 +963,13 @@ LMS.detectLearningSignals = function (lessons) {
 
   var consecC = 0;
   for (var i = rows.length - 1; i >= 0; i--) {
-    if (LMS.toStr(rows[i].assignment_completion) === 'C') {
+    var low = LMS.assignmentCode(rows[i].assignment_completion);
+    if (low === 'D' || low === 'E' || low === 'F') {
       consecC += 1;
       if (consecC >= 2) {
         signals.push({
-          code: 'assignment_c_streak',
-          label: '과제 이행률 C 2회 연속'
+          code: 'assignment_low_streak',
+          label: '과제 이행률 D 이하 2회 연속'
         });
         break;
       }
@@ -1018,7 +1069,7 @@ LMS.summarizeRecentLearning = function (lessons) {
   });
   var scores = LMS.collectNormalizedScores(rows);
   var stats = LMS.computeScoreStats(scores);
-  var assignment = { A: 0, B: 0, C: 0 };
+  var assignment = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
   var concentration = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
   rows.forEach(function (row) {
     var a = LMS.toStr(row.assignment_completion).charAt(0);
@@ -1040,9 +1091,9 @@ LMS.computeClassSessionTestStats = LMS.computeDailyClassTestAverage;
 LMS.assignmentCode = function (v) {
   var s = LMS.toStr(v).toUpperCase();
   if (!s) return '';
-  if (s.charAt(0) === 'A' || s.charAt(0) === 'B' || s.charAt(0) === 'C') {
-    return s.charAt(0);
-  }
+  var c = s.charAt(0);
+  if (LMS.ASSIGNMENT.indexOf(c) === -1) return '';
+  if (s.length === 1 || /[^A-Z]/.test(s.charAt(1))) return c;
   return '';
 };
 
@@ -1105,7 +1156,7 @@ LMS.summarizeLessonStats = function (lessons) {
 
   var present = 0;
   var absent = 0;
-  var assign = { A: 0, B: 0, C: 0 };
+  var assign = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
   var conc = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
 
   rows.forEach(function (row) {
@@ -1134,6 +1185,9 @@ LMS.summarizeLessonStats = function (lessons) {
     assignment_A: assign.A,
     assignment_B: assign.B,
     assignment_C: assign.C,
+    assignment_D: assign.D,
+    assignment_E: assign.E,
+    assignment_F: assign.F,
     concentration_A: conc.A,
     concentration_B: conc.B,
     concentration_C: conc.C,
@@ -1189,7 +1243,7 @@ LMS.formatClassTestStatsLine = function (classStats) {
     ' · 최저 ' + classStats.test_low_display + ')';
 };
 
-LMS.buildDailyReport = function (lesson, student, settings, classStats, classNotice) {
+LMS.buildDailyReport = function (lesson, student, settings, classStats, classNotice, itemGrades) {
   settings = settings || {};
   student = student || {};
   lesson = lesson || {};
@@ -1225,6 +1279,12 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
   }
 
   lines.push('2. 과제 이행률: ' + LMS.assignmentLabel(lesson.assignment_completion, settings));
+  (itemGrades || []).forEach(function (item) {
+    var grade = LMS.homeworkGrade(item && item.grade);
+    var title = LMS.toStr(item && item.title);
+    if (!grade || !title) return;
+    lines.push('   - ' + title + ': ' + grade);
+  });
   lines.push('3. 학습 진도: ' + (LMS.toStr(lesson.progress) || '-'));
   lines.push('4. 과제 안내:');
   lines.push(hwLines);
@@ -1271,8 +1331,9 @@ LMS.buildMonthlyReport = function (stats, student, settings) {
     lines.push('이번 달 실시된 테스트는 없습니다.');
   }
 
-  lines.push('과제 이행률은 A ' + (stats.assignment_A || 0) + '회, B ' +
-    (stats.assignment_B || 0) + '회, C ' + (stats.assignment_C || 0) + '회였습니다.');
+  lines.push('과제 이행률은 ' + LMS.ASSIGNMENT.map(function (g) {
+    return g + ' ' + (stats['assignment_' + g] || 0) + '회';
+  }).join(', ') + '였습니다.');
   lines.push(LMS.concentrationSummary(stats));
 
   if (stats.progress_summary) {

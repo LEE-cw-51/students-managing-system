@@ -25,7 +25,7 @@ function payload(s, overrides) {
     session: { progress: '11. 피타고라스 정리', content: '증명', test_title: '확인 테스트', test_max_score: '10', test_difficulty: '중', class_notice: '' },
     prior: {
       assigned_date: prior.assigned_date,
-      checks: ses.students.flatMap((st) => prior.items.map((it) => ({ item_id: it.item_id, student_id: st.student_id, status: '완료' })))
+      checks: ses.students.flatMap((st) => prior.items.map((it) => ({ item_id: it.item_id, student_id: st.student_id, status: 'A' })))
     },
     homework_items: [{ title: '교재 80~83쪽' }, { title: '오답 정리' }],
     students: ses.students.map((st, i) => ({
@@ -235,7 +235,7 @@ describe('saveTodaySession', () => {
     const outsider = s.store.readTable('Students').find((st) => !roster.includes(st.student_id));
     const before = JSON.stringify([s.store.readTable('Lessons'), s.store.readTable('HomeworkChecks')]);
     const p = payload(s);
-    p.prior.checks.push({ item_id: p.prior.checks[0].item_id, student_id: outsider.student_id, status: '완료' });
+    p.prior.checks.push({ item_id: p.prior.checks[0].item_id, student_id: outsider.student_id, status: 'A' });
     assert.throws(() => s.api.saveTodaySession(p), { message: '이 반 명단에 없는 학생입니다: ' + outsider.name });
     assert.equal(JSON.stringify([s.store.readTable('Lessons'), s.store.readTable('HomeworkChecks')]), before);
   });

@@ -47,7 +47,7 @@ describe('class record → student lessons', () => {
     api.saveSessionHomework({ lesson_date: '2026-09-21', class_id: classId, items: [{ title: 'HW21' }] });
     const result = api.saveHomeworkChecks({
       lesson_date: '2026-09-14', class_id: classId, check_date: '2026-09-21',
-      checks: demo.students.map((s) => ({ index: 0, student_id: s.student_id, status: '완료' }))
+      checks: demo.students.map((s) => ({ index: 0, student_id: s.student_id, status: 'A' }))
     });
     assert.equal(result.checks.length, 3);
     assert.equal(result.check_date, '');
@@ -194,8 +194,8 @@ describe('homework carried to the next lesson', () => {
       prior: {
         assigned_date: d.prior_homework.assigned_date,
         checks: d.students.flatMap((s) => [
-          { index: 0, student_id: s.student_id, status: '완료' },
-          { index: 1, student_id: s.student_id, status: '미완료' }
+          { index: 0, student_id: s.student_id, status: 'A' },
+          { index: 1, student_id: s.student_id, status: 'F' }
         ])
       },
       students: d.students.map((s) => ({
