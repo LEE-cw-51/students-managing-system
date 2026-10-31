@@ -7,6 +7,7 @@ import { api } from '@/lib/client-api';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import GlobalSearch from './GlobalSearch';
+import AgentPanel from './AgentPanel';
 
 const BootContext = createContext(null);
 
@@ -39,6 +40,8 @@ export default function AppShell({ boot: initialBoot, children }) {
   const pathname = usePathname();
   const [boot, setBoot] = useState(initialBoot);
   const [open, setOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const closeAgent = useCallback(() => setAgentOpen(false), []);
 
   // Server-only flags (ai_enabled) come from the layout and survive a refresh.
   const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled }))).catch(() => {}), []);
@@ -46,6 +49,18 @@ export default function AppShell({ boot: initialBoot, children }) {
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
+
+  // Ctrl+J (⌘J) opens or closes the AI assistant from any screen.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setAgentOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -104,9 +119,20 @@ export default function AppShell({ boot: initialBoot, children }) {
               >☰</button>
               <GlobalSearch index={boot.search} />
               <span className="today">{formatToday(boot.today)}</span>
+              <button
+                type="button"
+                className="agent-toggle"
+                aria-expanded={agentOpen}
+                aria-keyshortcuts="Control+J"
+                title="AI 비서 (Ctrl+J)"
+                onClick={() => setAgentOpen((v) => !v)}
+              >
+                <span aria-hidden="true">✦</span> AI 비서
+              </button>
             </header>
             <main className="app-content" id="main" tabIndex={-1}>{children}</main>
           </div>
+          <AgentPanel open={agentOpen} onClose={closeAgent} aiEnabled={Boolean(boot.ai_enabled)} />
         </div>
       </ConfirmProvider>
       </ToastProvider>

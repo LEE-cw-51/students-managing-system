@@ -99,6 +99,12 @@ LMS.TABLES = {
     'check_id', 'item_id', 'student_id', 'status',
     'created_at', 'updated_at'
   ],
+  AgentConversations: ['conversation_id', 'title', 'created_at', 'updated_at'],
+  AgentMessages: ['message_id', 'conversation_id', 'role', 'content', 'proposal_id', 'created_at'],
+  AgentProposals: [
+    'proposal_id', 'conversation_id', 'summary', 'calls', 'status', 'result',
+    'verification_status', 'created_at', 'executed_at'
+  ],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -158,7 +164,7 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: ''
 };
 
-LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT'];
+LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT', 'AGC', 'AGM', 'AGP'];
 
 LMS.DAY_INDEX = { 0: '일', 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토' };
 
