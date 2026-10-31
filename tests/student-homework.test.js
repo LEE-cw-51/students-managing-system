@@ -31,7 +31,7 @@ function setup() {
     lesson_date: assigned,
     class_id: cls.class_id,
     check_date: checkDate,
-    checks: saved.items.map((it) => ({ student_id: student.student_id, item_id: it.item_id, status: '완료' }))
+    checks: saved.items.map((it) => ({ student_id: student.student_id, item_id: it.item_id, status: 'A' }))
   });
   return { api, cls, student, assigned, checkDate, items: saved.items };
 }
@@ -47,10 +47,10 @@ describe('getStudentHomework for student tab edits', () => {
     assert.equal(row.check_date, '');
     assert.equal(row.items.length, 2);
     assert.ok(row.items.every((it) => it.item_id && it.item_id.startsWith('HWI_')));
-    assert.deepEqual(row.items.map((it) => it.status), ['완료', '완료']);
+    assert.deepEqual(row.items.map((it) => it.status), ['A', 'A']);
   });
 
-  it('lets saveHomeworkChecks flip 완료 to 미완료 and refresh the student view', () => {
+  it('lets saveHomeworkChecks flip A to F and refresh the student view', () => {
     const t = setup();
     const before = t.api.getStudentHomework(t.student.student_id, { start: '2026-09-01', end: '2026-09-30' });
     const target = before.rows[0].items[0];
@@ -58,11 +58,11 @@ describe('getStudentHomework for student tab edits', () => {
       lesson_date: before.rows[0].date,
       class_id: before.rows[0].class_id,
       check_date: before.rows[0].check_date,
-      checks: [{ student_id: t.student.student_id, item_id: target.item_id, status: '미완료' }]
+      checks: [{ student_id: t.student.student_id, item_id: target.item_id, status: 'F' }]
     });
     const after = t.api.getStudentHomework(t.student.student_id, { start: '2026-09-01', end: '2026-09-30' });
     const flipped = after.rows[0].items.find((it) => it.item_id === target.item_id);
-    assert.equal(flipped.status, '미완료');
+    assert.equal(flipped.status, 'F');
     assert.equal(after.missing.length, 1);
     assert.equal(after.missing[0].title, target.title);
     assert.ok(after.rate < before.rate);
@@ -88,12 +88,12 @@ describe('student tab homework edits and lesson records', () => {
     const today = t.api.saveSessionHomework({ lesson_date: TODAY, class_id: t.cls.class_id, titles: ['프린트'] });
     const row = t.api.getStudentHomework(t.student.student_id, RANGE).rows.find((r) => r.date === TODAY);
     assert.equal(row.check_date, '');
-    flip(t, row, today.items[0], '완료', '2026-09-17');
-    flip(t, row, today.items[0], '미완료');
+    flip(t, row, today.items[0], 'A', '2026-09-17');
+    flip(t, row, today.items[0], 'F');
     assert.deepEqual(lessonsOf(t, '2026-09-17'), []);
     assert.deepEqual(lessonsOf(t, TODAY), []);
     const after = t.api.getStudentHomework(t.student.student_id, RANGE).rows.find((r) => r.date === TODAY);
-    assert.equal(after.items[0].status, '미완료');
+    assert.equal(after.items[0].status, 'F');
   });
 
   it('updates the makeup-day lesson that checked the homework, not the scheduled next day', () => {
@@ -101,17 +101,17 @@ describe('student tab homework edits and lesson records', () => {
     record(t, '2026-09-14', 'A'); // 월 보강
     const row = t.api.getStudentHomework(t.student.student_id, RANGE).rows[0];
     assert.equal(row.check_date, '2026-09-14');
-    flip(t, row, t.items[0], '미완료');
+    flip(t, row, t.items[0], 'F');
     assert.equal(lessonsOf(t, '2026-09-14')[0].assignment_completion, 'C');
     assert.deepEqual(lessonsOf(t, t.checkDate), []);
   });
 
-  it('regrades the recorded checking lesson when 완료 becomes 미완료', () => {
+  it('regrades the recorded checking lesson when A becomes F', () => {
     const t = setup();
     record(t, t.checkDate, 'A');
     const row = t.api.getStudentHomework(t.student.student_id, RANGE).rows[0];
     assert.equal(row.check_date, t.checkDate);
-    const result = flip(t, row, t.items[1], '미완료');
+    const result = flip(t, row, t.items[1], 'F');
     assert.equal(result.grades[0].assignment_completion, 'C');
     assert.equal(lessonsOf(t, t.checkDate)[0].assignment_completion, 'C');
   });
@@ -120,7 +120,7 @@ describe('student tab homework edits and lesson records', () => {
     const t = setup();
     record(t, t.checkDate, 'A');
     const row = t.api.getStudentHomework(t.student.student_id, RANGE).rows[0];
-    const result = flip(t, row, t.items[0], '미완료', '2026-09-19');
+    const result = flip(t, row, t.items[0], 'F', '2026-09-19');
     assert.equal(result.check_date, t.checkDate);
     assert.equal(lessonsOf(t, t.checkDate)[0].assignment_completion, 'C');
     assert.deepEqual(lessonsOf(t, '2026-09-19'), []);

@@ -13,7 +13,16 @@ import { api, useApi } from '@/lib/client-api';
 import { formatDate, shortDate, timeSpan } from '@/lib/format';
 
 const CONC = ['A', 'B', 'C', 'D'];
-const ASSIGN = ['A', 'B', 'C'];
+const ASSIGN = LMS.ASSIGNMENT;
+
+function GradeSelect({ value, label, onChange }) {
+  return (
+    <select className="grade-select" aria-label={label} value={value || ''} onChange={(e) => onChange(e.target.value)}>
+      <option value="">-</option>
+      {ASSIGN.map((g) => <option key={g} value={g}>{g}</option>)}
+    </select>
+  );
+}
 const PLAN_DONE = ['완료', '일부', '못 함'];
 
 function Chips({ value, options, onChange, label, disabled }) {
@@ -68,12 +77,12 @@ function initialForm(d) {
       test_scope: ses.test_scope || '',
       class_notice: ses.class_notice || d.class_notice || ''
     },
-    // Nothing checked yet → start everyone at 완료 so only the exceptions need a click.
+    // Nothing graded for this student yet → start every item at A. Other students' grades stay put.
     checks: priorReady ? Object.fromEntries(d.students.map((s) => {
       const items = priorItemsForStudent(prior, s.student_id);
-      return [s.student_id, prior.has_checks
-        ? { ...(prior.checks_by_student[s.student_id] || {}) }
-        : Object.fromEntries(items.map((it) => [it.item_id, '완료']))];
+      const stored = (prior.checks_by_student && prior.checks_by_student[s.student_id]) || {};
+      const any = items.some((it) => stored[it.item_id]);
+      return [s.student_id, Object.fromEntries(items.map((it) => [it.item_id, any ? (stored[it.item_id] || '') : 'A']))];
     })) : {},
     homework: ((d.today_homework && d.today_homework.items) || []).map((it) => ({ item_id: it.item_id || '', title: it.title })),
     plan_done: d.daily_plan ? d.daily_plan.done_status || '' : '',
@@ -181,13 +190,13 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   });
   const clearErrorFor = (name) => setError((e) => (e.startsWith(`${name} 학생 `) ? '' : e));
   const clearClassMaxError = () => setError((e) => (e.startsWith('테스트 만점') ? '' : e));
-  const setCheck = (sid, itemId, done) => setForm((f) => ({ ...f, checks: { ...f.checks, [sid]: { ...f.checks[sid], [itemId]: done ? '완료' : '미완료' } } }));
-  const setAllChecks = (sid, done) => setForm((f) => ({
+  const setCheck = (sid, itemId, grade) => setForm((f) => ({ ...f, checks: { ...f.checks, [sid]: { ...f.checks[sid], [itemId]: grade } } }));
+  const setAllChecks = (sid, grade) => setForm((f) => ({
     ...f,
     checks: Object.fromEntries(Object.entries(f.checks).map(([id, m]) => {
       if (sid !== null && sid !== id) return [id, m];
       const items = priorItemsForStudent(prior, id);
-      return [id, Object.fromEntries(items.map((it) => [it.item_id, done ? '완료' : '미완료']))];
+      return [id, Object.fromEntries(items.map((it) => [it.item_id, grade]))];
     }))
   }));
 
@@ -195,8 +204,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
     const items = priorItemsForStudent(prior, sid);
     if (!items.length) return '';
     const m = form.checks[sid] || {};
-    const done = items.filter((it) => m[it.item_id] === '완료').length;
-    return LMS.assignmentGradeFromChecks(done, items.length);
+    return LMS.aggregateAssignmentGrades(items.map((it) => m[it.item_id])).grade;
   }, [form.checks, prior]);
 
   const setPersonalHomework = (sid, list) => setStudent(sid, 'personal_homework', list);
@@ -291,7 +299,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
           checks: data.students.flatMap((st) => priorItemsForStudent(prior, st.student_id).map((it) => ({
             item_id: it.item_id,
             student_id: st.student_id,
-            status: (form.checks[st.student_id] || {})[it.item_id] === '완료' ? '완료' : '미완료'
+            status: (form.checks[st.student_id] || {})[it.item_id] || ''
           })))
         } : null,
         homework_items: homework.filter((h) => h.title.trim()).map((h) => ({ item_id: h.item_id, title: h.title.trim() })),
@@ -417,9 +425,9 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
       <section className="card">
         <div className="card-head">
           <h2>② 지난 숙제 확인</h2>
-          {hasPriorHomework ? <span className="cluster"><span className="muted">{shortDate(prior.assigned_date)}에 낸 숙제</span><button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, true)}>전체 완료</button></span> : null}
+          {hasPriorHomework ? <span className="cluster"><span className="muted">{shortDate(prior.assigned_date)}에 낸 숙제</span><button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, 'A')}>전체 A</button></span> : null}
         </div>
-        {hasPriorHomework && !prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 ‘완료’로 채워 두었습니다. 안 한 숙제만 체크를 해제하세요.</p> : null}
+        {hasPriorHomework && !prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 A로 채워 두었습니다. 항목마다 A–F를 고르면 평균으로 과제 등급이 계산됩니다.</p> : null}
         {hasPriorHomework ? (
           <div className="table-wrap">
             <table className="data-table check-table">
@@ -446,10 +454,10 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                         if (replace) {
                           return <td key={it.item_id} className="center muted">—</td>;
                         }
-                        const done = (form.checks[st.student_id] || {})[it.item_id] === '완료';
+                        const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
                         return (
                           <td key={it.item_id} className="center">
-                            <input type="checkbox" className="big-check" checked={done} aria-label={`${st.name} ${it.title}`} onChange={(e) => setCheck(st.student_id, it.item_id, e.target.checked)} />
+                            <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
                           </td>
                         );
                       })}
@@ -457,10 +465,10 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                         {personal.length ? (
                           <div className="stack-sm">
                             {personal.map((it) => {
-                              const done = (form.checks[st.student_id] || {})[it.item_id] === '완료';
+                              const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
                               return (
                                 <label key={it.item_id} className="check-label" style={{ margin: 0 }}>
-                                  <input type="checkbox" className="big-check" checked={done} aria-label={`${st.name} ${it.title}`} onChange={(e) => setCheck(st.student_id, it.item_id, e.target.checked)} />
+                                  <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
                                   <span>{it.title} <span className="tag muted">개인</span></span>
                                 </label>
                               );
@@ -469,7 +477,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                         ) : <span className="muted">—</span>}
                       </td>
                       <td className="center"><strong>{form.students[st.student_id].assignment_manual || autoGrade(st.student_id) || '-'}</strong></td>
-                      <td><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, true)}>모두 완료</button></td>
+                      <td><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, 'A')}>모두 A</button></td>
                     </tr>
                   );
                 })}

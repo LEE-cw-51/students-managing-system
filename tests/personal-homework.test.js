@@ -85,9 +85,9 @@ describe('per-student homework items', () => {
       class_id: t.cls.class_id,
       check_date: checkDate,
       checks: [
-        { student_id: t.a.student_id, item_id: classItem.item_id, status: '완료' },
-        { student_id: t.a.student_id, item_id: personal.item_id, status: '미완료' },
-        { student_id: t.b.student_id, item_id: classItem.item_id, status: '완료' }
+        { student_id: t.a.student_id, item_id: classItem.item_id, status: 'A' },
+        { student_id: t.a.student_id, item_id: personal.item_id, status: 'F' },
+        { student_id: t.b.student_id, item_id: classItem.item_id, status: 'A' }
       ]
     });
     const gradeA = checked.grades.find((g) => g.student_id === t.a.student_id);
@@ -104,7 +104,7 @@ describe('per-student homework items', () => {
         lesson_date: assigned,
         class_id: t.cls.class_id,
         check_date: checkDate,
-        checks: [{ student_id: t.b.student_id, item_id: personal.item_id, status: '완료' }]
+        checks: [{ student_id: t.b.student_id, item_id: personal.item_id, status: 'A' }]
       }),
       /다른 학생의 개인 숙제/
     );
@@ -241,6 +241,6 @@ describe('schema v5', () => {
     assert.equal(api.ensureSchema(), true);
     assert.equal(api.ensureSchema(), false);
     const Core = require('../src/00_Core.js');
-    assert.equal(Core.SCHEMA_VERSION, 6);
+    assert.equal(Core.SCHEMA_VERSION, 7);
   });
 });

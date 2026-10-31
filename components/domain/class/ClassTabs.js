@@ -224,9 +224,10 @@ export function ProgressTab({ classId, onChanged }) {
 
 function HwCell({ cell }) {
   if (!cell) return <span className="muted">-</span>;
-  if (!cell.checked) return <span className="hw-cell unchecked" title="아직 확인하지 않음">미확인</span>;
-  const tone = cell.done === cell.total ? 'full' : cell.done === 0 ? 'none' : 'part';
-  return <span className={'hw-cell ' + tone} title={cell.missing.length ? '미완료: ' + cell.missing.join(', ') : '모두 완료'}>{cell.done}/{cell.total}</span>;
+  if (!cell.checked) return <span className="hw-cell unchecked" title="아직 입력하지 않음">미입력</span>;
+  const tone = cell.letter === 'A' || cell.letter === 'B' ? 'full' : cell.letter === 'E' || cell.letter === 'F' ? 'none' : 'part';
+  const title = (cell.grades || []).filter((g) => g.grade).map((g) => `${g.title} ${g.grade}`).join(', ');
+  return <span className={'hw-cell ' + tone} title={title}>{cell.letter}</span>;
 }
 
 export function HomeworkTab({ classId }) {
@@ -237,7 +238,7 @@ export function HomeworkTab({ classId }) {
   return (
     <div className="stack">
       <div className="split">
-        <span className="muted">수업일마다 낸 숙제와, 다음 수업에서 확인한 학생별 완료 현황입니다. 칸에 마우스를 올리면 미완료 항목이 보입니다.</span>
+        <span className="muted">수업일마다 낸 숙제와, 다음 수업에서 입력한 학생별 등급입니다. 칸은 항목 평균이고, 마우스를 올리면 항목별 등급이 보입니다.</span>
         <RangePicker value={range} onChange={setRange} />
       </div>
       <Async state={state}>
@@ -680,7 +681,7 @@ export function StatsTab({ classId, today }) {
           {(s) => s.students.length ? (
             <div className="table-wrap">
               <table className="data-table stack-mobile">
-                <thead><tr><th>학생</th><th className="num">출석</th><th className="num">결석</th><th className="num">테스트 평균 (100점)</th><th className="num">과제 A/B/C</th><th className="num">집중도 A/B/C/D</th></tr></thead>
+                <thead><tr><th>학생</th><th className="num">출석</th><th className="num">결석</th><th className="num">테스트 평균 (100점)</th><th className="num">과제 A/B/C/D/E/F</th><th className="num">집중도 A/B/C/D</th></tr></thead>
                 <tbody>
                   {s.students.map((r) => (
                     <tr key={r.student_id}>
@@ -688,7 +689,7 @@ export function StatsTab({ classId, today }) {
                       <td data-label="출석" className="num">{r.stats.present_count}</td>
                       <td data-label="결석" className="num">{r.stats.absent_count ? <span className="tag danger">{r.stats.absent_count}</span> : 0}</td>
                       <td data-label="테스트 평균" className="num">{r.stats.test_average_display}</td>
-                      <td data-label="과제" className="num">{r.stats.assignment_A}/{r.stats.assignment_B}/{r.stats.assignment_C}</td>
+                      <td data-label="과제" className="num">{[r.stats.assignment_A, r.stats.assignment_B, r.stats.assignment_C, r.stats.assignment_D, r.stats.assignment_E, r.stats.assignment_F].join('/')}</td>
                       <td data-label="집중도" className="num">{r.stats.concentration_A}/{r.stats.concentration_B}/{r.stats.concentration_C}/{r.stats.concentration_D}</td>
                     </tr>
                   ))}

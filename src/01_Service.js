@@ -1098,21 +1098,27 @@ LMS.createService = function (store) {
   }
 
   function homeworkCompletionForStudent_(items, checks, studentId) {
-    var itemIds = (items || []).map(function (it) { return LMS.toStr(it.item_id); }).filter(Boolean);
-    if (!itemIds.length) return { done: 0, total: 0, grade: '' };
+    var list = items || [];
+    if (!list.length) return { done: 0, total: 0, grade: '', score: null };
+    var letters = [];
     var done = 0;
-    itemIds.forEach(function (itemId) {
-      var hit = (checks || []).some(function (c) {
-        return LMS.toStr(c.item_id) === itemId &&
-          LMS.toStr(c.student_id) === LMS.toStr(studentId) &&
-          LMS.toStr(c.status) === '완료';
-      });
-      if (hit) done += 1;
+    list.forEach(function (it) {
+      var itemId = LMS.toStr(it.item_id);
+      if (!itemId) return;
+      var hit = (checks || []).filter(function (c) {
+        return LMS.toStr(c.item_id) === itemId && LMS.toStr(c.student_id) === LMS.toStr(studentId);
+      })[0];
+      var grade = hit ? LMS.homeworkGrade(hit.status) : '';
+      if (!grade) return;
+      letters.push(grade);
+      if (LMS.ASSIGNMENT_POINTS[grade] >= 60) done += 1;
     });
+    var agg = LMS.aggregateAssignmentGrades(letters);
     return {
       done: done,
-      total: itemIds.length,
-      grade: LMS.assignmentGradeFromChecks(done, itemIds.length)
+      total: list.filter(function (it) { return LMS.toStr(it.item_id); }).length,
+      grade: agg.grade,
+      score: agg.score
     };
   }
 
@@ -1170,10 +1176,21 @@ LMS.createService = function (store) {
       requireStudent(studentId);
       var owner = LMS.toStr(item.student_id);
       if (owner && owner !== studentId) throw new Error('다른 학생의 개인 숙제는 확인할 수 없습니다.');
-      var status = LMS.toStr(c.status) || '미완료';
-      LMS.assertEnum(status, LMS.HOMEWORK_CHECK_STATUS, '숙제 완료 여부');
+      var raw = LMS.toStr(c.status);
+      var status = raw ? LMS.homeworkGrade(raw) : '';
+      if (raw && !status) throw new Error('숙제 등급은 A부터 F까지입니다.');
       studentIds[studentId] = true;
       var key = itemId + '|' + studentId;
+      if (!status) {
+        if (Object.prototype.hasOwnProperty.call(byKey, key)) {
+          rows.splice(byKey[key], 1);
+          byKey = {};
+          rows.forEach(function (row, idx) {
+            byKey[LMS.toStr(row.item_id) + '|' + LMS.toStr(row.student_id)] = idx;
+          });
+        }
+        return;
+      }
       if (Object.prototype.hasOwnProperty.call(byKey, key)) {
         var existing = rows[byKey[key]];
         existing.status = status;
@@ -1205,18 +1222,19 @@ LMS.createService = function (store) {
         student_id: studentId,
         done: comp.done,
         total: comp.total,
+        score: comp.score,
         assignment_completion: comp.grade
       });
-      if (comp.grade) gradeByStudent[studentId] = comp.grade;
+      gradeByStudent[studentId] = comp.grade;
     });
     if (checkDate && Object.keys(gradeByStudent).length) {
       var lessonRows = table('Lessons');
       var lessonsChanged = false;
       lessonRows.forEach(function (row) {
         if (LMS.toStr(row.class_id) !== classId || LMS.toStr(row.lesson_date) !== checkDate) return;
-        var grade = gradeByStudent[LMS.toStr(row.student_id)];
-        if (!grade) return;
-        row.assignment_completion = grade;
+        var sid = LMS.toStr(row.student_id);
+        if (!Object.prototype.hasOwnProperty.call(gradeByStudent, sid)) return;
+        row.assignment_completion = gradeByStudent[sid];
         row.updated_at = ts;
         lessonsChanged = true;
       });
@@ -1367,7 +1385,7 @@ LMS.createService = function (store) {
             return LMS.toStr(c.item_id) === LMS.toStr(it.item_id) &&
               LMS.toStr(c.student_id) === LMS.toStr(s.student_id);
           })[0];
-          map[it.item_id] = hit ? hit.status : '미완료';
+          map[it.item_id] = hit ? LMS.homeworkGrade(hit.status) : '';
         });
         priorChecksByStudent[s.student_id] = map;
       });
@@ -1409,7 +1427,11 @@ LMS.createService = function (store) {
         personal_items_by_student: priorItemsByStudent,
         replace_by_student: priorReplaceByStudent,
         from_legacy: priorHomework.from_legacy,
-        has_checks: (priorHomework.checks || []).length > 0,
+        has_checks: Object.keys(priorChecksByStudent).some(function (sid) {
+          return Object.keys(priorChecksByStudent[sid]).some(function (itemId) {
+            return !!priorChecksByStudent[sid][itemId];
+          });
+        }),
         checks_by_student: priorChecksByStudent
       } : null,
       today_homework: {
@@ -1692,12 +1714,28 @@ LMS.createService = function (store) {
     return { deleted: true, plan_id: id };
   }
 
+  function checkedHomeworkGrades_(lesson) {
+    var cls = LMS.findById(table('Classes'), 'class_id', lesson.class_id);
+    if (!cls) return [];
+    var assigned = priorLessonDate_(cls, lesson.lesson_date);
+    if (!assigned) return [];
+    var session = getSessionHomework(assigned, lesson.class_id);
+    var items = effectiveHomeworkItems_(session.items || [], assigned, lesson.class_id, lesson.student_id);
+    return items.map(function (it) {
+      var hit = (session.checks || []).filter(function (c) {
+        return LMS.toStr(c.item_id) === LMS.toStr(it.item_id) &&
+          LMS.toStr(c.student_id) === LMS.toStr(lesson.student_id);
+      })[0];
+      return { title: LMS.toStr(it.title), grade: hit ? LMS.homeworkGrade(hit.status) : '' };
+    }).filter(function (row) { return row.grade && row.title; });
+  }
+
   function generateDailyReport(lessonId) {
     var lesson = getLesson(lessonId);
     var student = requireStudent(lesson.student_id);
     var classAvg = LMS.computeDailyClassTestAverage(getLessons(lesson.lesson_date, lesson.class_id), lesson);
     var notice = getClassSessionNotice(lesson.lesson_date, lesson.class_id);
-    var text = LMS.buildDailyReport(lesson, student, settings(), classAvg, notice);
+    var text = LMS.buildDailyReport(lesson, student, settings(), classAvg, notice, checkedHomeworkGrades_(lesson));
     return { lesson: lesson, student: student, text: text, class_test_average: classAvg };
   }
 
@@ -1712,7 +1750,7 @@ LMS.createService = function (store) {
         lesson_id: lesson.lesson_id,
         student_id: lesson.student_id,
         student_name: student.name,
-        text: LMS.buildDailyReport(lesson, student, set, LMS.computeDailyClassTestAverage(lessons, lesson), notice)
+        text: LMS.buildDailyReport(lesson, student, set, LMS.computeDailyClassTestAverage(lessons, lesson), notice, checkedHomeworkGrades_(lesson))
       };
     }).sort(function (a, b) {
       return LMS.toStr(a.student_name).localeCompare(LMS.toStr(b.student_name), 'ko');
@@ -3038,6 +3076,41 @@ LMS.createService = function (store) {
     Object.keys(touched).forEach(assignments.recomputeResume);
   }
 
+  /** v7: homework checks store A–F. 완료 → A, 미완료 → F. Safe to re-run. */
+  function migrateToV7_() {
+    var checks = table('HomeworkChecks');
+    var checksChanged = false;
+    checks.forEach(function (c) {
+      var raw = LMS.toStr(c.status);
+      if (raw === '완료') { c.status = 'A'; checksChanged = true; }
+      else if (raw === '미완료') { c.status = 'F'; checksChanged = true; }
+    });
+    if (checksChanged) saveTable('HomeworkChecks', checks);
+
+    var rows = table('Settings');
+    var settingsChanged = false;
+    function put(key, value) {
+      var row = LMS.findById(rows, 'key', key);
+      if (!row) {
+        rows.push({ key: key, value: value });
+        settingsChanged = true;
+        return;
+      }
+      if (LMS.toStr(row.value) === '') {
+        row.value = value;
+        settingsChanged = true;
+      }
+    }
+    rows.forEach(function (row) {
+      if (row.key === 'assignment_B' && row.value === '89~70%') { row.value = '89~80%'; settingsChanged = true; }
+      if (row.key === 'assignment_C' && row.value === '70% 미만') { row.value = '79~70%'; settingsChanged = true; }
+    });
+    put('assignment_D', LMS.DEFAULT_SETTINGS.assignment_D);
+    put('assignment_E', LMS.DEFAULT_SETTINGS.assignment_E);
+    put('assignment_F', LMS.DEFAULT_SETTINGS.assignment_F);
+    if (settingsChanged) saveTable('Settings', rows);
+  }
+
   /** Bring stored tables up to LMS.SCHEMA_VERSION. Returns true when anything ran. */
   function ensureSchema() {
     var version = schemaVersion_();
@@ -3047,6 +3120,7 @@ LMS.createService = function (store) {
     if (schemaVersion_() < 4) migrateToV4_();
     if (schemaVersion_() < 5) migrateToV5_();
     if (schemaVersion_() < 6) migrateToV6_();
+    if (schemaVersion_() < 7) migrateToV7_();
     var meta = table('_Meta');
     var row = LMS.findById(meta, 'prefix', LMS.SCHEMA_META_KEY);
     if (!row) {

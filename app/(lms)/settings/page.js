@@ -22,8 +22,8 @@ const SECTIONS = [
   },
   {
     title: '과제 이행 등급 기준',
-    hint: '보고서에 등급과 함께 표시되는 설명입니다. 숙제 체크로 자동 계산할 때 A는 90% 이상, B는 70% 이상입니다.',
-    fields: [['assignment_A', 'A 기준'], ['assignment_B', 'B 기준'], ['assignment_C', 'C 기준']]
+    hint: '보고서에 등급과 함께 표시되는 설명입니다. 항목 등급 A 100, B 89, C 79, D 69, E 59, F 50을 평균 내 A 90점 이상, B 80점 이상, C 70점 이상, D 60점 이상, E 51점 이상, 그 아래는 F로 바꿉니다.',
+    fields: [['assignment_A', 'A 기준'], ['assignment_B', 'B 기준'], ['assignment_C', 'C 기준'], ['assignment_D', 'D 기준'], ['assignment_E', 'E 기준'], ['assignment_F', 'F 기준']]
   }
 ];
 

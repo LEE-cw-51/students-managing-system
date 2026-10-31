@@ -70,7 +70,7 @@ describe('deleting a class', () => {
     assert.throws(() => t.api.deleteClass(t.c), /수업 기록이 있는 반은 삭제할 수 없습니다/);
 
     const t2 = setup();
-    t2.store.writeTable('HomeworkChecks', [{ check_id: 'HWC-X', item_id: 'HWI-X', student_id: t2.da.student_id, status: '완료' }]);
+    t2.store.writeTable('HomeworkChecks', [{ check_id: 'HWC-X', item_id: 'HWI-X', student_id: t2.da.student_id, status: 'A' }]);
     t2.api = seedRelated(t2.store, t2.c);
     assert.equal(t2.api.getClassOverview(t2.c).has_lessons, true);
     assert.throws(() => t2.api.deleteClass(t2.c), /수업 기록이 있는 반은 삭제할 수 없습니다/);

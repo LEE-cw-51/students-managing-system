@@ -91,7 +91,7 @@ function seedRich(api, today) {
           attendance: absent ? '결석' : '출석',
           test_status: testDay && !absent ? '실시' : '미실시',
           test_score: testDay && !absent ? Math.max(6, Math.round(20 - rand() * 9 - (si === 2 ? 5 : 0))) : '',
-          assignment_completion: absent ? '' : (si === 2 && di >= dates.length - 3 ? 'C' : pick(rand, ['A', 'A', 'B', 'C'])),
+          assignment_completion: absent ? '' : (si === 2 && di >= dates.length - 3 ? 'F' : pick(rand, ['A', 'A', 'B', 'C'])),
           concentration: absent ? 'ABSENT' : pick(rand, ['A', 'A', 'B', 'C']),
           special_note: rand() < 0.2 ? pick(rand, ['계산 실수가 잦음', '질문을 많이 함', '오답 정리 꼼꼼함', '지각 후 집중 회복']) : ''
         };
@@ -107,8 +107,10 @@ function seedRich(api, today) {
           lesson_date: prev,
           class_id: cls.class_id,
           check_date: date,
-          checks: roster.flatMap((s) => [0, 1].map((index) => ({
-            index, student_id: s.student_id, status: rand() < 0.78 ? '완료' : '미완료'
+          checks: roster.flatMap((s, si) => [0, 1].map((index) => ({
+            index,
+            student_id: s.student_id,
+            status: (si === 2 && di >= dates.length - 3) ? 'F' : (rand() < 0.78 ? 'A' : 'F')
           })))
         });
       }

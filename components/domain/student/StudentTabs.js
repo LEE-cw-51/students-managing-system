@@ -360,7 +360,7 @@ export function HomeworkTab({ studentId }) {
   const [savingId, setSavingId] = useState('');
 
   const setStatus = async (row, item, status) => {
-    if (!status || status === item.status || !item.item_id) return;
+    if (!item.item_id || status === item.status || (status === '' && item.status === '미확인')) return;
     setSavingId(item.item_id);
     try {
       await api('saveHomeworkChecks', {
@@ -369,7 +369,7 @@ export function HomeworkTab({ studentId }) {
         check_date: row.check_date,
         checks: [{ student_id: studentId, item_id: item.item_id, status }]
       });
-      toast(status === '완료' ? `"${item.title}"을(를) 완료로 바꿨습니다.` : `"${item.title}"을(를) 미완료로 바꿨습니다.`);
+      toast(status ? `"${item.title}"을(를) ${status}로 바꿨습니다.` : `"${item.title}" 등급을 지웠습니다.`);
       await state.reload();
     } catch (err) {
       toast(err.message, 'error');
@@ -380,17 +380,17 @@ export function HomeworkTab({ studentId }) {
 
   return (
     <div className="stack">
-      <div className="split"><span className="muted">수업일에 낸 숙제와 다음 수업에서 확인한 결과입니다. 완료 여부는 여기서 바로 고칠 수 있습니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">수업일에 낸 숙제입니다. 항목마다 A–F를 고르면 평균으로 그날의 과제 등급이 계산됩니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => (
           <>
             <div className="kpis">
               <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개`} />
-              <Kpi label="미완료" value={`${d.missing.length}개`} tone={d.missing.length ? 'terracotta' : undefined} />
+              <Kpi label="E·F" value={`${d.missing.length}개`} tone={d.missing.length ? 'terracotta' : undefined} />
             </div>
             {d.missing.length ? (
               <section className="card">
-                <h3>미완료 숙제</h3>
+                <h3>낮은 이행 (E·F)</h3>
                 <ul className="stack-sm" style={{ margin: 0, paddingLeft: 18 }}>
                   {d.missing.map((x, i) => <li key={i}>{shortDate(x.date)} · {x.class_name} — {x.title}</li>)}
                 </ul>
@@ -408,21 +408,20 @@ export function HomeworkTab({ studentId }) {
                         <td data-label="숙제">
                           <div className="cluster" style={{ alignItems: 'center' }}>
                             {row.items.map((it) => {
-                              const tone = it.status === '완료' ? 'ok' : it.status === '미완료' ? 'danger' : 'muted';
+                              const tone = it.status === 'A' || it.status === 'B' ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
                               const busy = savingId === it.item_id;
                               return (
                                 <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                                   <span>{it.title}{it.scope === 'student' ? ' · 개인' : ''}</span>
                                   <select
-                                    aria-label={`${it.title} 완료 여부`}
+                                    className="grade-select"
+                                    aria-label={`${it.title} 이행 등급`}
                                     value={it.status === '미확인' ? '' : it.status}
                                     disabled={busy || !it.item_id}
                                     onChange={(e) => setStatus(row, it, e.target.value)}
-                                    style={{ width: 'auto', minHeight: 28, padding: '2px 6px', fontSize: '0.85em' }}
                                   >
-                                    {it.status === '미확인' ? <option value="">미확인</option> : null}
-                                    <option value="완료">완료</option>
-                                    <option value="미완료">미완료</option>
+                                    <option value="">미입력</option>
+                                    {['A', 'B', 'C', 'D', 'E', 'F'].map((g) => <option key={g} value={g}>{g}</option>)}
                                   </select>
                                 </label>
                               );

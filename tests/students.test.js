@@ -130,7 +130,7 @@ describe('student views', () => {
     assert.equal(list.length, 12);
     const parkJiho = list.find((r) => r.name === '박지호');
     assert.deepEqual(parkJiho.classes.map((c) => c.class_name), ['중2 A반']);
-    assert.ok(parkJiho.badges.some((b) => b.code === 'assignment_c_streak'));
+    assert.ok(parkJiho.badges.some((b) => b.code === 'assignment_low_streak'));
     assert.equal(parkJiho.next_exam.d_day, 20);
     assert.equal(api.getStudentList({ query: '한빛' }).length, 5);
   });

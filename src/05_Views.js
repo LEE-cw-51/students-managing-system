@@ -340,13 +340,19 @@ LMS.createViews = function (ctx) {
       roster.forEach(function (s) {
         var replace = replaceFlags[d + '|' + LMS.toStr(classId) + '|' + LMS.toStr(s.student_id)] || '';
         var effective = LMS.homeworkItemsForStudent(items, s.student_id, replace);
-        var cell = { done: 0, total: effective.length, checked: 0, missing: [], replace_class: !!replace };
+        var cell = { done: 0, total: effective.length, checked: 0, missing: [], grades: [], letter: '', replace_class: !!replace };
+        var letters = [];
         effective.forEach(function (it) {
           var c = hw.checkByKey[LMS.toStr(it.item_id) + '|' + LMS.toStr(s.student_id)];
-          if (c) cell.checked += 1;
-          if (c && LMS.toStr(c.status) === '완료') cell.done += 1;
-          else if (c) cell.missing.push(it.title);
+          var grade = c ? LMS.homeworkGrade(c.status) : '';
+          cell.grades.push({ title: it.title, grade: grade });
+          if (!grade) return;
+          cell.checked += 1;
+          letters.push(grade);
+          if (LMS.ASSIGNMENT_POINTS[grade] >= 60) cell.done += 1;
+          else cell.missing.push(it.title);
         });
+        cell.letter = LMS.aggregateAssignmentGrades(letters).grade;
         cells[s.student_id] = cell;
       });
       var homework = LMS.homeworkRate(checkedByDate[d]);
@@ -691,10 +697,12 @@ LMS.createViews = function (ctx) {
     items.forEach(function (it) {
       var c = checks[LMS.toStr(it.item_id)];
       if (!c) return;
+      var grade = LMS.homeworkGrade(c.status);
+      if (!grade) return;
       var key = it.lesson_date + '|' + it.class_id;
       if (!byDate[key]) byDate[key] = { date: it.lesson_date, class_id: it.class_id, done: 0, total: 0 };
       byDate[key].total += 1;
-      if (LMS.toStr(c.status) === '완료') byDate[key].done += 1;
+      if (LMS.ASSIGNMENT_POINTS[grade] >= 60) byDate[key].done += 1;
     });
     return Object.keys(byDate).map(function (k) {
       var d = byDate[k];
@@ -991,7 +999,7 @@ LMS.createViews = function (ctx) {
             title: it.title,
             sort_order: Number(it.sort_order || 0),
             scope: LMS.isClassHomeworkItem(it) ? 'class' : 'student',
-            status: check ? LMS.toStr(check.status) : '미확인'
+            status: check ? (LMS.homeworkGrade(check.status) || '미확인') : '미확인'
           };
         })
       };
@@ -1002,7 +1010,10 @@ LMS.createViews = function (ctx) {
     var missing = [];
     rows.forEach(function (r) {
       r.items.forEach(function (it) {
-        if (it.status !== '미확인' && it.status !== '완료') missing.push({ date: r.date, class_name: r.class_name, title: it.title });
+        var points = LMS.ASSIGNMENT_POINTS[it.status];
+        if (it.status !== '미확인' && points !== undefined && points < 60) {
+          missing.push({ date: r.date, class_name: r.class_name, title: it.title });
+        }
       });
     });
     var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
