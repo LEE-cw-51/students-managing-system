@@ -13,6 +13,8 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
 LMS.AGENT_PROPOSAL_STATUS = ['pending', 'applied', 'rejected', 'failed'];
 LMS.AGENT_HISTORY_LIMIT = 20;
+// Conversations untouched this long are removed (with their messages) when a new turn is saved.
+LMS.AGENT_CONVERSATION_KEEP_DAYS = 90;
 
 function agentStudentName_(table, studentId) {
   var s = LMS.findById(table('Students'), 'student_id', studentId);
@@ -229,6 +231,29 @@ LMS.createAgent = function (ctx) {
   }
 
   /**
+   * Every request loads every table, so old chat must not pile up. Drops conversations not
+   * updated for AGENT_CONVERSATION_KEEP_DAYS and their messages. A conversation that still
+   * has a pending proposal is kept; proposals themselves stay as the record of changes.
+   */
+  function pruneOldConversations_() {
+    var cutoff = LMS.addDays(ctx.today(), -LMS.AGENT_CONVERSATION_KEEP_DAYS);
+    var pendingConv = {};
+    table('AgentProposals').forEach(function (p) {
+      if (p.status === 'pending') pendingConv[LMS.toStr(p.conversation_id)] = true;
+    });
+    var convs = table('AgentConversations');
+    var drop = {};
+    convs.forEach(function (c) {
+      var id = LMS.toStr(c.conversation_id);
+      if (!pendingConv[id] && LMS.toStr(c.updated_at).slice(0, 10) < cutoff) drop[id] = true;
+    });
+    if (!Object.keys(drop).length) return 0;
+    saveTable('AgentConversations', convs.filter(function (c) { return !drop[LMS.toStr(c.conversation_id)]; }));
+    saveTable('AgentMessages', table('AgentMessages').filter(function (m) { return !drop[LMS.toStr(m.conversation_id)]; }));
+    return Object.keys(drop).length;
+  }
+
+  /**
    * Server-only: store one chat turn. Creates the conversation on the first turn and a
    * pending proposal when the assistant asked for changes ([{ tool, args }]).
    */
@@ -237,6 +262,7 @@ LMS.createAgent = function (ctx) {
     var userText = LMS.toStr(data.message);
     if (!userText) throw new Error('메시지를 입력해 주세요.');
     var ts = ctx.now();
+    pruneOldConversations_();
     var convs = table('AgentConversations');
     var conv = data.conversation_id ? LMS.findById(convs, 'conversation_id', data.conversation_id) : null;
     if (data.conversation_id && !conv) throw new Error('대화를 찾을 수 없습니다.');

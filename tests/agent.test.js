@@ -263,3 +263,68 @@ describe('agent proposals', () => {
     assert.equal(lessonOf(hong.student_id).attendance, '출석');
   });
 });
+
+describe('agent model setting', () => {
+  const { getAgentAiConfig } = require('../lib/ai-client.js');
+
+  function withEnv(vars, fn) {
+    const saved = {};
+    Object.keys(vars).forEach((k) => { saved[k] = process.env[k]; if (vars[k] === undefined) delete process.env[k]; else process.env[k] = vars[k]; });
+    try { return fn(); } finally {
+      Object.keys(saved).forEach((k) => { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; });
+    }
+  }
+
+  it('uses AGENT_MODEL for the assistant only', () => {
+    withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: 'tool-model' }, () => {
+      assert.equal(getAgentAiConfig().model, 'tool-model');
+      assert.equal(require('../lib/ai-client.js').getAiConfig().model, 'report-model');
+    });
+  });
+
+  it('falls back to AI_MODEL when AGENT_MODEL is blank', () => {
+    withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: '' }, () => {
+      assert.equal(getAgentAiConfig().model, 'report-model');
+    });
+  });
+
+  it('sends AGENT_MODEL in the chat request', async () => {
+    const { run } = setup();
+    const { fetch, requests } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: 'tool-model', AI_BASE_URL: 'https://ai.test/v1' }, () =>
+      runAgentTurn({ message: '안녕' }, run, { fetch }));
+    assert.equal(requests[0].model, 'tool-model');
+  });
+});
+
+describe('agent conversation cleanup', () => {
+  it('drops conversations untouched for 90 days unless a change is still pending', () => {
+    const { api, store, hong, lessonOf } = setup();
+    const old = api.saveAgentTurn({ message: '오래된 대화', reply: '답' });
+    const oldPending = api.saveAgentTurn({
+      message: '오래된 승인 대기', reply: '승인해 주세요',
+      calls: [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]
+    });
+    const recent = api.saveAgentTurn({ message: '최근 대화', reply: '답' });
+    // Age the first two: last touched 91 days before today (2026-09-14).
+    store.writeTable('AgentConversations', store.readTable('AgentConversations').map((c) =>
+      c.conversation_id === recent.conversation_id ? c : { ...c, updated_at: '2026-06-15T09:00:00' }));
+    const fresh = LMS.createService(store);
+    fresh.saveAgentTurn({ message: '새 대화', reply: '답' });
+
+    const ids = fresh.listAgentConversations().map((c) => c.conversation_id);
+    assert.ok(!ids.includes(old.conversation_id));
+    assert.ok(ids.includes(oldPending.conversation_id));
+    assert.ok(ids.includes(recent.conversation_id));
+    assert.equal(store.readTable('AgentMessages').filter((m) => m.conversation_id === old.conversation_id).length, 0);
+    assert.equal(store.readTable('AgentProposals').length, 1);
+  });
+
+  it('keeps conversations exactly 90 days old', () => {
+    const { api, store } = setup();
+    const edge = api.saveAgentTurn({ message: '90일 전', reply: '답' });
+    store.writeTable('AgentConversations', store.readTable('AgentConversations').map((c) => ({ ...c, updated_at: '2026-06-16T09:00:00' })));
+    LMS.createService(store).saveAgentTurn({ message: '새 대화', reply: '답' });
+    assert.ok(LMS.createService(store).listAgentConversations().some((c) => c.conversation_id === edge.conversation_id));
+  });
+});
