@@ -104,6 +104,15 @@ describe('chatWithTools', () => {
     assert.deepEqual(res.toolCalls, [{ id: 'c1', name: 'search_students', args: { query: '민수' } }]);
   });
 
+  it('sends no temperature unless one is given', async () => {
+    const first = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: first.fetch });
+    assert.equal('temperature' in first.requests[0], false);
+    const second = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: second.fetch, temperature: 0.5 });
+    assert.equal(second.requests[0].temperature, 0.5);
+  });
+
   it('keeps unreadable arguments visible', () => {
     assert.deepEqual(parseToolArguments('{bad'), { __unreadable: '{bad' });
     assert.deepEqual(parseToolArguments(''), {});
