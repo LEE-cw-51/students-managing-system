@@ -8,6 +8,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
   require('./03_Sessions.js');
   require('./05_Views.js');
   require('./06_Plans.js');
+  require('./07_Agent.js');
 }
 
 LMS.createService = function (store) {
@@ -3226,7 +3227,17 @@ LMS.createService = function (store) {
     homeworkCells: views.homeworkCells_
   }) : {};
 
-  return transactional(Object.assign({
+  // Approved assistant changes run through the finished service object built just below.
+  var agent = LMS.createAgent ? LMS.createAgent({
+    table: table,
+    saveTable: saveTable,
+    now: now,
+    today: function () { return store.today(); },
+    nextIds: nextIds,
+    service: function () { return service; }
+  }) : {};
+
+  var service = transactional(Object.assign({
     getStudents: getStudents,
     getStudent: getStudent,
     createStudent: createStudent,
@@ -3319,7 +3330,8 @@ LMS.createService = function (store) {
     saveSchoolExam: saveSchoolExam,
     saveSchoolExamsBatch: saveSchoolExamsBatch,
     deleteSchoolExam: deleteSchoolExam
-  }, views, planner));
+  }, views, planner, agent));
+  return service;
 };
 
 if (typeof module !== 'undefined' && module.exports) {
