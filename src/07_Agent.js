@@ -15,6 +15,16 @@ LMS.AGENT_PROPOSAL_STATUS = ['pending', 'applied', 'rejected', 'failed'];
 LMS.AGENT_HISTORY_LIMIT = 20;
 // Conversations untouched this long are removed (with their messages) when a new turn is saved.
 LMS.AGENT_CONVERSATION_KEEP_DAYS = 90;
+// The rate limit counts chat turns in this sliding window (AgentUsage rows, epoch ms).
+LMS.AGENT_RATE_WINDOW_MS = 60 * 60 * 1000;
+// Error codes the API passes to the browser (lib/api-error.js maps them to HTTP statuses).
+LMS.AGENT_CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND';
+
+function conversationNotFound_() {
+  var e = new Error('대화를 찾을 수 없습니다.');
+  e.code = LMS.AGENT_CONVERSATION_NOT_FOUND;
+  return e;
+}
 
 function agentStudentName_(table, studentId) {
   var s = LMS.findById(table('Students'), 'student_id', studentId);
@@ -186,7 +196,7 @@ LMS.createAgent = function (ctx) {
   /** One conversation with its messages; assistant messages carry their proposal. */
   function getAgentConversation(conversationId) {
     var conv = LMS.findById(table('AgentConversations'), 'conversation_id', conversationId);
-    if (!conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (!conv) throw conversationNotFound_();
     var proposals = table('AgentProposals');
     return {
       conversation: conv,
@@ -201,7 +211,7 @@ LMS.createAgent = function (ctx) {
   function getAgentHistory(conversationId, limit) {
     if (!conversationId) return [];
     var conv = LMS.findById(table('AgentConversations'), 'conversation_id', conversationId);
-    if (!conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (!conv) throw conversationNotFound_();
     var proposals = table('AgentProposals');
     return conversationMessages(conversationId).slice(-(limit || LMS.AGENT_HISTORY_LIMIT)).map(function (m) {
       var content = LMS.toStr(m.content);
@@ -231,6 +241,23 @@ LMS.createAgent = function (ctx) {
   }
 
   /**
+   * Server-only: count one chat turn against `limit` turns per AGENT_RATE_WINDOW_MS. The count
+   * lives in the database, so every serverless instance shares it. When the limit is used up
+   * nothing is counted and { ok: false, retry_after_ms } comes back.
+   */
+  function reserveAgentTurn(nowMs, limit) {
+    var cutoff = nowMs - LMS.AGENT_RATE_WINDOW_MS;
+    var recent = table('AgentUsage').filter(function (u) { return Number(u.used_at) > cutoff; });
+    if (recent.length >= limit) {
+      var oldest = Math.min.apply(null, recent.map(function (u) { return Number(u.used_at); }));
+      return { ok: false, retry_after_ms: Math.max(0, oldest + LMS.AGENT_RATE_WINDOW_MS - nowMs) };
+    }
+    recent.push({ used_at: nowMs });
+    saveTable('AgentUsage', recent);
+    return { ok: true, retry_after_ms: 0 };
+  }
+
+  /**
    * Every request loads every table, so old chat must not pile up. Drops conversations not
    * updated for AGENT_CONVERSATION_KEEP_DAYS and their messages. A conversation that still
    * has a pending proposal is kept; proposals themselves stay as the record of changes.
@@ -255,7 +282,10 @@ LMS.createAgent = function (ctx) {
 
   /**
    * Server-only: store one chat turn. Creates the conversation on the first turn and a
-   * pending proposal when the assistant asked for changes ([{ tool, args }]).
+   * pending proposal when the assistant asked for changes ([{ tool, args, preview? }]).
+   * A call that carries its preview (made by previewAgentAction during the turn) is stored as
+   * is: the data may have changed during the AI wait, and the turn must not be lost for it.
+   * Approval checks every change again against the data at that time.
    */
   function saveAgentTurn(data) {
     data = data || {};
@@ -265,7 +295,7 @@ LMS.createAgent = function (ctx) {
     pruneOldConversations_();
     var convs = table('AgentConversations');
     var conv = data.conversation_id ? LMS.findById(convs, 'conversation_id', data.conversation_id) : null;
-    if (data.conversation_id && !conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (data.conversation_id && !conv) throw conversationNotFound_();
     if (!conv) {
       conv = { conversation_id: ctx.nextIds('AGC', 1)[0], title: userText.slice(0, 40), created_at: ts, updated_at: ts };
       convs.push(conv);
@@ -275,7 +305,7 @@ LMS.createAgent = function (ctx) {
 
     var proposal = null;
     var calls = (Array.isArray(data.calls) ? data.calls : []).map(function (c) {
-      var preview = previewAgentAction(c.tool, c.args);
+      var preview = c.preview || previewAgentAction(c.tool, c.args);
       return { tool: c.tool, label: writeAction(c.tool).label, args: preview.args, target: preview.target, before: preview.before, after: preview.after, text: preview.text };
     });
     if (calls.length) {
@@ -369,6 +399,7 @@ LMS.createAgent = function (ctx) {
     getAgentHistory: getAgentHistory,
     getAgentContext: getAgentContext,
     previewAgentAction: previewAgentAction,
+    reserveAgentTurn: reserveAgentTurn,
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,

@@ -35,7 +35,7 @@ async function postJson(url, body) {
   }
   const data = await res.json().catch(() => null);
   if (!data) throw new ApiError('서버 응답을 읽을 수 없습니다.');
-  if (!data.ok) throw new ApiError(data.error || '요청을 처리하지 못했습니다.');
+  if (!data.ok) throw new ApiError(data.error || '요청을 처리하지 못했습니다.', data.code);
   return data.data;
 }
 
@@ -65,6 +65,8 @@ export function RichText({ text }) {
       const rows = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) rows.push(lines[i++]);
       const body = rows.filter((r) => !isDivider(r)).map(cells);
+      // Only divider lines: nothing to show as a table.
+      if (!body.length) continue;
       const [head, ...rest] = body;
       blocks.push(
         <div className="agent-table" key={blocks.length}>
@@ -106,8 +108,17 @@ function ProposalCard({ proposal, onChange }) {
       }
     } catch (e) {
       toast(e.message, 'error');
-      // The server recorded the failure on the proposal; show it.
-      if (kind === 'apply') onChange({ ...p, status: 'failed', result: { error: e.message } });
+      // The request can fail after the server applied the proposal, or before it recorded the
+      // failure; show what the server has now.
+      if (kind === 'apply') {
+        const stored = await api('getAgentConversation', p.conversation_id)
+          .then((c) => c.messages.map((m) => m.proposal).find((x) => x && x.proposal_id === p.proposal_id))
+          .catch(() => null);
+        if (stored) {
+          onChange(stored);
+          if (stored.status === 'applied') notifyDataChanged();
+        }
+      }
     } finally {
       setBusy('');
     }
@@ -149,6 +160,7 @@ function ProposalCard({ proposal, onChange }) {
 // ----- Panel -----
 
 export default function AgentPanel({ open, onClose, aiEnabled }) {
+  const toast = useToast();
   const [view, setView] = useState('chat');
   const [conversationId, setConversationId] = useState('');
   const [messages, setMessages] = useState([]);
@@ -172,7 +184,7 @@ export default function AgentPanel({ open, onClose, aiEnabled }) {
       writeLast('');
       setConversationId('');
       setMessages([]);
-      if (!/찾을 수 없습니다/.test(e.message)) setError(e.message);
+      if (e.code !== 'CONVERSATION_NOT_FOUND') setError(e.message);
     }
   }, []);
 
@@ -222,15 +234,27 @@ export default function AgentPanel({ open, onClose, aiEnabled }) {
     setInput('');
     const temp = { message_id: 'tmp', role: 'user', content: text, pending: true };
     setMessages((list) => [...list, temp]);
+    const ask = (id) => postJson('/api/agent', { conversation_id: id, message: text });
     try {
-      const data = await postJson('/api/agent', { conversation_id: conversationId, message: text });
+      let data;
+      try {
+        data = await ask(conversationId);
+      } catch (e) {
+        if (e.code !== 'CONVERSATION_NOT_FOUND' || !conversationId) throw e;
+        // The conversation is gone (e.g. removed after 90 days unused): start a new one.
+        setConversationId('');
+        writeLast('');
+        setMessages([temp]);
+        data = await ask('');
+      }
       setConversationId(data.conversation_id);
       writeLast(data.conversation_id);
       setMessages((list) => [...list.filter((m) => m !== temp), data.user_message, data.message]);
     } catch (e) {
       setMessages((list) => list.filter((m) => m !== temp));
       setInput(text);
-      setError(e.message);
+      if (e.code === 'AGENT_RATE_LIMITED') toast(e.message, 'error');
+      else setError(e.message);
     } finally {
       setBusy(false);
       setTimeout(() => inputRef.current && inputRef.current.focus(), 0);

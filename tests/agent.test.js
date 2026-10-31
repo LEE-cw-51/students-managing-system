@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
-const { runAgentTurn, applyProposal } = require('../lib/agent.js');
+const { runAgentTurn, applyProposal, agentRateLimit, AGENT_RATE_LIMITED } = require('../lib/agent.js');
 const { chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
 
 const CONFIG = { key: 'test-key', baseUrl: 'https://ai.test/v1', model: 'test-model' };
@@ -207,6 +207,95 @@ describe('runAgentTurn', () => {
     const { fetch } = scriptedFetch([{ status: 429 }]);
     await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch }), /잠시 후/);
     assert.equal(api.listAgentConversations().length, 0);
+  });
+
+  it('keeps the turn when the data changes during the AI wait', async () => {
+    const { store, hong, kim, lessonOf } = setup();
+    // Like withService: every step reads the store again.
+    const run = async (fn) => fn(LMS.createService(store));
+    const hongLesson = lessonOf(hong.student_id);
+    const kimLesson = lessonOf(kim.student_id);
+    const script = scriptedFetch([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          toolCall('w1', 'update_attendance', { lesson_id: hongLesson.lesson_id, attendance: '결석' }),
+          toolCall('w2', 'update_attendance', { lesson_id: kimLesson.lesson_id, attendance: '결석' })
+        ]
+      },
+      { role: 'assistant', content: '두 학생 결석 처리를 승인해 주세요.' }
+    ]);
+    const fetch = async (url, init) => {
+      // Kim's lesson is deleted on another screen while the model writes its reply.
+      if (script.requests.length === 1) store.writeTable('Lessons', store.readTable('Lessons').filter((l) => l.lesson_id !== kimLesson.lesson_id));
+      return script.fetch(url, init);
+    };
+    const out = await runAgentTurn({ message: '홍길동, 김철수 오늘 결석' }, run, { config: CONFIG, fetch });
+    assert.equal(out.message.proposal.status, 'pending');
+    assert.equal(out.message.proposal.calls.length, 2);
+    const conv = LMS.createService(store).getAgentConversation(out.conversation_id);
+    assert.deepEqual(conv.messages.map((m) => m.role), ['user', 'assistant']);
+
+    // Approval checks again and refuses the stale change; nothing is applied.
+    await assert.rejects(applyProposal(out.message.proposal.proposal_id, run), /찾을 수 없습니다/);
+    const after = LMS.createService(store);
+    assert.equal(after.getStudentLessons(hong.student_id, '2026-09-14', '2026-09-14')[0].attendance, '출석');
+    assert.equal(after.getAgentConversation(out.conversation_id).messages[1].proposal.status, 'failed');
+  });
+
+  it('flags a removed conversation with a code and counts nothing', async () => {
+    const { api, store, run } = setup();
+    const { fetch, requests } = scriptedFetch([]);
+    await assert.rejects(runAgentTurn({ conversationId: 'AGC-9999', message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 5 }), (e) => {
+      assert.equal(e.code, 'CONVERSATION_NOT_FOUND');
+      assert.match(e.message, /대화를 찾을 수 없습니다/);
+      return true;
+    });
+    assert.throws(() => api.getAgentConversation('AGC-9999'), (e) => e.code === 'CONVERSATION_NOT_FOUND');
+    assert.equal(requests.length, 0);
+    assert.equal(store.readTable('AgentUsage').length, 0);
+  });
+});
+
+describe('agent rate limit', () => {
+  const HOUR = 60 * 60 * 1000;
+  const T0 = Date.parse('2026-09-14T01:00:00Z');
+
+  it('allows the limit per hour, then refuses before calling the AI', async () => {
+    const { api, store, run } = setup();
+    const replies = scriptedFetch([{ role: 'assistant', content: '하나' }, { role: 'assistant', content: '둘' }]);
+    await runAgentTurn({ message: '1' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 });
+    await runAgentTurn({ message: '2' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 + 10 * 60000 });
+    await assert.rejects(runAgentTurn({ message: '3' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 + 20 * 60000 }), (e) => {
+      assert.equal(e.code, AGENT_RATE_LIMITED);
+      assert.match(e.message, /한 시간에 2번까지.*약 40분 뒤/);
+      return true;
+    });
+    assert.equal(replies.requests.length, 2);
+    assert.equal(api.listAgentConversations().length, 2);
+    assert.equal(store.readTable('AgentUsage').length, 2);
+
+    // An hour after the first turn, one slot is free again; old rows are dropped.
+    const later = scriptedFetch([{ role: 'assistant', content: '셋' }]);
+    await runAgentTurn({ message: '3' }, run, { config: CONFIG, fetch: later.fetch, rateLimit: 2, now: T0 + HOUR + 1 });
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0 + 10 * 60000, T0 + HOUR + 1]);
+  });
+
+  it('counts nothing when the limit is 0', async () => {
+    const { store, run } = setup();
+    const { fetch } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 0 });
+    assert.equal(store.readTable('AgentUsage').length, 0);
+  });
+
+  it('reads AGENT_RATE_LIMIT_PER_HOUR with a default of 60', () => {
+    assert.equal(agentRateLimit(undefined), 60);
+    assert.equal(agentRateLimit(''), 60);
+    assert.equal(agentRateLimit('20'), 20);
+    assert.equal(agentRateLimit('0'), 0);
+    assert.equal(agentRateLimit('-1'), 60);
+    assert.equal(agentRateLimit('abc'), 60);
   });
 });
 
