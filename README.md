@@ -114,7 +114,15 @@ AI는 월간 보고서·강의 계획에서는 **초안 글쓰기에만** 씁니
 | 반 → 강의 계획 | 단원 진행, 남은 수업일, 4주 출석·숙제, 시험, 학생별 요약(별칭) | 이 달 목표, 수업일 계획, 학생 제안, 근거 | 서버가 날짜·단원·명단으로 검증 → 초안 → 강사가 고치고 확정 |
 | 상단 → AI 비서 | 강사 메시지, 대화 이력, 조회 도구 결과(학생 이름 포함) | 답변, 변경 제안(출결·상담·할 일) | 조회는 바로 답변, 변경은 강사가 승인하면 같은 업무 함수로 실행 → 다시 읽어 확인 |
 
-설정은 `AI_API_KEY`(필수), `AI_MODEL`, `AI_BASE_URL` 하나로 모든 AI 기능이 함께 씁니다(`lib/ai-client.js`). AI 비서는 도구 호출(tool calling)을 쓰므로 도구 호출을 지원하는 모델이 필요합니다. `AGENT_MODEL`에 넣으면 AI 비서만 그 모델을 쓰고, 월간 보고서·강의 계획은 `AI_MODEL`을 그대로 씁니다(비우면 AI 비서도 `AI_MODEL`). 기본값 `openrouter/free`는 도구 호출을 못 하거나 불안정할 수 있습니다. 권장값은 **Claude Haiku 5.5**입니다(OpenRouter 모델 ID는 openrouter.ai/models에서 확인, 예: `anthropic/claude-haiku-5.5`). 저렴하고(입력 $0.10 / 출력 $0.50 per 1M 토큰) 도구 호출을 지원합니다. 학생 식별이나 여러 단계 지시를 자주 틀리면 Gemini 3.7 Flash·GPT-5.6 Luna와 비교하고, 그래도 부족하면 Claude Sonnet 5.5로 올립니다. AI 비서 요청에는 `temperature`를 보내지 않습니다(최신 Claude 모델은 기본값이 아닌 값을 거부).
+설정은 `AI_API_KEY`(필수), `AI_MODEL`, `AI_BASE_URL` 하나로 모든 AI 기능이 함께 씁니다(`lib/ai-client.js`). AI 비서는 도구 호출(tool calling)을 쓰므로 도구 호출을 지원하는 모델이 필요합니다. `AGENT_MODEL`에 넣으면 AI 비서만 그 모델을 쓰고, 월간 보고서·강의 계획은 `AI_MODEL`을 그대로 씁니다(비우면 AI 비서도 `AI_MODEL`). 기본값 `openrouter/free`는 도구 호출을 못 하거나 불안정할 수 있습니다. 권장값은 **Claude Haiku 5.5**입니다(OpenRouter 모델 ID는 openrouter.ai/models에서 확인, 예: `anthropic/claude-haiku-5.5`). 저렴하고(입력 $0.10 / 출력 $0.50 per 1M 토큰) 도구 호출을 지원합니다. 학생 식별이나 여러 단계 지시를 자주 틀리면 Gemini 3.7 Flash·GPT-5.6 Luna와 비교하고, 그래도 부족하면 Claude Sonnet 5.5로 올립니다.
+
+`temperature`(답변의 다양성)는 기능마다 정해 두고, 보낼지는 `lib/ai-client.js`의 `temperatureFor`가 모델 ID로 정합니다. 최신 Claude 모델은 기본값이 아닌 값을 거부하므로 Claude 모델(ID에 `claude`가 있거나 `anthropic/`으로 시작)에는 어느 기능도 보내지 않습니다. 그래서 `AI_MODEL`·`AGENT_MODEL` 어디에 Claude를 넣어도 됩니다.
+
+| 기능 | 모델 설정 | Claude 외 모델 | Claude 모델 |
+|---|---|---|---|
+| 월간 보고서 AI 분석 | `AI_MODEL` | 0.4 | 보내지 않음 |
+| 강의 계획 AI 초안 | `AI_MODEL` | 0.3 | 보내지 않음 |
+| AI 비서 | `AGENT_MODEL`(비면 `AI_MODEL`) | 0.2 | 보내지 않음 |
 
 ## AI 비서
 

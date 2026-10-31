@@ -104,13 +104,47 @@ describe('chatWithTools', () => {
     assert.deepEqual(res.toolCalls, [{ id: 'c1', name: 'search_students', args: { query: '민수' } }]);
   });
 
-  it('sends no temperature unless one is given', async () => {
-    const first = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
-    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: first.fetch });
-    assert.equal('temperature' in first.requests[0], false);
-    const second = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
-    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: second.fetch, temperature: 0.5 });
-    assert.equal(second.requests[0].temperature, 0.5);
+});
+
+describe('temperature by model', () => {
+  const { chatCompletion, temperatureFor, isClaudeModel } = require('../lib/ai-client.js');
+  const { buildMonthlyAiSections } = require('../lib/monthly-ai.js');
+  const CLAUDE = { ...CONFIG, model: 'anthropic/claude-haiku-5.5' };
+  const reply = () => scriptedFetch([{ role: 'assistant', content: '【학습 분석】\n좋음' }]);
+  const hi = [{ role: 'user', content: 'hi' }];
+
+  it('recognises Claude model IDs', () => {
+    ['anthropic/claude-haiku-5.5', 'Anthropic/Claude-Sonnet-5.5', 'claude-haiku-5-5'].forEach((m) => assert.equal(isClaudeModel(m), true, m));
+    ['openrouter/free', 'google/gemini-3.7-flash', 'openai/gpt-5.6-luna', ''].forEach((m) => assert.equal(isClaudeModel(m), false, m));
+  });
+
+  it('never sends temperature to Claude models, on any AI path', async () => {
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CLAUDE, fetch: tools.fetch, temperature: 0.5 });
+    const plain = reply();
+    await chatCompletion(hi, { config: CLAUDE, fetch: plain.fetch });
+    const monthly = reply();
+    await buildMonthlyAiSections({ student: { name: '가' } }, { config: CLAUDE, fetch: monthly.fetch });
+    [tools, plain, monthly].forEach((r) => assert.equal('temperature' in r.requests[0], false));
+  });
+
+  it('keeps each feature temperature for other models', async () => {
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CONFIG, fetch: tools.fetch });
+    const plain = reply();
+    await chatCompletion(hi, { config: CONFIG, fetch: plain.fetch });
+    const monthly = reply();
+    await buildMonthlyAiSections({ student: { name: '가' } }, { config: CONFIG, fetch: monthly.fetch });
+    assert.equal(tools.requests[0].temperature, 0.2);
+    assert.equal(plain.requests[0].temperature, 0.3);
+    assert.equal(monthly.requests[0].temperature, 0.4);
+  });
+
+  it('treats a null temperature as unset', async () => {
+    assert.equal(temperatureFor(CONFIG, null, 0.2), 0.2);
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CONFIG, fetch: tools.fetch, temperature: null });
+    assert.equal(tools.requests[0].temperature, 0.2);
   });
 
   it('keeps unreadable arguments visible', () => {
