@@ -1,0 +1,274 @@
+{
+  "schema": 1,
+  "title": "공통 틀 컴팩트화",
+  "platform": "responsive",
+  "created_at": "2026-11-01T18:30:31+00:00",
+  "stage": "locked",
+  "versions": [
+    {
+      "v": 1,
+      "file": "wireframes/v1.html",
+      "from": null,
+      "note": "first draft",
+      "created_at": "2026-11-01T18:30:31+00:00",
+      "lint": "pass",
+      "sha256": "4837afa8c5653f05dd0774b377bcdd32fe7d4968102311227b58fb335409e31c"
+    },
+    {
+      "v": 2,
+      "file": "wireframes/v2.html",
+      "from": 1,
+      "note": "remove topbar date; sidebar expanded by default",
+      "created_at": "2026-11-01T18:38:31+00:00",
+      "lint": "pass",
+      "sha256": "f3786cce8efa32f2bdb0156772253136bd8522f560baee24ed4eeb6c40379919"
+    },
+    {
+      "v": 3,
+      "file": "wireframes/v3.html",
+      "from": 2,
+      "note": "today screen",
+      "created_at": "2026-11-01T18:58:09+00:00",
+      "lint": "pass",
+      "sha256": "d40d422000f8911b629090a5b53cc27e9e752b46424b45d2792e2cb1a9b3bfaa"
+    },
+    {
+      "v": 4,
+      "file": "wireframes/v4.html",
+      "from": 3,
+      "note": "student detail screen",
+      "created_at": "2026-11-01T19:07:41+00:00",
+      "lint": "pass",
+      "sha256": "2ed4c4fe1f5b960065956c03e6a61d3d3857637b103b4de64ecb0e389e5623d1"
+    },
+    {
+      "v": 5,
+      "file": "wireframes/v5.html",
+      "from": 4,
+      "note": "student list screen",
+      "created_at": "2026-11-01T19:25:51+00:00",
+      "lint": "pass",
+      "sha256": "7c766bc66fc6dc3aadce43a8f8bfe9da55348e451f4c421bdc0b2fd202455b7c"
+    }
+  ],
+  "lock": {
+    "version": 5,
+    "source": "wireframes/v5.html",
+    "sha256_source": "7c766bc66fc6dc3aadce43a8f8bfe9da55348e451f4c421bdc0b2fd202455b7c",
+    "sha256_lock": "599e9eb6d763fff1885c15bd5d8b1bdd11c7c93bffc1694a45c903dedd89f87f",
+    "approved_at": "2026-11-01T19:27:57+00:00",
+    "quote": "좋아요, 위 답대로 확정하고 구현",
+    "evidence": "unverified"
+  },
+  "gate": {
+    "skipped": false,
+    "extra_paths": [],
+    "ignore_paths": []
+  },
+  "history": [
+    {
+      "ts": "2026-11-01T18:30:31+00:00",
+      "event": "init"
+    },
+    {
+      "ts": "2026-11-01T18:30:31+00:00",
+      "event": "new",
+      "v": 1,
+      "from": null,
+      "note": "first draft"
+    },
+    {
+      "ts": "2026-11-01T18:30:54+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 0
+    },
+    {
+      "ts": "2026-11-01T18:31:12+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 0
+    },
+    {
+      "ts": "2026-11-01T18:37:09+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:38:31+00:00",
+      "event": "new",
+      "v": 2,
+      "from": 1,
+      "note": "remove topbar date; sidebar expanded by default"
+    },
+    {
+      "ts": "2026-11-01T18:38:41+00:00",
+      "event": "check",
+      "v": 2,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:38:48+00:00",
+      "event": "approve",
+      "v": 2,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T18:58:09+00:00",
+      "event": "reopen",
+      "was": 2,
+      "reason": "오늘/수업 기록 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T18:58:09+00:00",
+      "event": "new",
+      "v": 3,
+      "from": 2,
+      "note": "today screen"
+    },
+    {
+      "ts": "2026-11-01T18:59:05+00:00",
+      "event": "check",
+      "v": 3,
+      "lint_errors": 4,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-01T18:59:15+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:59:39+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:59:46+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:00:56+00:00",
+      "event": "approve",
+      "v": 3,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T19:07:41+00:00",
+      "event": "reopen",
+      "was": 3,
+      "reason": "학생 상세 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T19:07:41+00:00",
+      "event": "new",
+      "v": 4,
+      "from": 3,
+      "note": "student detail screen"
+    },
+    {
+      "ts": "2026-11-01T19:08:16+00:00",
+      "event": "check",
+      "v": 4,
+      "lint_errors": 5,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-01T19:08:25+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-01T19:08:38+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:08:51+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:09:02+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:09:14+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:11:07+00:00",
+      "event": "approve",
+      "v": 4,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T19:25:50+00:00",
+      "event": "reopen",
+      "was": 4,
+      "reason": "학생 목록 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T19:25:51+00:00",
+      "event": "new",
+      "v": 5,
+      "from": 4,
+      "note": "student list screen"
+    },
+    {
+      "ts": "2026-11-01T19:26:20+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-01T19:26:34+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:26:46+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:27:57+00:00",
+      "event": "approve",
+      "v": 5,
+      "evidence": "unverified"
+    }
+  ]
+}

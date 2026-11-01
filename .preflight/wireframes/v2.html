@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>공통 틀 컴팩트화 — wireframe</title>
+<link rel="stylesheet" href="lofi.css">
+<script src="lofi.js"></script>
+<style>
+  [data-screen-id="shell-collapsed"] [data-region="sidebar"][data-w] { flex: 0 0 72px !important; width: 72px !important; max-width: 72px !important; }
+  [data-region="week-strip"] { grid-template-columns: repeat(7, 1fr); }
+  [data-region="search"][data-w] { flex: 1 1 auto !important; }
+  [data-region="today-date"][data-w], [data-region="agent-toggle"][data-w] { flex: 0 0 140px !important; width: 140px !important; }
+</style>
+</head>
+<body data-platform="responsive">
+
+<!-- 펼친 사이드바 -->
+<div data-page data-screen-id="shell-expanded" data-start-screen>
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-layout="row" data-keep="row" data-size="xs"><strong>이 · 이찬우 선생님</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow>
+        <span>오늘</span><span>학생</span><span>반</span><span>시험</span><span>보고서</span><span>설정</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="row" data-keep="row" data-justify="between" data-size="xs">
+        <button data-action-target="shell-collapsed">« 접기</button><button>로그아웃</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="wide">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-justify="between" data-size="xs">
+          <div data-layout="row" data-keep="row"><h1>오늘</h1><span>2026년 11월 2일 (월)</span></div>
+          <div data-layout="row" data-keep="row"><button>◀</button><button>날짜</button><button>▶</button></div>
+        </div>
+        <section data-region="page-body" data-layout="col">
+          <p class="wf-note">각 페이지 내용은 그대로. 공통 여백·카드 안쪽 여백·제목 크기만 한 단계 줄임</p>
+          <div data-region="week-strip" data-label="off" data-layout="grid" data-cols="6" data-cols-sm="3">
+            <div>월 2</div><div>화 3</div><div>수 4</div><div>목 5</div><div>금 6</div><div>토 7</div><div>일 8</div>
+          </div>
+          <div data-layout="grid" data-cols="2" data-cols-sm="1">
+            <div data-size="sm"><h3>수업</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>할 일</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>주의 학생</h3><div data-ph="table"></div></div>
+            <div data-size="sm"><h3>이번 주 숙제</h3><div data-ph="table"></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <footer class="wf-assume">
+    결정: 사이드바 기본은 펼침(184px), 접으면 아이콘 막대로 바뀌고 상태 기억. 위쪽 막대의 날짜는 뺌.
+    위쪽 막대 약 48px, 제목 줄은 제목·부제·액션을 한 줄로(약 70 → 40px).
+  </footer>
+</div>
+
+<!-- 접힌 사이드바(아이콘 막대) -->
+<div data-page data-screen-id="shell-collapsed">
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-label="off" data-size="xs"><strong>이</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow data-label="off">
+        <span>◷</span><span>◉</span><span>▦</span><span>✓</span><span>✎</span><span>⚙</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="col" data-size="xs" data-label="off">
+        <button data-action-target="shell-expanded">»</button><button>⎋</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="fill">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-justify="between" data-size="xs">
+          <div data-layout="row" data-keep="row"><h1>오늘</h1><span>2026년 11월 2일 (월)</span></div>
+          <div data-layout="row" data-keep="row"><button>◀</button><button>날짜</button><button>▶</button></div>
+        </div>
+        <section data-region="page-body" data-layout="col">
+          <p class="wf-note">아이콘 막대(56px): 메뉴 이름은 마우스를 올리면 툴팁으로 표시. 본문이 그만큼 넓어짐</p>
+          <div data-layout="grid" data-cols="2" data-cols-sm="1">
+            <div data-size="sm"><h3>수업</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>할 일</h3><div data-ph="text"></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

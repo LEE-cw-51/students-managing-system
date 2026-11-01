@@ -1,0 +1,201 @@
+/*
+ * lofi.css — the only stylesheet a UI Preflight wireframe may use.
+ *
+ * Purpose: make every wireframe answer "is this the structure I meant?"
+ * and never "is this pretty?". It deliberately has no color, no shadow,
+ * no radius beyond 2px, no motion and a single system font.
+ *
+ * Structure is expressed with data attributes, not custom CSS:
+ *   data-region="name"     a named layout region (becomes part of the lock)
+ *   data-layout="row|col|grid"   how the region lays out its children
+ *   data-cols="1..6"        grid columns (desktop)
+ *   data-cols-sm="1..3"     grid columns under 640px
+ *   data-size="xs|sm|md|lg|xl"  rough block height
+ *   data-w="narrow|wide|fill"   rough width inside a row
+ *   data-ph="text|image|chart|table|avatar|input|button"  placeholder kind
+ */
+
+:root {
+  --wf-ink: #111;
+  --wf-ink-2: #555;
+  --wf-ink-3: #888;
+  --wf-line: #bbb;
+  --wf-fill: #eee;
+  --wf-fill-2: #f6f6f6;
+  --wf-paper: #fff;
+  --wf-gap: 12px;
+  --wf-pad: 12px;
+  --wf-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--wf-paper);
+  color: var(--wf-ink);
+  font: 13px/1.4 var(--wf-font);
+}
+
+/* ---------- Regions ---------- */
+
+[data-region] {
+  position: relative;
+  border: 1px solid var(--wf-line);
+  padding: calc(var(--wf-pad) + 12px) var(--wf-pad) var(--wf-pad);
+  min-width: 0;
+}
+
+/* Region label, printed from the attribute so the name on screen and
+   the name in layout.lock.yaml can never drift apart. It is absolutely
+   positioned so it never becomes a flex/grid item and never shifts the
+   layout that extract_lock.py measures. */
+[data-region]::before {
+  content: attr(data-region);
+  position: absolute;
+  top: 4px;
+  left: var(--wf-pad);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--wf-ink-3);
+  pointer-events: none;
+}
+
+[data-region][data-label="off"] { padding-top: var(--wf-pad); }
+[data-region][data-label="off"]::before { content: none; }
+
+/* ---------- Layout ---------- */
+
+[data-layout="row"]  { display: flex; flex-direction: row; gap: var(--wf-gap); align-items: stretch; }
+[data-layout="col"]  { display: flex; flex-direction: column; gap: var(--wf-gap); }
+[data-layout="grid"] { display: grid; gap: var(--wf-gap); grid-template-columns: repeat(var(--wf-cols, 2), minmax(0, 1fr)); }
+
+[data-cols="1"] { --wf-cols: 1; } [data-cols="2"] { --wf-cols: 2; }
+[data-cols="3"] { --wf-cols: 3; } [data-cols="4"] { --wf-cols: 4; }
+[data-cols="5"] { --wf-cols: 5; } [data-cols="6"] { --wf-cols: 6; }
+
+[data-span="2"] { grid-column: span 2; } [data-span="3"] { grid-column: span 3; }
+[data-span="full"] { grid-column: 1 / -1; }
+
+[data-w="narrow"] { flex: 0 0 200px; }
+[data-w="wide"]   { flex: 2 1 0; }
+[data-w="fill"]   { flex: 1 1 0; }
+[data-layout="row"] > [data-region]:not([data-w]) { flex: 1 1 0; }
+
+[data-size="xs"] { min-height: 40px; }
+[data-size="sm"] { min-height: 96px; }
+[data-size="md"] { min-height: 180px; }
+[data-size="lg"] { min-height: 300px; }
+[data-size="xl"] { min-height: 460px; }
+
+[data-sticky="top"]    { position: sticky; top: 0; z-index: 1; background: var(--wf-paper); }
+[data-sticky="bottom"] { position: sticky; bottom: 0; z-index: 1; background: var(--wf-paper); }
+
+/* Page shell. [hidden] must win over [data-page]'s display:flex so
+   lofi.js can show one screen at a time. */
+[hidden] { display: none !important; }
+[data-page] { display: flex; flex-direction: column; gap: var(--wf-gap); min-height: calc(100vh - var(--wf-bar, 0px)); padding: var(--wf-gap); }
+/* The screen switcher takes --wf-bar of height; pages shrink by the same
+   amount so bottom-sticky regions (tab bars) don't ride up over content. */
+:root:has(.wf-screens) { --wf-bar: 36px; }
+[data-page] > [data-grow] { flex: 1 1 auto; }
+
+/* Mobile-only products are drawn in a phone-width column even on a wide
+   monitor, so the reviewer sees what the user will see. */
+body[data-platform="mobile"] { background: var(--wf-fill-2); }
+body[data-platform="mobile"] [data-page] {
+  max-width: 390px; margin: 0 auto; background: var(--wf-paper);
+  border-left: 1px solid var(--wf-line); border-right: 1px solid var(--wf-line);
+}
+
+/* Screen switcher added by lofi.js (only when there are 2+ screens). */
+.wf-screens {
+  display: flex; flex-wrap: nowrap; overflow-x: auto; align-items: center; gap: 6px;
+  height: var(--wf-bar); padding: 0 var(--wf-gap); font-size: 11px; color: var(--wf-ink-3);
+  border-bottom: 1px solid var(--wf-line); background: var(--wf-fill-2);
+}
+.wf-screens button { min-height: 24px; padding: 2px 8px; font-size: 11px; border-color: var(--wf-line); }
+.wf-screens button[data-current] { border-color: var(--wf-ink); font-weight: 700; }
+
+/* ---------- Mobile ---------- */
+
+@media (max-width: 640px) {
+  /* stacked rows: children take the full width (space-between's centering
+     would otherwise shrink them to their content) */
+  [data-layout="row"]:not([data-keep="row"]) { flex-direction: column; align-items: stretch; }
+  [data-w="narrow"] { flex-basis: auto; }
+  [data-layout="grid"] { grid-template-columns: repeat(var(--wf-cols-sm, 1), minmax(0, 1fr)); }
+  [data-cols-sm="2"] { --wf-cols-sm: 2; }
+  [data-cols-sm="3"] { --wf-cols-sm: 3; }
+  [data-span] { grid-column: auto; }
+  [data-hide="mobile"] { display: none !important; }
+}
+@media (min-width: 641px) {
+  [data-hide="desktop"] { display: none !important; }
+}
+
+/* ---------- Placeholders ---------- */
+
+[data-ph] { display: block; background: var(--wf-fill-2); border: 1px solid var(--wf-line); min-height: 24px; }
+/* In a row, placeholders share the width instead of collapsing to 0 px. */
+[data-layout="row"] > [data-ph]:not([data-ph="avatar"]):not([data-ph="button"]) { flex: 1 1 0; min-width: 40px; }
+
+/* Titles written directly inside a grid span the whole row instead of
+   stealing the first cell. */
+[data-layout="grid"] > :is(h1, h2, h3, h4, p, .wf-note):not([data-region]) { grid-column: 1 / -1; }
+
+[data-ph="text"] {
+  background: repeating-linear-gradient(to bottom, var(--wf-fill) 0 8px, transparent 8px 16px);
+  border: 0; min-height: 40px;
+}
+[data-ph="image"] {
+  min-height: 120px;
+  background:
+    linear-gradient(to top right, transparent calc(50% - .5px), var(--wf-line) 50%, transparent calc(50% + .5px)),
+    linear-gradient(to top left,  transparent calc(50% - .5px), var(--wf-line) 50%, transparent calc(50% + .5px)),
+    var(--wf-fill-2);
+}
+[data-ph="chart"] {
+  min-height: 140px;
+  background:
+    linear-gradient(to right, var(--wf-line) 1px, transparent 1px) 0 0 / 20% 100%,
+    linear-gradient(to top, var(--wf-line) 1px, transparent 1px) 0 0 / 100% 25%,
+    var(--wf-fill-2);
+}
+[data-ph="table"] {
+  min-height: 120px;
+  background: repeating-linear-gradient(to bottom, var(--wf-fill-2) 0 23px, var(--wf-line) 23px 24px);
+}
+[data-ph="avatar"] { width: 32px; min-height: 32px; height: 32px; border-radius: 50%; flex: none; }
+[data-ph="input"]  { min-height: 32px; background: var(--wf-paper); }
+
+/* The only element allowed to draw attention: primary actions. */
+button, [data-ph="button"], .wf-btn {
+  font: inherit; color: var(--wf-ink);
+  background: var(--wf-paper);
+  border: 1px solid var(--wf-ink);
+  border-radius: 2px;
+  padding: 6px 12px;
+  min-height: 32px;
+  cursor: pointer;
+}
+[data-primary], .wf-btn-primary { background: var(--wf-ink); color: var(--wf-paper); }
+
+/* ---------- Text ---------- */
+
+h1, h2, h3, h4 { margin: 0 0 6px; font-weight: 700; line-height: 1.2; }
+h1 { font-size: 20px; } h2 { font-size: 16px; } h3 { font-size: 14px; } h4 { font-size: 13px; }
+p  { margin: 0 0 6px; color: var(--wf-ink-2); }
+a  { color: inherit; }
+nav ul, .wf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+[data-layout="row"] > ul,
+[data-layout="row"] > nav ul { flex-direction: row; gap: 16px; }
+
+[data-justify="between"] { justify-content: space-between; align-items: center; }
+[data-justify="end"]     { justify-content: flex-end; }
+
+/* Review aids */
+.wf-note { font-size: 11px; color: var(--wf-ink-3); border-left: 2px solid var(--wf-line); padding-left: 6px; }
+.wf-assume { font-size: 11px; color: var(--wf-ink-2); }

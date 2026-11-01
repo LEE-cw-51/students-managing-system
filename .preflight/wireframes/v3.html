@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>공통 틀 컴팩트화 — wireframe</title>
+<link rel="stylesheet" href="lofi.css">
+<script src="lofi.js"></script>
+<style>
+  [data-screen-id="shell-collapsed"] [data-region="sidebar"][data-w] { flex: 0 0 72px !important; width: 72px !important; max-width: 72px !important; }
+  [data-region="week-strip"] { grid-template-columns: repeat(7, 1fr); }
+  [data-region="search"][data-w] { flex: 1 1 auto !important; }
+  [data-region="today-date"][data-w], [data-region="agent-toggle"][data-w] { flex: 0 0 140px !important; width: 140px !important; }
+  [data-region="week-days"] { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  [data-region="week-prev"][data-w], [data-region="week-next"][data-w], [data-region="week-pick"][data-w] { flex: 0 0 96px !important; width: 96px !important; }
+  [data-screen-id="today-board"] button, [data-screen-id="lesson-recorder"] button { flex-shrink: 0; }
+  .sr-line { flex-wrap: wrap; align-items: center; }
+  @media (max-width: 640px) {
+    [data-region="week-prev"][data-w], [data-region="week-next"][data-w] { flex: 0 0 32px !important; width: 32px !important; padding: 2px; }
+    [data-region="week-pick"] { display: none !important; }
+    [data-region="week-nav"] { gap: 4px; padding: 4px; }
+    [data-region="week-days"] { gap: 2px; padding: 2px; }
+    [data-region="week-days"] button { padding: 2px 0; min-width: 0; }
+  }
+</style>
+</head>
+<body data-platform="responsive">
+
+<!-- 펼친 사이드바 -->
+<div data-page data-screen-id="shell-expanded" data-start-screen>
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-layout="row" data-keep="row" data-size="xs"><strong>이 · 이찬우 선생님</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow>
+        <span>오늘</span><span>학생</span><span>반</span><span>시험</span><span>보고서</span><span>설정</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="row" data-keep="row" data-justify="between" data-size="xs">
+        <button data-action-target="shell-collapsed">« 접기</button><button>로그아웃</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="wide">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-justify="between" data-size="xs">
+          <div data-layout="row" data-keep="row"><h1>오늘</h1><span>2026년 11월 2일 (월)</span></div>
+          <div data-layout="row" data-keep="row"><button>◀</button><button>날짜</button><button>▶</button></div>
+        </div>
+        <section data-region="page-body" data-layout="col">
+          <p class="wf-note">각 페이지 내용은 그대로. 공통 여백·카드 안쪽 여백·제목 크기만 한 단계 줄임</p>
+          <div data-region="week-strip" data-label="off" data-layout="grid" data-cols="6" data-cols-sm="3">
+            <div>월 2</div><div>화 3</div><div>수 4</div><div>목 5</div><div>금 6</div><div>토 7</div><div>일 8</div>
+          </div>
+          <div data-layout="grid" data-cols="2" data-cols-sm="1">
+            <div data-size="sm"><h3>수업</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>할 일</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>주의 학생</h3><div data-ph="table"></div></div>
+            <div data-size="sm"><h3>이번 주 숙제</h3><div data-ph="table"></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <footer class="wf-assume">
+    결정: 사이드바 기본은 펼침(184px), 접으면 아이콘 막대로 바뀌고 상태 기억. 위쪽 막대의 날짜는 뺌.
+    위쪽 막대 약 48px, 제목 줄은 제목·부제·액션을 한 줄로(약 70 → 40px).
+  </footer>
+</div>
+
+<!-- 접힌 사이드바(아이콘 막대) -->
+<div data-page data-screen-id="shell-collapsed">
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-label="off" data-size="xs"><strong>이</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow data-label="off">
+        <span>◷</span><span>◉</span><span>▦</span><span>✓</span><span>✎</span><span>⚙</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="col" data-size="xs" data-label="off">
+        <button data-action-target="shell-expanded">»</button><button>⎋</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="fill">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-justify="between" data-size="xs">
+          <div data-layout="row" data-keep="row"><h1>오늘</h1><span>2026년 11월 2일 (월)</span></div>
+          <div data-layout="row" data-keep="row"><button>◀</button><button>날짜</button><button>▶</button></div>
+        </div>
+        <section data-region="page-body" data-layout="col">
+          <p class="wf-note">아이콘 막대(56px): 메뉴 이름은 마우스를 올리면 툴팁으로 표시. 본문이 그만큼 넓어짐</p>
+          <div data-layout="grid" data-cols="2" data-cols-sm="1">
+            <div data-size="sm"><h3>수업</h3><div data-ph="text"></div></div>
+            <div data-size="sm"><h3>할 일</h3><div data-ph="text"></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+
+<!-- 오늘 보드 (반 선택 전) -->
+<div data-page data-screen-id="today-board">
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-layout="row" data-keep="row" data-size="xs"><strong>이 · 이찬우 선생님</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow>
+        <span>오늘</span><span>학생</span><span>반</span><span>시험</span><span>보고서</span><span>설정</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="row" data-keep="row" data-justify="between" data-size="xs">
+        <button data-action-target="shell-collapsed">« 접기</button><button>로그아웃</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="wide">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-keep="row" data-justify="between" data-size="xs">
+          <div data-layout="row" data-keep="row"><h1>오늘</h1><span>11월 2일 (월)</span></div>
+          <button>오늘로</button>
+        </div>
+        <p class="wf-note">날짜 이동은 아래 주간 띠 하나로 통일. 제목 줄의 ◀ 날짜 ▶ 는 뺌. "오늘로"는 다른 날을 보고 있을 때만 보임</p>
+
+        <nav data-region="week-nav" data-layout="row" data-keep="row">
+          <button data-region="week-prev" data-label="off" data-w="narrow">◀<span data-hide="mobile"> 지난주</span></button>
+          <div data-region="week-days" data-label="off" data-layout="grid" data-cols="6" data-cols-sm="3" data-w="fill">
+            <button>월 2<br><span data-hide="mobile">수업 3</span><span data-hide="desktop">•••</span></button><button>화 3<br><span data-hide="mobile">수업 2</span><span data-hide="desktop">••</span></button><button>수 4<br><span data-hide="mobile">수업 3</span><span data-hide="desktop">•••</span></button><button>목 5<br><span data-hide="mobile">수업 2</span><span data-hide="desktop">••</span></button><button>금 6<br><span data-hide="mobile">수업 3</span><span data-hide="desktop">•••</span></button><button>토 7<br><span data-hide="mobile">보강 1</span><span data-hide="desktop">◦</span></button><button>일 8<br>–</button>
+          </div>
+          <button data-region="week-next" data-label="off" data-w="narrow"><span data-hide="mobile">다음 주 </span>▶</button>
+          <button data-region="week-pick" data-label="off" data-w="narrow">날짜 선택</button>
+        </nav>
+
+        <section data-region="classes" data-layout="col">
+          <div data-region="classes-head" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <h2>수업 3개 · 보강 1개</h2><button>보강 추가</button>
+          </div>
+          <div data-region="class-cards" data-label="off" data-layout="grid" data-cols="3" data-cols-sm="1">
+            <div data-region="class-card-done" data-layout="col"><span>16:00–17:30</span><strong>중1 기초반</strong><span>기록 완료</span><button>기록 보기 →</button></div>
+            <div data-region="class-card-partial" data-layout="col"><span>18:00–19:30</span><strong>중2 A반</strong><span>기록 3/8</span><button data-primary>수업 기록 →</button></div>
+            <div data-region="class-card-todo" data-layout="col"><span>20:00–21:30</span><strong>고1 내신반 · 시험대비</strong><span>기록 전 · 6명</span><button>수업 기록 →</button></div>
+            <div data-region="makeup-card" data-layout="col"><span>시간 미정</span><strong>보강 · 김민준</strong><span>보강 예정</span><button>완료</button></div>
+          </div>
+          <div data-region="cancelled" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <span>휴강 · 19:00 중3 심화반 · 학교 행사</span><button>휴강 취소</button>
+          </div>
+        </section>
+
+        <div data-region="board-cards" data-label="off" data-layout="grid" data-cols="2" data-cols-sm="1">
+          <section data-region="tasks" data-layout="col"><h3>할 일 3</h3><div data-ph="text"></div></section>
+          <section data-region="exams-soon" data-layout="col"><h3>D-7 학교 시험</h3><div data-ph="text"></div></section>
+          <section data-region="flagged" data-layout="col"><h3>주의 학생 2명</h3><div data-ph="table"></div></section>
+          <section data-region="weekly-homework" data-layout="col"><h3>이번 주 숙제 확인</h3><div data-ph="table"></div></section>
+        </div>
+      </main>
+    </div>
+  </div>
+  <footer class="wf-assume">
+    가정: 보드 카드 4개(할 일·D-7 시험·주의 학생·이번 주 숙제)의 내용과 순서는 그대로. 휴대폰에서 주간 띠는 7칸 한 줄 유지(요일+날짜만, 건수는 점 표시), 화살표만 남기고 "날짜 선택"은 뺌.
+  </footer>
+</div>
+
+<!-- 수업 기록 (/today?class=...) -->
+<div data-page data-screen-id="lesson-recorder">
+  <div data-region="app" data-layout="row" data-label="off" data-grow>
+    <aside data-region="sidebar" data-layout="col" data-w="narrow" data-hide="mobile">
+      <div data-region="brand" data-layout="row" data-keep="row" data-size="xs"><strong>이 · 이찬우 선생님</strong></div>
+      <nav data-region="nav" data-layout="col" data-grow>
+        <span>오늘</span><span>학생</span><span>반</span><span>시험</span><span>보고서</span><span>설정</span>
+      </nav>
+      <div data-region="sidebar-foot" data-layout="row" data-keep="row" data-justify="between" data-size="xs">
+        <button data-action-target="shell-collapsed">« 접기</button><button>로그아웃</button>
+      </div>
+    </aside>
+    <div data-region="main" data-layout="col" data-w="wide">
+      <header data-region="topbar" data-layout="row" data-keep="row" data-sticky="top" data-size="xs">
+        <button data-region="menu-toggle" data-label="off" data-hide="desktop">☰</button>
+        <div data-region="search" data-w="fill" data-label="off"><div data-ph="input"></div></div>
+        <button data-region="agent-toggle" data-label="off" data-w="narrow" data-primary>AI 비서</button>
+      </header>
+      <main data-region="content" data-layout="col" data-grow>
+        <div data-region="page-header" data-layout="row" data-justify="between" data-size="xs">
+          <div data-layout="col">
+            <div data-layout="row" data-keep="row"><span>‹ 오늘</span><h1>중2 A반</h1></div>
+            <span>11월 2일 (월) 18:00–19:30 · 월수금</span>
+          </div>
+          <div data-region="lesson-date-nav" data-label="off" data-layout="row" data-keep="row">
+            <button>◀<span data-hide="mobile"> 이전 수업</span></button><button>11/2 (월)</button><button><span data-hide="mobile">다음 수업 </span>▶</button>
+          </div>
+        </div>
+        <p class="wf-note">반 이름·수업 시간을 제목 줄로 합쳐 별도 머리줄을 없앰. 날짜 이동은 이 반의 이전/다음 수업일 이동 하나만</p>
+
+        <div data-region="day-notice" data-size="xs">
+          <span>이 날은 이 반의 정규 수업일이 아닙니다. 보강이면 그대로 기록하세요. · 최근 수업일 10/30</span>
+        </div>
+
+        <section data-region="class-common" data-layout="col">
+          <div data-region="class-common-summary" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <span><strong>반 공통</strong> · 진도: 3단원 일차함수 ~ p.82 · 테스트 봄(만점 20) · 공지 있음</span>
+            <button>펼치기 ▾</button>
+          </div>
+          <p class="wf-note">접힘이 기본(진도는 강의 계획으로 미리 채워짐). 펼치면 지금과 같은 입력: 계획 진행 결과, 진도, 수업 내용, 테스트(이름·만점·난이도·범위), 반 공지, "이 날 휴강". 아직 기록이 없는 날 첫 진입에는 펼친 상태로 시작</p>
+        </section>
+
+        <section data-region="student-records" data-layout="col">
+          <div data-region="student-records-head" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <h2>학생별 기록</h2><span>출석 7/8명</span>
+          </div>
+          <div data-region="student-row" data-layout="col">
+            <div class="sr-line" data-layout="row">
+              <strong>김민준 · 개인 진도</strong>
+              <div data-layout="row" data-keep="row"><span>출결</span><button data-primary>출석</button><button>결석</button></div>
+              <div data-layout="row" data-keep="row"><span>점수</span><button>15</button><span>/ 20</span></div>
+              <div data-layout="row" data-keep="row"><span>집중</span><button>A</button><button>B</button><button>C</button><button>D</button></div>
+              <div data-layout="row" data-keep="row"><span>과제(자동)</span><button>A</button><button data-primary>B</button><button>C</button><button>D</button><button>F</button></div>
+            </div>
+            <div data-layout="row">
+              <div data-ph="input" data-w="fill"></div>
+              <span>진도 다름 · 다른 시험지 · + 개별 공지·개인 숙제</span>
+            </div>
+          </div>
+          <div data-region="student-row-absent" data-layout="col">
+            <div class="sr-line" data-layout="row">
+              <strong>이서연</strong>
+              <div data-layout="row" data-keep="row"><span>출결</span><button>출석</button><button data-primary>결석</button></div>
+              <span>결석 — 점수·집중도 입력 안 함</span>
+            </div>
+            <div data-layout="row"><div data-ph="input" data-w="fill"></div></div>
+          </div>
+          <p class="wf-note">특이사항 입력은 줄 끝. "진도 다름 · 다른 시험지 · + 개별 공지·개인 숙제"는 줄 아래 작은 링크로. ↑↓ 키로 학생 줄 이동, 휴대폰에서는 한 학생씩 카드로 쌓임</p>
+        </section>
+
+        <section data-region="prior-homework" data-layout="col">
+          <div data-region="prior-homework-head" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <span><strong>지난 숙제 확인</strong> · 10/30에 낸 숙제 3개</span>
+            <div data-layout="row" data-keep="row"><button>전체 A</button><button>접기 ▴</button></div>
+          </div>
+          <div data-region="prior-table" data-hide="mobile" data-layout="col">
+            <p class="wf-note">학생 × 숙제 항목(A–F 선택) + 개인 숙제 + "모두 A". "과제 등급" 칸은 뺌 → 학생별 기록의 과제 칩 한 곳에만 표시</p>
+            <div data-ph="table"></div>
+          </div>
+          <div data-region="prior-stack" data-hide="desktop" data-layout="col">
+            <div data-layout="col"><strong>김민준</strong><span>교재 76~79쪽 [A▾] · 워크북 12쪽 [B▾] · 오답노트 [A▾]</span><button>모두 A</button></div>
+            <div data-layout="col"><strong>이서연</strong><span>교재 76~79쪽 [A▾] · 워크북 12쪽 [A▾] · 오답노트 [C▾]</span><button>모두 A</button></div>
+          </div>
+        </section>
+
+        <section data-region="today-homework" data-layout="col">
+          <div data-region="today-homework-summary" data-label="off" data-layout="row" data-keep="row" data-justify="between">
+            <span><strong>오늘 낼 숙제</strong> · 2개: 교재 80~83쪽, 워크북 13쪽</span>
+            <button>펼치기 ▾</button>
+          </div>
+          <p class="wf-note">펼치면 숙제 목록 편집 + "+ 숙제 추가" + "강의 계획 숙제 불러오기"</p>
+        </section>
+
+        <div data-region="save-bar" data-layout="row" data-keep="row" data-justify="between" data-sticky="bottom" data-size="xs">
+          <span>● 저장 안 한 변경</span>
+          <div data-layout="row" data-keep="row"><button>일일 보고서</button><button data-primary>저장</button></div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <footer class="wf-assume">
+    순서: 반 공통(한 줄 요약) → 학생별 기록 → 지난 숙제 확인 → 오늘 낼 숙제 → 저장 막대. 저장 안 한 채 떠날 때는 브라우저 confirm 대신 앱의 확인 창. 휴대폰 저장 막대는 한 줄(상태 아이콘 + 버튼 2개)로 낮춤.
+  </footer>
+</div>
+
+</body>
+</html>
