@@ -271,7 +271,7 @@ export default function AgentPanel({ open, onClose, aiEnabled }) {
         {!aiEnabled ? (
           <div className="agent-empty">
             <p><strong>AI 키가 설정되지 않았습니다.</strong></p>
-            <p>서버 환경 변수 <code>AI_API_KEY</code>와 도구 호출을 지원하는 <code>AI_MODEL</code>을 넣으면 사용할 수 있습니다.</p>
+            <p>서버 환경 변수 <code>ANTHROPIC_API_KEY</code>를 넣으면 Claude Haiku 5.5로 사용할 수 있습니다. 없으면 <code>AI_API_KEY</code>(OpenRouter)와 도구 호출을 지원하는 <code>AGENT_MODEL</code>을 씁니다.</p>
           </div>
         ) : view === 'list' ? (
           <div className="agent-convs">
