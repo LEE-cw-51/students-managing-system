@@ -133,7 +133,7 @@ export default function MonthlyBoard({ ym, classId, onChange }) {
                       return (
                         <tr key={r.student_id}>
                           <td className="center"><input type="checkbox" aria-label={`${r.name} 선택`} style={{ width: 18, minHeight: 0 }} disabled={!eligible(r)} checked={selected.has(r.student_id)} onChange={() => toggle(r.student_id)} /></td>
-                          <td className="primary"><Link href={`/students/${r.student_id}?tab=reports`}>{r.name}</Link> <span className="muted">{r.grade}</span></td>
+                          <td className="primary"><Link href={`/students/${r.student_id}?tab=counseling`}>{r.name}</Link> <span className="muted">{r.grade}</span></td>
                           <td data-label="이 달 수업" className="num">{r.lesson_count ? `${r.lesson_count}회` : <span className="muted">없음</span>}</td>
                           <td data-label="상태">
                             <span className={'tag ' + STATUS_TAG[r.status]}>{r.status}</span>

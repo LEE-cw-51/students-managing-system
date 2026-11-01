@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import LMS from '../../../src/00_Core.js';
 import { Async, EmptyState } from '@/components/ui/Feedback';
@@ -10,7 +11,7 @@ import Badges from '@/components/domain/Badges';
 import DailyReportsModal from './DailyReportsModal';
 import CancelDayDialog from '@/components/domain/class/CancelDayDialog';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, shortDate, timeSpan } from '@/lib/format';
+import { formatDate, relativeDay, shortDate, timeSpan } from '@/lib/format';
 
 const CONC = ['A', 'B', 'C', 'D'];
 const ASSIGN = LMS.ASSIGNMENT;
@@ -25,9 +26,9 @@ function GradeSelect({ value, label, onChange }) {
 }
 const PLAN_DONE = ['완료', '일부', '못 함'];
 
-function Chips({ value, options, onChange, label, disabled }) {
+function Chips({ value, options, onChange, label, disabled, nav }) {
   return (
-    <div className="chips" role="group" aria-label={label}>
+    <div className="chips" role="group" aria-label={label} data-nav={nav}>
       {options.map((o) => (
         <button key={o} type="button" className="chip" aria-pressed={value === o} disabled={disabled}
           onClick={() => onChange(value === o ? '' : o)}>{o}</button>
@@ -113,18 +114,39 @@ function initialForm(d) {
   };
 }
 
-function useUnsavedGuard(dirty) {
+function useUnsavedGuard(dirty, confirm) {
+  const router = useRouter();
   useEffect(() => {
     if (!dirty) return undefined;
-    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    let leaving = false;
+    const onBeforeUnload = (e) => {
+      if (leaving) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    // Links can't wait for the in-app dialog, so the click is held and replayed once confirmed.
     const onClick = (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = e.target.closest && e.target.closest('a[href]');
       const href = a ? a.getAttribute('href') || '' : '';
-      if (!a || a.target === '_blank' || !href || href.startsWith('#') || href.startsWith('tel:')) return;
-      if (!window.confirm('저장하지 않은 수업 기록이 있습니다. 이 화면을 떠날까요?')) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      if (!a || a.target === '_blank' || a.hasAttribute('download') || !href || href.startsWith('#') || href.startsWith('tel:') || href.startsWith('mailto:')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      confirm({
+        title: '저장하지 않은 수업 기록',
+        message: '저장하지 않은 수업 기록이 있습니다. 이 화면을 떠날까요?',
+        confirmLabel: '저장하지 않고 떠나기',
+        danger: true
+      }).then((ok) => {
+        if (!ok) return;
+        const url = new URL(a.href, window.location.href);
+        if (url.origin === window.location.origin) {
+          router.push(url.pathname + url.search + url.hash);
+        } else {
+          leaving = true;
+          window.location.assign(url.href);
+        }
+      });
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     document.addEventListener('click', onClick, true);
@@ -132,7 +154,34 @@ function useUnsavedGuard(dirty) {
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClick, true);
     };
-  }, [dirty]);
+  }, [dirty, confirm, router]);
+}
+
+/** ↑↓ from a field in one student row lands on the same field in the next row. */
+function focusRowField(row, nav, label) {
+  const zone = nav ? row.querySelector(`[data-nav="${nav}"]`) : null;
+  const items = zone ? (zone.matches('input') ? [zone] : [...zone.querySelectorAll('button, input')]) : [];
+  const enabled = items.filter((el) => !el.disabled);
+  const el = enabled.find((x) => label && x.textContent === label)
+    || enabled.find((x) => x.getAttribute('aria-pressed') === 'true')
+    || enabled[0]
+    || row.querySelector('.sr-name a');
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest' });
+}
+
+function onStudentRowsKey(e) {
+  if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  const row = e.target.closest('.student-row');
+  if (!row) return;
+  const rows = [...e.currentTarget.querySelectorAll('.student-row')];
+  const next = rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+  if (!next) return;
+  e.preventDefault();
+  const zone = e.target.closest('[data-nav]');
+  focusRowField(next, zone && zone.dataset.nav, e.target.tagName === 'BUTTON' ? e.target.textContent : '');
 }
 
 function Editor({ data, onSaved, onGoDate, onGuard }) {
@@ -145,8 +194,11 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   const [savedOnce, setSavedOnce] = useState(false);
   const [reports, setReports] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [commonOpen, setCommonOpen] = useState(() => !data.recorded_count);
+  const [priorOpen, setPriorOpen] = useState(true);
+  const [homeworkOpen, setHomeworkOpen] = useState(false);
   const dirty = JSON.stringify(form) !== baseline;
-  useUnsavedGuard(dirty);
+  useUnsavedGuard(dirty, confirm);
 
   // Anything that reloads `data` rebuilds the form below, so ask before throwing edits away.
   const discardOk = async () => !dirty || confirm({
@@ -216,6 +268,14 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   // 개별 공지 · 개인 숙제 are rarely used: folded per student unless opened or already filled.
   const [extraOpen, setExtraOpen] = useState({});
   const presentCount = data.students.filter((s) => form.students[s.student_id].attendance !== '결석').length;
+  const ses = form.session;
+  const commonSummary = [
+    ses.progress.trim() ? `진도: ${ses.progress.trim().replace(/\s+/g, ' ')}` : '진도 미입력',
+    ses.test_on ? `테스트 봄${String(ses.test_max_score).trim() ? `(만점 ${ses.test_max_score})` : ''}` : '테스트 없음',
+    ses.class_notice.trim() ? '공지 있음' : ''
+  ].filter(Boolean).join(' · ');
+  const homeworkTitles = homework.map((h) => h.title.trim()).filter(Boolean);
+  const homeworkSummary = homeworkTitles.length ? `${homeworkTitles.length}개: ${homeworkTitles.join(', ')}` : planHomework ? '없음 · 강의 계획 숙제 있음' : '없음';
 
   const restore = async () => {
     if (!(await discardOk())) return;
@@ -229,16 +289,21 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   };
   const goDate = async (d) => { if (await discardOk()) onGoDate(d); };
 
+  const focusClassMax = () => {
+    setCommonOpen(true);
+    setTimeout(() => document.getElementById('rec-tm')?.focus(), 0);
+  };
+
   const save = async () => {
     setError('');
     const s = form.session;
     if (s.test_on && !String(s.test_max_score).trim()) {
       setError('테스트 만점을 입력해 주세요.');
-      return document.getElementById('rec-tm')?.focus();
+      return focusClassMax();
     }
     if (s.test_on && !(toNumber(s.test_max_score) > 0)) {
       setError('테스트 만점은 0보다 커야 합니다.');
-      return document.getElementById('rec-tm')?.focus();
+      return focusClassMax();
     }
     const ownTested = (v) => s.test_on && v.test_own && v.attendance !== '결석' && String(v.test_score).trim() !== '';
     // Saving an open other paper without a score would drop an earlier 실시 record on it.
@@ -375,15 +440,21 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
       ) : null}
 
       <section className="card">
-        <div className="card-head">
-          <h2>① 반 공통</h2>
-          {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={async () => { if (await discardOk()) setCancelling(true); }}>이 날 휴강</button> : null}
+        <div className="card-head fold-head">
+          <div className="fold-title">
+            <h2>반 공통</h2>
+            {!commonOpen ? <span className="fold-summary">{commonSummary}</span> : null}
+          </div>
+          <span className="cluster">
+            {data.meets && !data.recorded_count && !savedOnce ? <button type="button" className="btn ghost sm" onClick={async () => { if (await discardOk()) setCancelling(true); }}>이 날 휴강</button> : null}
+            <button type="button" className="btn secondary sm" aria-expanded={commonOpen} aria-controls="rec-common" onClick={() => setCommonOpen((o) => !o)}>{commonOpen ? '접기 ▴' : '펼치기 ▾'}</button>
+          </span>
         </div>
         {cancelling ? (
           <CancelDayDialog classId={cls.class_id} className={cls.class_name} date={data.date}
             onClose={() => setCancelling(false)} onDone={() => onSaved()} />
         ) : null}
-        <div className="form-grid">
+        {commonOpen ? <div className="form-grid" id="rec-common">
           <div className="field span-all">
             <label htmlFor="rec-progress">진도</label>
             {data.daily_plan ? (
@@ -419,101 +490,22 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
             <label htmlFor="rec-notice">반 공지 (일일 보고서 공지사항)</label>
             <textarea id="rec-notice" rows={2} value={form.session.class_notice} onChange={(e) => setSession('class_notice', e.target.value)} />
           </div>
-        </div>
+        </div> : null}
       </section>
 
       <section className="card">
         <div className="card-head">
-          <h2>② 지난 숙제 확인</h2>
-          {hasPriorHomework ? <span className="cluster"><span className="muted">{shortDate(prior.assigned_date)}에 낸 숙제</span><button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, 'A')}>전체 A</button></span> : null}
-        </div>
-        {hasPriorHomework && !prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 A로 채워 두었습니다. 항목마다 A–F를 고르면 평균으로 과제 등급이 계산됩니다.</p> : null}
-        {hasPriorHomework ? (
-          <div className="table-wrap">
-            <table className="data-table check-table">
-              <thead>
-                <tr>
-                  <th>학생</th>
-                  {priorClassItems.map((it) => <th key={it.item_id} className="center">{it.title}</th>)}
-                  <th>개인 숙제</th>
-                  <th className="center">과제 등급</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.students.map((st) => {
-                  const replace = !!(prior.replace_by_student && prior.replace_by_student[st.student_id]);
-                  const personal = ((prior.personal_items_by_student && prior.personal_items_by_student[st.student_id]) || []).filter((it) => it.item_id);
-                  return (
-                    <tr key={st.student_id}>
-                      <td>
-                        <strong>{st.name}</strong>
-                        {replace ? <span className="tag muted" style={{ marginLeft: 6 }}>반 숙제 제외</span> : null}
-                      </td>
-                      {priorClassItems.map((it) => {
-                        if (replace) {
-                          return <td key={it.item_id} className="center muted">—</td>;
-                        }
-                        const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
-                        return (
-                          <td key={it.item_id} className="center">
-                            <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
-                          </td>
-                        );
-                      })}
-                      <td>
-                        {personal.length ? (
-                          <div className="stack-sm">
-                            {personal.map((it) => {
-                              const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
-                              return (
-                                <label key={it.item_id} className="check-label" style={{ margin: 0 }}>
-                                  <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
-                                  <span>{it.title} <span className="tag muted">개인</span></span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        ) : <span className="muted">—</span>}
-                      </td>
-                      <td className="center"><strong>{form.students[st.student_id].assignment_manual || autoGrade(st.student_id) || '-'}</strong></td>
-                      <td><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, 'A')}>모두 A</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : <p className="muted" style={{ margin: 0 }}>{prior && prior.assigned_date ? `${shortDate(prior.assigned_date)} 수업에 낸 숙제가 없습니다.` : '이전 수업이 없습니다.'} 과제 등급은 학생별 입력에서 직접 고르세요.</p>}
-      </section>
-
-      <section className="card">
-        <div className="card-head">
-          <h2>③ 오늘 낼 숙제</h2>
-          {planHomework && !homework.length ? <button type="button" className="link-btn" onClick={() => setHomework(planHomework.split(/\n+/).filter(Boolean).map((t) => ({ item_id: '', title: t.trim() })))}>강의 계획 숙제 불러오기</button> : null}
-        </div>
-        <div className="stack-sm">
-          {homework.map((h, i) => (
-            <div key={i} className="cluster" style={{ flexWrap: 'nowrap' }}>
-              <span className="muted" style={{ width: 20 }}>{i + 1}</span>
-              <input value={h.title} aria-label={`숙제 ${i + 1}`} onChange={(e) => setHomework(homework.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} placeholder="예: 교재 80~83쪽" />
-              <button type="button" className="btn ghost sm" aria-label={`숙제 ${i + 1} 삭제`} onClick={() => setHomework(homework.filter((_, j) => j !== i))}>✕</button>
-            </div>
-          ))}
-          <div><button type="button" className="btn secondary sm" onClick={() => setHomework([...homework, { item_id: '', title: '' }])}>+ 숙제 추가</button></div>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-head">
-          <h2>④ 학생별 기록</h2>
-          <span className="muted">출석 {presentCount}/{data.students.length}명</span>
+          <h2>학생별 기록</h2>
+          <span className="cluster">
+            {data.students.length > 1 ? <span className="hint desktop-only">↑↓ 키로 학생 이동</span> : null}
+            <span className="muted">출석 {presentCount}/{data.students.length}명</span>
+          </span>
         </div>
         {data.on_leave && data.on_leave.length ? (
           <p className="hint">휴원 학생 {data.on_leave.length}명({data.on_leave.map((s) => s.name).join(', ')})은 명단에서 뺐습니다.</p>
         ) : null}
         {data.students.length ? (
-          <div className="student-rows">
+          <div className="student-rows" onKeyDown={onStudentRowsKey}>
             {data.students.map((st) => {
               const v = form.students[st.student_id];
               const absent = v.attendance === '결석';
@@ -522,30 +514,53 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
               const extra = extraOpen[st.student_id] || !!v.student_notice || !!v.homework_replace_class || !!(v.personal_homework || []).length;
               return (
                 <div key={st.student_id} className={'student-row' + (absent ? ' is-absent' : '')}>
-                  <div className="sr-name">
-                    <Link href={`/students/${st.student_id}`}>{st.name}</Link>
-                    {st.off_roster ? <span className="tag muted">명단 밖</span> : null}
-                    {v.progress_own ? <span className="tag">개인 진도</span> : null}
-                    {form.session.test_on && v.test_own ? <span className="tag">다른 시험지</span> : null}
-                    <Badges badges={st.badges} quiet />
-                  </div>
-                  <div className="sr-field">
-                    <span className="sr-label">출결</span>
-                    <div className="chips" role="group" aria-label={`${st.name} 출결`}>
-                      {['출석', '결석'].map((a) => <button key={a} type="button" className={'chip' + (a === '결석' ? ' danger' : '')} aria-pressed={v.attendance === a} onClick={() => setStudent(st.student_id, 'attendance', a)}>{a}</button>)}
+                  <div className="sr-line">
+                    <div className="sr-name">
+                      <Link href={`/students/${st.student_id}`}>{st.name}</Link>
+                      {st.off_roster ? <span className="tag muted">명단 밖</span> : null}
+                      {v.progress_own ? <span className="tag">개인 진도</span> : null}
+                      {form.session.test_on && v.test_own ? <span className="tag">다른 시험지</span> : null}
+                      <Badges badges={st.badges} quiet />
                     </div>
-                  </div>
-                  {form.session.test_on ? (
                     <div className="sr-field">
-                      <span className="sr-label">점수</span>
-                      <input id={`rec-ts-${st.student_id}`} className="score-input" inputMode="decimal" disabled={absent} value={absent ? '' : v.test_score} aria-label={`${st.name} 점수`}
-                        aria-invalid={error === `${st.name} 학생 점수가 만점보다 클 수 없습니다.` || error === `${st.name} 학생 다른 시험지 점수를 입력해 주세요.` || error === `${st.name} 학생 점수를 숫자로 입력해 주세요.`}
-                        placeholder={absent ? '결석' : '미응시'} onChange={(e) => { clearErrorFor(st.name); setStudent(st.student_id, 'test_score', e.target.value.replace(/[^\d.]/g, '')); }} />
-                      {testMax ? <span className="muted">/ {testMax}</span> : null}
-                      {!v.test_own ? <button type="button" className="link-btn" onClick={() => { clearErrorFor(st.name); setOwnTest(st.student_id, true); }}>다른 시험지</button> : null}
+                      <span className="sr-label">출결</span>
+                      <div className="chips" role="group" aria-label={`${st.name} 출결`} data-nav="att">
+                        {['출석', '결석'].map((a) => <button key={a} type="button" className={'chip' + (a === '결석' ? ' danger' : '')} aria-pressed={v.attendance === a} onClick={() => setStudent(st.student_id, 'attendance', a)}>{a}</button>)}
+                      </div>
                     </div>
-                  ) : null}
-                  {form.session.test_on && v.test_own ? (
+                    {absent ? <span className="muted sr-absent">결석 — 점수·집중도 입력 안 함</span> : (
+                      <>
+                        {form.session.test_on ? (
+                          <div className="sr-field">
+                            <span className="sr-label">점수</span>
+                            <input id={`rec-ts-${st.student_id}`} className="score-input" inputMode="decimal" data-nav="score" value={v.test_score} aria-label={`${st.name} 점수`}
+                              aria-invalid={error === `${st.name} 학생 점수가 만점보다 클 수 없습니다.` || error === `${st.name} 학생 다른 시험지 점수를 입력해 주세요.` || error === `${st.name} 학생 점수를 숫자로 입력해 주세요.`}
+                              placeholder="미응시" onChange={(e) => { clearErrorFor(st.name); setStudent(st.student_id, 'test_score', e.target.value.replace(/[^\d.]/g, '')); }} />
+                            {testMax ? <span className="muted">/ {testMax}</span> : null}
+                          </div>
+                        ) : null}
+                        <div className="sr-field">
+                          <span className="sr-label">집중도</span>
+                          <Chips value={v.concentration} options={CONC} label={`${st.name} 집중도`} nav="conc" onChange={(x) => setStudent(st.student_id, 'concentration', x)} />
+                        </div>
+                      </>
+                    )}
+                    <div className="sr-field sr-grade">
+                      <span className="sr-label">과제{!v.assignment_manual && grade ? ' (자동)' : ''}</span>
+                      <Chips value={grade} options={ASSIGN} label={`${st.name} 과제 이행`} nav="assign" onChange={(x) => setStudent(st.student_id, 'assignment_manual', x)} />
+                    </div>
+                  </div>
+                  <div className="sr-sub">
+                    <input value={v.special_note} data-nav="note" aria-label={`${st.name} 특이사항`} placeholder="특이사항 · 학생 피드백" onChange={(e) => setStudent(st.student_id, 'special_note', e.target.value)} />
+                    {!v.progress_own || (form.session.test_on && !v.test_own && !absent) || !extra ? (
+                      <span className="sr-links">
+                        {!v.progress_own ? <button type="button" className="link-btn" onClick={() => setOwnProgress(st.student_id, true)}>진도 다름</button> : null}
+                        {form.session.test_on && !v.test_own && !absent ? <button type="button" className="link-btn" onClick={() => { clearErrorFor(st.name); setOwnTest(st.student_id, true); }}>다른 시험지</button> : null}
+                        {!extra ? <button type="button" className="link-btn" onClick={() => setExtraOpen((o) => ({ ...o, [st.student_id]: true }))}>+ 개별 공지 · 개인 숙제</button> : null}
+                      </span>
+                    ) : null}
+                  </div>
+                  {form.session.test_on && v.test_own && !absent ? (
                     <div className="sr-field sr-paper">
                       <span className="sr-label">시험지</span>
                       <input value={v.own_test_title} aria-label={`${st.name} 시험지 이름`} placeholder="테스트 이름"
@@ -557,17 +572,6 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                       <button type="button" className="link-btn" onClick={() => { clearErrorFor(st.name); setOwnTest(st.student_id, false); }}>반 시험지로</button>
                     </div>
                   ) : null}
-                  <div className="sr-field">
-                    <span className="sr-label">집중도</span>
-                    <Chips value={absent ? '' : v.concentration} options={CONC} label={`${st.name} 집중도`} disabled={absent} onChange={(x) => setStudent(st.student_id, 'concentration', x)} />
-                  </div>
-                  <div className="sr-field">
-                    <span className="sr-label">과제{!v.assignment_manual && grade ? ' (자동)' : ''}</span>
-                    <Chips value={grade} options={ASSIGN} label={`${st.name} 과제 이행`} onChange={(x) => setStudent(st.student_id, 'assignment_manual', x)} />
-                  </div>
-                  {extra ? <div className="sr-note" style={{ flexBasis: '100%' }}>
-                    <input value={v.student_notice} aria-label={`${st.name} 개별 공지`} placeholder="개별 공지 (피드백과 별도)" onChange={(e) => setStudent(st.student_id, 'student_notice', e.target.value)} />
-                  </div> : null}
                   {v.progress_own ? (
                     <div className="sr-field sr-progress">
                       <span className="sr-label">진도</span>
@@ -575,16 +579,10 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                         onChange={(e) => setStudent(st.student_id, 'own_progress', e.target.value)} />
                       <button type="button" className="link-btn" onClick={() => setOwnProgress(st.student_id, false)}>반 진도로</button>
                     </div>
-                  ) : (
-                    <div className="sr-field">
-                      <button type="button" className="link-btn" onClick={() => setOwnProgress(st.student_id, true)}>진도 다름</button>
-                    </div>
-                  )}
-                  <div className="sr-note">
-                    <input value={v.special_note} aria-label={`${st.name} 특이사항`} placeholder="특이사항 · 학생 피드백" onChange={(e) => setStudent(st.student_id, 'special_note', e.target.value)} />
-                  </div>
-                  {extra ? <div className="sr-note" style={{ flexBasis: '100%' }}>
-                    <div className="cluster" style={{ marginBottom: 6 }}>
+                  ) : null}
+                  {extra ? <div className="sr-extra">
+                    <input value={v.student_notice} aria-label={`${st.name} 개별 공지`} placeholder="개별 공지 (피드백과 별도)" onChange={(e) => setStudent(st.student_id, 'student_notice', e.target.value)} />
+                    <div className="cluster">
                       <span className="sr-label">개인 숙제</span>
                       <label className="check-label" style={{ margin: 0 }}>
                         <input
@@ -624,11 +622,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
                         ))}
                       </div>
                     ) : <span className="muted">반 공통 숙제만 냅니다.</span>}
-                  </div> : (
-                    <div className="sr-field">
-                      <button type="button" className="link-btn" onClick={() => setExtraOpen((o) => ({ ...o, [st.student_id]: true }))}>+ 개별 공지 · 개인 숙제</button>
-                    </div>
-                  )}
+                  </div> : null}
                 </div>
               );
             })}
@@ -636,12 +630,109 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
         ) : <EmptyState title="이 날 이 반에 배정된 학생이 없습니다">반 화면의 학생 탭에서 배정하세요.</EmptyState>}
       </section>
 
+      <section className="card">
+        <div className="card-head fold-head">
+          <div className="fold-title">
+            <h2>지난 숙제 확인</h2>
+            {hasPriorHomework ? <span className="fold-summary">{shortDate(prior.assigned_date)}에 낸 숙제{priorClassItems.length ? ` ${priorClassItems.length}개` : ''}</span> : null}
+          </div>
+          {hasPriorHomework ? (
+            <span className="cluster">
+              <button type="button" className="btn secondary sm" onClick={() => setAllChecks(null, 'A')}>전체 A</button>
+              <button type="button" className="btn secondary sm" aria-expanded={priorOpen} aria-controls="rec-prior" onClick={() => setPriorOpen((o) => !o)}>{priorOpen ? '접기 ▴' : '펼치기 ▾'}</button>
+            </span>
+          ) : null}
+        </div>
+        {hasPriorHomework ? (priorOpen ? (
+          <div id="rec-prior">
+            {!prior.has_checks ? <p className="hint" style={{ marginTop: 0 }}>아직 확인 전이라 모두 A로 채워 두었습니다. 항목마다 A–F를 고르면 평균으로 계산한 과제 등급이 학생별 기록의 과제 칸에 표시됩니다.</p> : null}
+            <div className="table-wrap">
+              <table className="data-table check-table stack-mobile">
+                <thead>
+                  <tr>
+                    <th>학생</th>
+                    {priorClassItems.map((it) => <th key={it.item_id} className="center">{it.title}</th>)}
+                    <th>개인 숙제</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.students.map((st) => {
+                    const replace = !!(prior.replace_by_student && prior.replace_by_student[st.student_id]);
+                    const personal = ((prior.personal_items_by_student && prior.personal_items_by_student[st.student_id]) || []).filter((it) => it.item_id);
+                    return (
+                      <tr key={st.student_id}>
+                        <td className="primary">
+                          <strong>{st.name}</strong>
+                          {replace ? <span className="tag muted" style={{ marginLeft: 6 }}>반 숙제 제외</span> : null}
+                        </td>
+                        {priorClassItems.map((it) => {
+                          if (replace) {
+                            return <td key={it.item_id} className="center muted" data-label={it.title}>—</td>;
+                          }
+                          const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
+                          return (
+                            <td key={it.item_id} className="center" data-label={it.title}>
+                              <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
+                            </td>
+                          );
+                        })}
+                        <td data-label="개인 숙제">
+                          {personal.length ? (
+                            <div className="stack-sm">
+                              {personal.map((it) => {
+                                const grade = (form.checks[st.student_id] || {})[it.item_id] || '';
+                                return (
+                                  <label key={it.item_id} className="check-label" style={{ margin: 0 }}>
+                                    <GradeSelect value={grade} label={`${st.name} ${it.title}`} onChange={(g) => setCheck(st.student_id, it.item_id, g)} />
+                                    <span>{it.title} <span className="tag muted">개인</span></span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : <span className="muted">—</span>}
+                        </td>
+                        <td className="check-all"><button type="button" className="link-btn" onClick={() => setAllChecks(st.student_id, 'A')}>모두 A</button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null) : <p className="muted" style={{ margin: 0 }}>{prior && prior.assigned_date ? `${shortDate(prior.assigned_date)} 수업에 낸 숙제가 없습니다.` : '이전 수업이 없습니다.'} 과제 등급은 위 학생별 기록에서 직접 고르세요.</p>}
+      </section>
+
+      <section className="card">
+        <div className="card-head fold-head">
+          <div className="fold-title">
+            <h2>오늘 낼 숙제</h2>
+            {!homeworkOpen ? <span className="fold-summary">{homeworkSummary}</span> : null}
+          </div>
+          <button type="button" className="btn secondary sm" aria-expanded={homeworkOpen} aria-controls="rec-homework" onClick={() => setHomeworkOpen((o) => !o)}>{homeworkOpen ? '접기 ▴' : '펼치기 ▾'}</button>
+        </div>
+        {homeworkOpen ? (
+          <div className="stack-sm" id="rec-homework">
+            {planHomework && !homework.length ? <div><button type="button" className="link-btn" onClick={() => setHomework(planHomework.split(/\n+/).filter(Boolean).map((t) => ({ item_id: '', title: t.trim() })))}>강의 계획 숙제 불러오기</button></div> : null}
+            {homework.map((h, i) => (
+              <div key={i} className="cluster" style={{ flexWrap: 'nowrap' }}>
+                <span className="muted" style={{ width: 20 }}>{i + 1}</span>
+                <input value={h.title} aria-label={`숙제 ${i + 1}`} onChange={(e) => setHomework(homework.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} placeholder="예: 교재 80~83쪽" />
+                <button type="button" className="btn ghost sm" aria-label={`숙제 ${i + 1} 삭제`} onClick={() => setHomework(homework.filter((_, j) => j !== i))}>✕</button>
+              </div>
+            ))}
+            <div><button type="button" className="btn secondary sm" onClick={() => setHomework([...homework, { item_id: '', title: '' }])}>+ 숙제 추가</button></div>
+          </div>
+        ) : null}
+      </section>
+
       <div className="save-bar">
         {error ? <div className="error-box save-bar-error" role="alert">{error}</div> : null}
         <span className={'save-state ' + (dirty ? 'dirty' : savedOnce ? 'saved' : '')}>
-          {dirty ? '● 저장하지 않은 변경이 있습니다' : savedOnce ? '✓ 저장됨' : data.recorded_count ? `기록 ${data.recorded_count}/${data.total_count}명 저장됨` : '아직 저장하지 않았습니다'}
+          <span className="sb-long">{dirty ? '● 저장하지 않은 변경이 있습니다' : savedOnce ? '✓ 저장됨' : data.recorded_count ? `기록 ${data.recorded_count}/${data.total_count}명 저장됨` : '아직 저장하지 않았습니다'}</span>
+          <span className="sb-short">{dirty ? '● 저장 안 함' : savedOnce ? '✓ 저장됨' : data.recorded_count ? `기록 ${data.recorded_count}/${data.total_count}` : '저장 전'}</span>
         </span>
-        <span className="cluster">
+        <span className="cluster save-actions">
           {data.recorded_count || savedOnce ? <button type="button" className="btn secondary" onClick={() => setReports(true)} disabled={dirty}>일일 보고서</button> : null}
           <button type="button" className="btn" onClick={save} disabled={saving || !data.students.length} title="저장 (Ctrl+S)">{saving ? '저장 중…' : '저장'}</button>
         </span>
@@ -652,7 +743,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
 }
 
 /** `onGuard(fn)` registers an async "ok to leave?" check for the page's own date buttons; `onGuard(null)` on unmount. */
-export default function LessonRecorder({ classId, date, onGoDate, onGuard }) {
+export default function LessonRecorder({ classId, date, today, backHref, onGoDate, onGuard }) {
   const state = useApi(() => api('getTodayClassSession', date, classId), [classId, date]);
   // The error box's retry reloads `data`, which rebuilds the editor form, so it goes through the same guard.
   const guardRef = useRef(null);
@@ -663,17 +754,29 @@ export default function LessonRecorder({ classId, date, onGoDate, onGuard }) {
   const retry = async () => {
     if (!guardRef.current || (await guardRef.current())) state.reload();
   };
+  const goDate = async (d) => {
+    if (!guardRef.current || (await guardRef.current())) onGoDate(d);
+  };
+  const rel = relativeDay(date, today);
   return (
     <Async state={{ ...state, reload: retry }}>
       {(d) => (
         <>
-          <div className="recorder-head">
-            <div>
-              <h2 className="display" style={{ margin: 0 }}><Link href={`/classes/${d.class.class_id}`}>{d.class.class_name}</Link></h2>
-              <div className="muted">{formatDate(d.date, true)} {d.time ? timeSpan(d.time) : ''} · {d.class.schedule_label}</div>
+          <div className="page-header rec-header">
+            <div className="page-header-title">
+              <Link className="rec-back" href={backHref}>‹ 오늘</Link>
+              <h1 className="display"><Link href={`/classes/${d.class.class_id}`}>{d.class.class_name}</Link></h1>
+              <div className="sub">
+                {formatDate(d.date)}{d.time ? ` ${timeSpan(d.time)}` : ''}{rel && rel !== '오늘' ? ` · ${rel}` : ''}{d.class.schedule_label ? ` · ${d.class.schedule_label}` : ''}
+              </div>
+            </div>
+            <div className="page-actions rec-date-nav">
+              <button type="button" className="btn secondary sm" disabled={!d.prev_meeting} aria-label={d.prev_meeting ? `이전 수업 ${shortDate(d.prev_meeting)}` : '이전 수업 없음'} onClick={() => goDate(d.prev_meeting)}>◀<span className="rec-nav-label"> 이전 수업</span></button>
+              <input type="date" value={date} aria-label="날짜" onChange={(e) => e.target.value && goDate(e.target.value)} />
+              <button type="button" className="btn secondary sm" disabled={!d.next_meeting} aria-label={d.next_meeting ? `다음 수업 ${shortDate(d.next_meeting)}` : '다음 수업 없음'} onClick={() => goDate(d.next_meeting)}><span className="rec-nav-label">다음 수업 </span>▶</button>
             </div>
           </div>
-          <Editor data={d} onSaved={state.reload} onGoDate={onGoDate} onGuard={registerGuard} />
+          <Editor key={`${d.class.class_id}:${d.date}`} data={d} onSaved={state.reload} onGoDate={onGoDate} onGuard={registerGuard} />
         </>
       )}
     </Async>

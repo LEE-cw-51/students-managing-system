@@ -39,6 +39,31 @@ function scriptedFetch(script) {
   return { fetch, requests };
 }
 
+/**
+ * Fake streaming chat endpoint: each request gets the next scripted list of SSE deltas,
+ * sent in small byte chunks that cut through lines and multi-byte characters.
+ */
+function streamedFetch(script, chunkBytes = 7) {
+  const requests = [];
+  const fetch = async (url, init) => {
+    requests.push(JSON.parse(init.body));
+    const deltas = script[requests.length - 1];
+    if (!deltas) throw new Error('unexpected extra AI call');
+    const sse = deltas.map((delta) => `data: ${JSON.stringify({ model: 'test-model', choices: [{ delta }] })}\n\n`).join('') + 'data: [DONE]\n\n';
+    const bytes = new TextEncoder().encode(sse);
+    let at = 0;
+    const body = new ReadableStream({
+      pull(out) {
+        if (at >= bytes.length) return out.close();
+        out.enqueue(bytes.slice(at, at + chunkBytes));
+        at += chunkBytes;
+      }
+    });
+    return { ok: true, status: 200, headers: { get: () => 'text/event-stream' }, body };
+  };
+  return { fetch, requests };
+}
+
 describe('agent tools', () => {
   it('every read tool calls a real service function and returns compact data', () => {
     const { api, hong, demo } = setup();
@@ -111,6 +136,36 @@ describe('chatWithTools', () => {
     const second = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
     await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: second.fetch, temperature: 0.5 });
     assert.equal(second.requests[0].temperature, 0.5);
+  });
+
+  it('streams text pieces to onText and joins tool call pieces', async () => {
+    const { fetch, requests } = streamedFetch([[
+      { role: 'assistant', content: '학생을 ' },
+      { content: '찾아볼게요.' },
+      { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'search_students', arguments: '{"qu' } }] },
+      { tool_calls: [{ index: 1, id: 'c2', type: 'function', function: { name: 'get_today_board', arguments: '' } }] },
+      { tool_calls: [{ index: 0, function: { arguments: 'ery":"민' } }] },
+      { tool_calls: [{ index: 0, function: { arguments: '수"}' } }] },
+      { tool_calls: [{ index: 1, function: { arguments: '{}' } }] }
+    ]]);
+    const pieces = [];
+    const res = await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch, onText: (t) => pieces.push(t) });
+    assert.equal(requests[0].stream, true);
+    assert.deepEqual(pieces, ['학생을 ', '찾아볼게요.']);
+    assert.equal(res.text, '학생을 찾아볼게요.');
+    assert.equal(res.model, 'test-model');
+    assert.deepEqual(res.toolCalls, [
+      { id: 'c1', name: 'search_students', args: { query: '민수' } },
+      { id: 'c2', name: 'get_today_board', args: {} }
+    ]);
+    // The raw message goes back to the model in the next request, in the usual shape.
+    assert.deepEqual(res.message.tool_calls.map((c) => [c.id, c.function.arguments]), [['c1', '{"query":"민수"}'], ['c2', '{}']]);
+  });
+
+  it('sends no stream flag without onText', async () => {
+    const { fetch, requests } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch });
+    assert.equal('stream' in requests[0], false);
   });
 
   it('keeps unreadable arguments visible', () => {
@@ -256,6 +311,63 @@ describe('runAgentTurn', () => {
     assert.equal(requests.length, 0);
     assert.equal(store.readTable('AgentUsage').length, 0);
   });
+
+  it('reports steps and streamed text in order, dropping text that came before tool calls', async () => {
+    const { run } = setup();
+    const { fetch } = streamedFetch([
+      [
+        { role: 'assistant', content: '찾아볼게요.' },
+        { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'search_students', arguments: '{"query":"홍길동"}' } }] },
+        { tool_calls: [{ index: 1, id: 'c2', type: 'function', function: { name: 'get_scores', arguments: '{"student_id":"STU-9999"}' } }] }
+      ],
+      [{ role: 'assistant', content: '홍길동 학생을 ' }, { content: '찾았습니다.' }]
+    ]);
+    const events = [];
+    const out = await runAgentTurn({ message: '홍길동 찾아줘' }, run, { config: CONFIG, fetch, onEvent: (e) => events.push(e) });
+    assert.deepEqual(events, [
+      { type: 'text', delta: '찾아볼게요.' },
+      { type: 'text_reset' },
+      { type: 'step', id: 'c1', tool: 'search_students', label: '학생 검색 중', state: 'running' },
+      { type: 'step', id: 'c1', tool: 'search_students', label: '학생 검색 중', state: 'done', ok: true },
+      { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'running' },
+      { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'done', ok: false },
+      { type: 'text', delta: '홍길동 학생을 ' },
+      { type: 'text', delta: '찾았습니다.' }
+    ]);
+    assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
+    assert.deepEqual(out.steps.map((s) => s.ok), [true, false]);
+  });
+
+  it('stops on abort, gives the slot back and saves nothing', async () => {
+    const { store, hong, lessonOf, run } = setup();
+    const now = Date.parse('2026-09-14T01:00:00Z');
+    const saved = () => ['AgentUsage', 'AgentConversations', 'AgentMessages', 'AgentProposals'].map((t) => store.readTable(t).length);
+
+    // Stopped after a change was collected, while the model writes its reply.
+    const controller = new AbortController();
+    const script = scriptedFetch([
+      { role: 'assistant', content: null, tool_calls: [toolCall('w1', 'update_attendance', { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' })] },
+      { role: 'assistant', content: '승인해 주세요.' }
+    ]);
+    const fetch = async (url, init) => {
+      if (script.requests.length === 1) controller.abort();
+      return script.fetch(url, init);
+    };
+    await assert.rejects(runAgentTurn({ message: '홍길동 결석' }, run, { config: CONFIG, fetch, rateLimit: 5, now, signal: controller.signal }),
+      (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(saved(), [0, 0, 0, 0]);
+
+    // Stopped while the AI request is in flight: the request itself is cancelled.
+    const inflight = new AbortController();
+    const hanging = (url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      inflight.abort();
+    });
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch: hanging, rateLimit: 5, now, signal: inflight.signal }),
+      (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(saved(), [0, 0, 0, 0]);
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
 });
 
 describe('agent rate limit', () => {
@@ -280,6 +392,38 @@ describe('agent rate limit', () => {
     const later = scriptedFetch([{ role: 'assistant', content: '셋' }]);
     await runAgentTurn({ message: '3' }, run, { config: CONFIG, fetch: later.fetch, rateLimit: 2, now: T0 + HOUR + 1 });
     assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0 + 10 * 60000, T0 + HOUR + 1]);
+  });
+
+  it('gives the slot back when the AI call fails', async () => {
+    const { api, store, run } = setup();
+    const { fetch } = scriptedFetch([{ status: 429 }]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 2, now: T0 }), /잠시 후/);
+    assert.equal(store.readTable('AgentUsage').length, 0);
+    assert.equal(api.listAgentConversations().length, 0);
+  });
+
+  it('gives the slot back when the turn cannot be saved', async () => {
+    const { store } = setup();
+    const run = async (fn) => fn(LMS.createService(store));
+    const first = scriptedFetch([{ role: 'assistant', content: '어느 학생인가요?' }]);
+    const a = await runAgentTurn({ message: '민수 찾아줘' }, run, { config: CONFIG, fetch: first.fetch, rateLimit: 5, now: T0 });
+    assert.equal(store.readTable('AgentUsage').length, 1);
+    const second = scriptedFetch([{ role: 'assistant', content: '알겠습니다.' }]);
+    const fetch = async (url, init) => {
+      // The conversation is removed while the model answers.
+      store.writeTable('AgentConversations', []);
+      return second.fetch(url, init);
+    };
+    await assert.rejects(runAgentTurn({ conversationId: a.conversation_id, message: '중2 학생이요' }, run, { config: CONFIG, fetch, rateLimit: 5, now: T0 + 60000 }),
+      (e) => e.code === 'CONVERSATION_NOT_FOUND');
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0]);
+  });
+
+  it('keeps the slot of a saved turn', async () => {
+    const { store, run } = setup();
+    const { fetch } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 2, now: T0 });
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0]);
   });
 
   it('counts nothing when the limit is 0', async () => {
@@ -351,6 +495,35 @@ describe('agent proposals', () => {
     assert.equal(conv.messages[1].proposal.status, 'failed');
     assert.match(conv.messages[1].proposal.result.error, /찾을 수 없습니다/);
     void run;
+  });
+
+  it('applies only the selected changes and records the rest as skipped', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const p = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'create_counseling', args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-14', content: '결석 사유 확인' } }
+    ]);
+    const statusOf = () => api.getAgentConversation(p.conversation_id).messages[1].proposal.status;
+
+    // An empty choice is refused and the proposal stays pending.
+    await assert.rejects(applyProposal(p.proposal_id, run, []), /하나 이상/);
+    await assert.rejects(applyProposal(p.proposal_id, run, [7]), (e) => e.code === 'AGENT_NOTHING_SELECTED');
+    assert.throws(() => api.applyAgentProposal(p.proposal_id, []), (e) => e.code === 'AGENT_NOTHING_SELECTED');
+    assert.equal(statusOf(), 'pending');
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+
+    const applied = await applyProposal(p.proposal_id, run, [0, 2]);
+    assert.equal(applied.status, 'applied');
+    assert.equal(applied.verification_status, 'verified');
+    assert.equal(applied.result.length, 3);
+    assert.equal(applied.result[0].ok, true);
+    assert.deepEqual(applied.result[1], { tool: 'update_attendance', text: p.calls[1].text, skipped: true });
+    assert.equal(applied.result[2].ok, true);
+    assert.equal(lessonOf(hong.student_id).attendance, '결석');
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+    assert.equal(api.getCounselingNotes(hong.student_id).length, 1);
+    assert.equal(statusOf(), 'applied');
   });
 
   it('rejects once and refuses to apply a rejected proposal', () => {

@@ -243,7 +243,8 @@ LMS.createAgent = function (ctx) {
   /**
    * Server-only: count one chat turn against `limit` turns per AGENT_RATE_WINDOW_MS. The count
    * lives in the database, so every serverless instance shares it. When the limit is used up
-   * nothing is counted and { ok: false, retry_after_ms } comes back.
+   * nothing is counted and { ok: false, retry_after_ms } comes back. On success `used_at`
+   * identifies the slot for releaseAgentTurn.
    */
   function reserveAgentTurn(nowMs, limit) {
     var cutoff = nowMs - LMS.AGENT_RATE_WINDOW_MS;
@@ -254,7 +255,20 @@ LMS.createAgent = function (ctx) {
     }
     recent.push({ used_at: nowMs });
     saveTable('AgentUsage', recent);
-    return { ok: true, retry_after_ms: 0 };
+    return { ok: true, retry_after_ms: 0, used_at: nowMs };
+  }
+
+  /** Server-only: give back one slot taken by reserveAgentTurn when the turn was not saved. */
+  function releaseAgentTurn(usedAt) {
+    var dropped = false;
+    // Slots with the same time are interchangeable; drop just one.
+    var rows = table('AgentUsage').filter(function (u) {
+      if (dropped || Number(u.used_at) !== Number(usedAt)) return true;
+      dropped = true;
+      return false;
+    });
+    if (dropped) saveTable('AgentUsage', rows);
+    return dropped;
   }
 
   /**
@@ -345,13 +359,28 @@ LMS.createAgent = function (ctx) {
    * Server-only (the apply route records failures): run every change of a pending proposal,
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
+   * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
    */
-  function applyAgentProposal(proposalId) {
+  function applyAgentProposal(proposalId, selected) {
     var row = requireProposal(proposalId);
     if (row.status === 'applied') return slimProposal(row);
     if (row.status !== 'pending') throw new Error('이미 처리된 제안입니다.');
+    var calls = row.calls || [];
+    var chosen = null;
+    if (Array.isArray(selected)) {
+      chosen = {};
+      selected.forEach(function (i) {
+        if (Number(i) >= 0 && Number(i) < calls.length && Math.floor(Number(i)) === Number(i)) chosen[Number(i)] = true;
+      });
+      if (!Object.keys(chosen).length) {
+        var none = new Error('반영할 항목을 하나 이상 선택해 주세요.');
+        none.code = 'AGENT_NOTHING_SELECTED';
+        throw none;
+      }
+    }
     var s = svc();
-    var results = (row.calls || []).map(function (c) {
+    var results = calls.map(function (c, i) {
+      if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
       var action = writeAction(c.tool);
       // Re-check against the current data: something may have changed since the proposal.
       var preview = action.preview(s, c.args);
@@ -363,7 +392,7 @@ LMS.createAgent = function (ctx) {
     row = LMS.findById(rows, 'proposal_id', proposalId);
     row.status = 'applied';
     row.result = results;
-    row.verification_status = results.every(function (r) { return r.ok; }) ? 'verified' : 'mismatch';
+    row.verification_status = results.every(function (r) { return r.skipped || r.ok; }) ? 'verified' : 'mismatch';
     row.executed_at = ctx.now();
     saveTable('AgentProposals', rows);
     return slimProposal(row);
@@ -400,6 +429,7 @@ LMS.createAgent = function (ctx) {
     getAgentContext: getAgentContext,
     previewAgentAction: previewAgentAction,
     reserveAgentTurn: reserveAgentTurn,
+    releaseAgentTurn: releaseAgentTurn,
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,

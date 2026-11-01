@@ -39,22 +39,41 @@ function StudentsView() {
   const tab = useTab(TABS);
   const [creating, setCreating] = useState(false);
   const router = useRouter();
+  const boot = useBoot();
+  const enrolled = (boot.search.students || []).filter((s) => s.status === '재원').length;
   return (
-    <>
+    <div className="students-page">
       <PageHeader
         title="학생"
-        sub={tab === 'list' ? '학생을 누르면 출결·수업 기록·숙제·성적·상담을 한 곳에서 봅니다.' : '모든 학생의 학부모·학생 상담 기록입니다.'}
-        actions={<button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button>}
+        sub={tab === 'list' ? `재원 ${enrolled}명` : '모든 학생의 상담 기록'}
+        actions={tab === 'list' ? <button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button> : null}
       />
       <Tabs tabs={TABS} current={tab} />
       {tab === 'list' ? <StudentList onCreate={() => setCreating(true)} /> : <CounselingLog />}
       {creating ? <StudentForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/students/${row.student_id}`)} /> : null}
-    </>
+    </div>
+  );
+}
+
+function ExamTag({ exam }) {
+  return <span className={'tag ' + (exam.d_day <= 7 ? 'danger' : exam.d_day <= 21 ? 'amber' : '')}>{dDayLabel(exam.d_day)}</span>;
+}
+
+function ClassTags({ r, none }) {
+  return (
+    <span className="st-tags">
+      {r.classes.map((c) => (
+        <span key={c.rel_id} className={'tag ' + (c.assignment_type === '임시' ? 'amber' : 'muted')}>{c.class_name}</span>
+      ))}
+      {(r.upcoming || []).map((u) => (
+        <span key={u.rel_id} className="tag">{u.class_name} {shortDate(u.start_date)}부터</span>
+      ))}
+      {r.unassigned ? <span className="tag warn">미배정</span> : !r.classes.length && !(r.upcoming || []).length ? <span className="muted">{none}</span> : null}
+    </span>
   );
 }
 
 function StudentList({ onCreate }) {
-  const router = useRouter();
   const boot = useBoot();
   // Filters live in the URL so coming back from a student keeps them.
   const [status, setStatus] = useUrlState('status', '재원');
@@ -97,23 +116,21 @@ function StudentList({ onCreate }) {
 
   return (
     <>
-      <div className="split" style={{ marginBottom: 14 }}>
-        <div className="cluster">
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름 · 학교 · 연락처" aria-label="학생 검색" style={{ width: 200 }} />
-          <select value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="학년" style={{ width: 'auto' }}>
-            <option value="">전체 학년</option>
-            {(boot.grades || []).map((g) => <option key={g}>{g}</option>)}
-          </select>
-          <select value={classId} onChange={(e) => setClassId(e.target.value)} aria-label="반" style={{ width: 'auto' }}>
-            <option value="">전체 반</option>
-            <option value="__none__">미배정 (반 없는 재원생)</option>
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button type="button" className={'btn sm ' + (onlyFlagged ? '' : 'secondary')} aria-pressed={onlyFlagged} onClick={() => setFlagged(onlyFlagged ? '' : '1')}>
-            ⚠ 주의 학생만{state.data ? ` (${flaggedCount})` : ''}
-          </button>
-        </div>
-        <div className="segmented" role="group" aria-label="재원 상태">
+      <div className="st-filters">
+        <input type="search" className="st-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름 · 학교 · 연락처" aria-label="학생 검색" />
+        <select value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="학년">
+          <option value="">전체 학년</option>
+          {(boot.grades || []).map((g) => <option key={g}>{g}</option>)}
+        </select>
+        <select value={classId} onChange={(e) => setClassId(e.target.value)} aria-label="반">
+          <option value="">전체 반</option>
+          <option value="__none__">미배정 (반 없는 재원생)</option>
+          {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button type="button" className={'btn sm ' + (onlyFlagged ? '' : 'secondary')} aria-pressed={onlyFlagged} onClick={() => setFlagged(onlyFlagged ? '' : '1')}>
+          ⚠ 주의만{state.data ? ` (${flaggedCount})` : ''}
+        </button>
+        <div className="segmented st-status" role="group" aria-label="재원 상태">
           {[['재원', '재원'], ['휴원', '휴원'], ['퇴원', '퇴원'], ['', '전체']].map(([v, label]) => (
             <button key={label} type="button" aria-pressed={status === v} onClick={() => setStatus(v)}>{label}</button>
           ))}
@@ -123,36 +140,58 @@ function StudentList({ onCreate }) {
       <Async state={state}>
         {() => rows.length ? (
           <>
-          <label className="check-label mobile-only" style={{ marginBottom: 8 }}><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /> 전체 선택</label>
-          <div className="table-wrap">
-            <table className="data-table stack-mobile">
-              <thead><tr><th className="check-col"><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /></th><SortTh sort={sort} col="name">이름</SortTh><SortTh sort={sort} col="grade">학년 · 학교</SortTh><th>반</th><SortTh sort={sort} col="last">최근 수업</SortTh><SortTh sort={sort} col="exam">다음 학교 시험</SortTh><th>학부모 연락처</th></tr></thead>
+          <div className="table-wrap st-table">
+            <table className="data-table">
+              <thead><tr><th className="check-col"><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /></th><SortTh sort={sort} col="name">이름</SortTh><SortTh sort={sort} col="grade">학년 · 학교</SortTh><th>반</th><SortTh sort={sort} col="last">최근 수업</SortTh><SortTh sort={sort} col="exam">다음 학교 시험</SortTh></tr></thead>
               <tbody>
                 {sort.rows.map((r) => (
-                  <tr key={r.student_id} className="clickable" onClick={() => router.push(`/students/${r.student_id}`)}>
-                    <td className="check-col" data-label="선택" onClick={(e) => e.stopPropagation()}>
+                  <tr key={r.student_id}>
+                    <td className="check-col">
                       <input type="checkbox" checked={sel.selected.has(r.student_id)} onChange={() => sel.toggle(r.student_id)} aria-label={`${r.name} 선택`} />
                     </td>
                     <td className="primary">
-                      <Link href={`/students/${r.student_id}`} onClick={(e) => e.stopPropagation()}>{r.name}</Link>
+                      <Link href={`/students/${r.student_id}`}>{r.name}</Link>
                       {r.status !== '재원' ? <span className="tag muted" style={{ marginLeft: 6 }}>{r.status}</span> : null}
                       <div style={{ marginTop: 4 }}><Badges badges={r.badges} quiet /></div>
                     </td>
-                    <td data-label="학년 · 학교">{[r.grade, r.school].filter(Boolean).join(' · ') || '-'}{!r.school && r.status === '재원' ? <span className="tag warn" style={{ marginLeft: 4 }}>학교 미입력</span> : null}</td>
-                    <td data-label="반">{r.classes.length ? r.classes.map((c) => (
-                      <span key={c.rel_id} className={'tag ' + (c.assignment_type === '임시' ? 'amber' : 'muted')} style={{ marginRight: 4 }}>{c.class_name}</span>
-                    )) : null}
-                    {r.upcoming && r.upcoming.length ? r.upcoming.map((u) => (
-                      <span key={u.rel_id} className="tag" style={{ marginRight: 4 }}>{u.class_name} {shortDate(u.start_date)}부터</span>
-                    )) : null}
-                    {r.unassigned ? <span className="tag warn">미배정</span> : !r.classes.length && !(r.upcoming || []).length ? <span className="muted">없음</span> : null}</td>
-                    <td data-label="최근 수업">{r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : <span className="muted">-</span>}</td>
-                    <td data-label="다음 시험">{r.next_exam ? <>{shortDate(r.next_exam.date)} <span className={'tag ' + (r.next_exam.d_day <= 7 ? 'danger' : r.next_exam.d_day <= 21 ? 'amber' : '')}>{dDayLabel(r.next_exam.d_day)}</span></> : <span className="muted">-</span>}</td>
-                    <td data-label="학부모">{r.parent_phone ? <a href={`tel:${r.parent_phone}`} onClick={(e) => e.stopPropagation()}>{r.parent_phone}</a> : <span className="muted">-</span>}</td>
+                    <td>{[r.grade, r.school].filter(Boolean).join(' · ') || '-'}{!r.school && r.status === '재원' ? <span className="tag warn" style={{ marginLeft: 4 }}>학교 미입력</span> : null}</td>
+                    <td><ClassTags r={r} none="없음" /></td>
+                    <td>{r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : <span className="muted">-</span>}</td>
+                    <td>{r.next_exam ? <>{shortDate(r.next_exam.date)} <ExamTag exam={r.next_exam} /></> : <span className="muted">-</span>}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="st-cards">
+            <div className="st-cards-head">
+              <label className="check-label st-check"><SelectAllCheckbox sel={sel} label="보이는 학생 전체 선택" /> 전체 선택</label>
+              <span className="muted">{rows.length}명</span>
+            </div>
+            <ul className="st-card-list" aria-label="학생">
+              {sort.rows.map((r) => (
+                <li key={r.student_id} className="st-card">
+                  <div className="st-card-head">
+                    <label className="st-check">
+                      <input type="checkbox" checked={sel.selected.has(r.student_id)} onChange={() => sel.toggle(r.student_id)} aria-label={`${r.name} 선택`} />
+                    </label>
+                    <Link className="st-card-name" href={`/students/${r.student_id}`}>{r.name} <span aria-hidden="true">›</span></Link>
+                    {r.status !== '재원' ? <span className="tag muted">{r.status}</span> : null}
+                    <Badges badges={r.badges} quiet />
+                  </div>
+                  <div className="st-card-line">
+                    <span>{[r.grade, r.school].filter(Boolean).join(' · ') || '-'}</span>
+                    {!r.school && r.status === '재원' ? <span className="tag warn">학교 미입력</span> : null}
+                    <ClassTags r={r} none="반 없음" />
+                  </div>
+                  <div className="st-card-line muted">
+                    <span>최근 수업 {r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : '-'}</span>
+                    <span>시험 {r.next_exam ? <>{shortDate(r.next_exam.date)} <ExamTag exam={r.next_exam} /></> : '-'}</span>
+                  </div>
+                  {r.parent_phone ? <a className="btn secondary sm st-call" href={`tel:${r.parent_phone}`}>학부모 {r.parent_phone}</a> : null}
+                </li>
+              ))}
+            </ul>
           </div>
           </>
         ) : (
@@ -207,7 +246,7 @@ function StudentBulkBar({ ids, onDone, onClear }) {
   };
 
   return (
-    <div className="card bulk-bar" style={{ marginBottom: 14 }}>
+    <div className="card bulk-bar st-bulk">
       <div className="cluster">
         <strong>선택한 {ids.length}명</strong>
         <div className="segmented" role="group" aria-label="할 일">
