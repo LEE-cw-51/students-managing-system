@@ -170,7 +170,7 @@ function useDelayedRemove(onRemoved) {
       try {
         await api('removeTempAssignment', m.rel_id);
         toast(`${m.name} 학생을 뺐습니다.`);
-        onRemoved();
+        if (mounted.current) onRemoved();
       } catch (err) {
         if (mounted.current) unhide();
         toast(`${m.name} 학생을 빼지 못해 다시 표시했습니다. ${err.message}`, 'error');

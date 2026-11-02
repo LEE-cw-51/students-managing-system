@@ -131,10 +131,11 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
   const [target, setTarget] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [applied, setApplied] = useState(false);
   const [section, setSection] = useActiveSection(navRef);
 
   const dirty = useDirty({ cards, suspended: Array.from(suspended).sort() });
-  useUnsavedGuard(dirty && !saving);
+  useUnsavedGuard(dirty && !saving && !applied);
   useEffect(() => { if (onDirty) onDirty(dirty); }, [dirty, onDirty]);
 
   const byId = new Map(data.students.map((s) => [s.student_id, s]));
@@ -237,9 +238,11 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
         suspended_class_ids: Array.from(suspended)
       });
       toast(`시험대비 반 ${classCount}개, 학생 ${studentCount}명을 편성했습니다.`);
+      setApplied(true);
       onApplied();
     } catch (err) {
       setError(err.message);
+    } finally {
       setSaving(false);
     }
   };
@@ -403,7 +406,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
       <div className="save-bar pl-save">
         {error ? <div className="error-box save-bar-error" role="alert">{error}</div> : null}
         <span className="save-state">시험대비 반 {classCount}개 · 학생 {studentCount}명 · 휴강 {suspended.size}개 반 · 남은 {pool.length}명</span>
-        <button type="button" className="btn" onClick={apply} disabled={saving || (!active.length && firstTime)}>{saving ? '편성 중…' : '편성 확정'}</button>
+        <button type="button" className="btn" onClick={apply} disabled={saving || applied || (!active.length && firstTime)}>{saving ? '편성 중…' : applied ? '편성 완료' : '편성 확정'}</button>
       </div>
     </div>
   );
