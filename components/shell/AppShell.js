@@ -91,8 +91,8 @@ export default function AppShell({ boot: initialBoot, children }) {
   }, []);
   const shownWidth = prefsLoaded ? clampAgentWidth(agentWidth, sidebarWidth) : agentWidth;
 
-  // Server-only flags (ai_enabled) come from the layout and survive a refresh.
-  const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled }))).catch(() => {}), []);
+  // Server-only flags (ai_enabled, agent_enabled) come from the layout and survive a refresh.
+  const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled, agent_enabled: prev.agent_enabled }))).catch(() => {}), []);
 
   useEffect(() => {
     setOpen(false);
@@ -199,7 +199,7 @@ export default function AppShell({ boot: initialBoot, children }) {
           <AgentPanel
             open={agentOpen}
             onClose={closeAgent}
-            aiEnabled={Boolean(boot.ai_enabled)}
+            aiEnabled={Boolean(boot.agent_enabled)}
             today={boot.today}
             classes={boot.search && boot.search.classes}
             students={boot.search && boot.search.students}

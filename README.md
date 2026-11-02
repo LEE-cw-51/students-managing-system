@@ -83,7 +83,7 @@ LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-s
 - 브라우저에 데이터베이스 키를 넣지 않습니다. 모든 읽기/쓰기는 서버 API를 통과합니다.
 - `/api/[name]`은 `lib/public-api.js` 허용 목록(화면이 실제로 부르는 업무 함수)만 호출합니다. 화면에서 새 함수를 부르면 목록에 추가해야 하며, `tests/public-api.test.js`가 빠진 이름을 잡습니다.
 - AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 OpenRouter로 전송됩니다.
-- AI 비서는 강사 메시지와 조회 결과(학생 이름, 학교, 출결·성적·숙제·상담 내용 등)를 OpenRouter로 보냅니다. 전화번호는 도구 결과에 넣지 않습니다.
+- AI 비서는 강사 메시지와 조회 결과(학생 이름, 학교, 출결·성적·숙제·상담 내용 등)를 AI로 보냅니다. `ANTHROPIC_API_KEY`가 있으면 Anthropic으로만, 없으면 OpenRouter를 거쳐 보냅니다. 전화번호는 도구 결과에 넣지 않습니다.
 - 강의 계획 AI 제안에는 학생 이름 대신 `S1, S2…` 별칭과 숫자 요약(출석·숙제 이행률·최근 점수·학습 신호)만 보냅니다. 연락처·메모·상담 내용은 보내지 않습니다.
 
 ## 강의 계획
@@ -114,7 +114,22 @@ AI는 월간 보고서·강의 계획에서는 **초안 글쓰기에만** 씁니
 | 반 → 강의 계획 | 단원 진행, 남은 수업일, 4주 출석·숙제, 시험, 학생별 요약(별칭) | 이 달 목표, 수업일 계획, 학생 제안, 근거 | 서버가 날짜·단원·명단으로 검증 → 초안 → 강사가 고치고 확정 |
 | 상단 → AI 비서 | 강사 메시지, 대화 이력, 조회 도구 결과(학생 이름 포함) | 답변, 변경 제안(출결·상담·할 일) | 조회는 바로 답변, 변경은 강사가 승인하면 같은 업무 함수로 실행 → 다시 읽어 확인 |
 
-설정은 `AI_API_KEY`(필수), `AI_MODEL`, `AI_BASE_URL` 하나로 모든 AI 기능이 함께 씁니다(`lib/ai-client.js`). AI 비서는 도구 호출(tool calling)을 쓰므로 도구 호출을 지원하는 모델이 필요합니다. `AGENT_MODEL`에 넣으면 AI 비서만 그 모델을 쓰고, 월간 보고서·강의 계획은 `AI_MODEL`을 그대로 씁니다(비우면 AI 비서도 `AI_MODEL`). 기본값 `openrouter/free`는 도구 호출을 못 하거나 불안정할 수 있습니다. 권장값은 **Claude Haiku 5.5**입니다(OpenRouter 모델 ID는 openrouter.ai/models에서 확인, 예: `anthropic/claude-haiku-5.5`). 저렴하고(입력 $0.10 / 출력 $0.50 per 1M 토큰) 도구 호출을 지원합니다. 학생 식별이나 여러 단계 지시를 자주 틀리면 Gemini 3.7 Flash·GPT-5.6 Luna와 비교하고, 그래도 부족하면 Claude Sonnet 5.5로 올립니다. AI 비서 요청에는 `temperature`를 보내지 않습니다(최신 Claude 모델은 기본값이 아닌 값을 거부).
+설정은 `AI_API_KEY`(필수), `AI_MODEL`, `AI_BASE_URL` 하나로 모든 AI 기능이 함께 씁니다(`lib/ai-client.js`). AI 비서는 도구 호출(tool calling)을 쓰므로 도구 호출을 지원하는 모델이 필요합니다. 연결 방식은 둘입니다.
+
+- **권장: Anthropic API 직접** — `ANTHROPIC_API_KEY`([console.anthropic.com](https://console.anthropic.com)에서 발급)를 넣으면 AI 비서는 공식 SDK(`@anthropic-ai/sdk`)로 **Claude Haiku 5.5**(`claude-haiku-5-5`)를 부릅니다. 학생 데이터가 중간 업체를 거치지 않고, 반복되는 도구 목록·지시문은 프롬프트 캐싱으로 싸게 재사용합니다. 다른 Claude 모델은 `AGENT_MODEL`에 Anthropic 모델 ID(예: `claude-sonnet-5-5`)로 넣습니다. 이전 안내대로 `anthropic/claude-haiku-5.5` 같은 OpenRouter 형식이 남아 있어도 자동으로 바꿔 씁니다.
+- **OpenRouter** — `ANTHROPIC_API_KEY`가 없으면 지금처럼 `AI_API_KEY`로 OpenRouter를 거칩니다. `AGENT_MODEL`에 넣으면 AI 비서만 그 모델을 쓰고(비우면 `AI_MODEL`), 기본값 `openrouter/free`는 도구 호출을 못 하거나 불안정할 수 있습니다.
+
+월간 보고서·강의 계획은 연결 방식과 관계없이 OpenRouter(`AI_API_KEY`, `AI_MODEL`)를 씁니다. 학생 식별이나 여러 단계 지시를 Haiku가 자주 틀리면 Claude Sonnet 5.5로 올립니다.
+
+`temperature`(답변의 다양성)는 기능마다 정해 두고, 보낼지는 `lib/ai-client.js`의 `temperatureFor`가 모델 ID로 정합니다. 최신 Claude 모델은 기본값이 아닌 값을 거부하므로 Claude 모델(ID에 `claude`가 있거나 `anthropic/`으로 시작)에는 어느 기능도 보내지 않습니다. 그래서 `AI_MODEL`·`AGENT_MODEL` 어디에 Claude를 넣어도 됩니다.
+
+| 기능 | 모델 설정 | Claude 외 모델 | Claude 모델 |
+|---|---|---|---|
+| 월간 보고서 AI 분석 | `AI_MODEL` | 0.4 | 보내지 않음 |
+| 강의 계획 AI 초안 | `AI_MODEL` | 0.3 | 보내지 않음 |
+| AI 비서 (OpenRouter 연결 시) | `AGENT_MODEL`(비면 `AI_MODEL`) | 0.2 | 보내지 않음 |
+
+Anthropic API로 직접 부를 때는 temperature를 보내지 않고, 답변 깊이는 `effort: low`로 정합니다.
 
 ## AI 비서
 
@@ -126,7 +141,7 @@ AI는 월간 보고서·강의 계획에서는 **초안 글쓰기에만** 씁니
 - **안 하는 일**: 성적 입력, 진도 수정, 문자 발송은 아직 도구가 없어 해당 화면을 안내합니다. AI가 SQL이나 테이블을 직접 건드리지 않습니다.
 - **사용량 제한**: AI 비용이 늘지 않도록 한 시간에 `AGENT_RATE_LIMIT_PER_HOUR`번(기본 60, `0`이면 제한 없음)까지만 대화를 처리합니다. 횟수는 DB(`AgentUsage`)에 남겨 서버 인스턴스가 여럿이어도 함께 셉니다. 넘으면 429와 함께 몇 분 뒤에 다시 쓸 수 있는지 알려 줍니다. 승인(`/api/agent/apply`)은 AI를 부르지 않고 제안마다 한 번만 실행되므로 세지 않습니다.
 - **기록**: 대화(`AgentConversations`, `AgentMessages`)와 제안(`AgentProposals`: 변경 전/후, 상태, 검증 결과, 실행 시각)은 따로 저장합니다. 대화는 참고용이고, 학생 데이터의 기준은 언제나 업무 테이블입니다. 90일 동안 이어지지 않은 대화는 새 대화를 저장할 때 메시지와 함께 지웁니다(승인 대기 제안이 있는 대화는 남김). 제안 기록은 지우지 않습니다.
-- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음) · 승인은 `/api/agent/apply` · 도구 목록 `lib/agent-tools.js` · 제안·검증 `src/07_Agent.js`.
+- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 `lib/agent-anthropic.js`(Anthropic) 또는 OpenRouter) · 승인은 `/api/agent/apply` · 도구 목록 `lib/agent-tools.js` · 제안·검증 `src/07_Agent.js`.
 
 ## 숙제 체크리스트
 

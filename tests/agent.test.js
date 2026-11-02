@@ -64,6 +64,18 @@ function streamedFetch(script, chunkBytes = 7) {
   return { fetch, requests };
 }
 
+/** Set env vars for fn, restoring them afterwards (after the promise settles for async fn). */
+function withEnv(vars, fn) {
+  const saved = {};
+  Object.keys(vars).forEach((k) => { saved[k] = process.env[k]; if (vars[k] === undefined) delete process.env[k]; else process.env[k] = vars[k]; });
+  const restore = () => Object.keys(saved).forEach((k) => { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; });
+  let out;
+  try { out = fn(); } catch (e) { restore(); throw e; }
+  if (out && typeof out.then === 'function') return out.finally(restore);
+  restore();
+  return out;
+}
+
 describe('agent tools', () => {
   it('every read tool calls a real service function and returns compact data', () => {
     const { api, hong, demo } = setup();
@@ -129,13 +141,47 @@ describe('chatWithTools', () => {
     assert.deepEqual(res.toolCalls, [{ id: 'c1', name: 'search_students', args: { query: '민수' } }]);
   });
 
-  it('sends no temperature unless one is given', async () => {
-    const first = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
-    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: first.fetch });
-    assert.equal('temperature' in first.requests[0], false);
-    const second = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
-    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch: second.fetch, temperature: 0.5 });
-    assert.equal(second.requests[0].temperature, 0.5);
+});
+
+describe('temperature by model', () => {
+  const { chatCompletion, temperatureFor, isClaudeModel } = require('../lib/ai-client.js');
+  const { buildMonthlyAiSections } = require('../lib/monthly-ai.js');
+  const CLAUDE = { ...CONFIG, model: 'anthropic/claude-haiku-5.5' };
+  const reply = () => scriptedFetch([{ role: 'assistant', content: '【학습 분석】\n좋음' }]);
+  const hi = [{ role: 'user', content: 'hi' }];
+
+  it('recognises Claude model IDs', () => {
+    ['anthropic/claude-haiku-5.5', 'Anthropic/Claude-Sonnet-5.5', 'claude-haiku-5-5'].forEach((m) => assert.equal(isClaudeModel(m), true, m));
+    ['openrouter/free', 'google/gemini-3.7-flash', 'openai/gpt-5.6-luna', ''].forEach((m) => assert.equal(isClaudeModel(m), false, m));
+  });
+
+  it('never sends temperature to Claude models, on any AI path', async () => {
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CLAUDE, fetch: tools.fetch, temperature: 0.5 });
+    const plain = reply();
+    await chatCompletion(hi, { config: CLAUDE, fetch: plain.fetch });
+    const monthly = reply();
+    await buildMonthlyAiSections({ student: { name: '가' } }, { config: CLAUDE, fetch: monthly.fetch });
+    [tools, plain, monthly].forEach((r) => assert.equal('temperature' in r.requests[0], false));
+  });
+
+  it('keeps each feature temperature for other models', async () => {
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CONFIG, fetch: tools.fetch });
+    const plain = reply();
+    await chatCompletion(hi, { config: CONFIG, fetch: plain.fetch });
+    const monthly = reply();
+    await buildMonthlyAiSections({ student: { name: '가' } }, { config: CONFIG, fetch: monthly.fetch });
+    assert.equal(tools.requests[0].temperature, 0.2);
+    assert.equal(plain.requests[0].temperature, 0.3);
+    assert.equal(monthly.requests[0].temperature, 0.4);
+  });
+
+  it('treats a null temperature as unset', async () => {
+    assert.equal(temperatureFor(CONFIG, null, 0.2), 0.2);
+    const tools = reply();
+    await chatWithTools(hi, toolDefinitions(), { config: CONFIG, fetch: tools.fetch, temperature: null });
+    assert.equal(tools.requests[0].temperature, 0.2);
   });
 
   it('streams text pieces to onText and joins tool call pieces', async () => {
@@ -538,13 +584,6 @@ describe('agent proposals', () => {
 describe('agent model setting', () => {
   const { getAgentAiConfig } = require('../lib/ai-client.js');
 
-  function withEnv(vars, fn) {
-    const saved = {};
-    Object.keys(vars).forEach((k) => { saved[k] = process.env[k]; if (vars[k] === undefined) delete process.env[k]; else process.env[k] = vars[k]; });
-    try { return fn(); } finally {
-      Object.keys(saved).forEach((k) => { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; });
-    }
-  }
 
   it('uses AGENT_MODEL for the assistant only', () => {
     withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: 'tool-model' }, () => {
@@ -562,7 +601,7 @@ describe('agent model setting', () => {
   it('sends AGENT_MODEL in the chat request', async () => {
     const { run } = setup();
     const { fetch, requests } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
-    await withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: 'tool-model', AI_BASE_URL: 'https://ai.test/v1' }, () =>
+    await withEnv({ AI_API_KEY: 'k', AI_MODEL: 'report-model', AGENT_MODEL: 'tool-model', AI_BASE_URL: 'https://ai.test/v1', ANTHROPIC_API_KEY: undefined }, () =>
       runAgentTurn({ message: '안녕' }, run, { fetch }));
     assert.equal(requests[0].model, 'tool-model');
   });
@@ -597,5 +636,223 @@ describe('agent conversation cleanup', () => {
     store.writeTable('AgentConversations', store.readTable('AgentConversations').map((c) => ({ ...c, updated_at: '2026-06-16T09:00:00' })));
     LMS.createService(store).saveAgentTurn({ message: '새 대화', reply: '답' });
     assert.ok(LMS.createService(store).listAgentConversations().some((c) => c.conversation_id === edge.conversation_id));
+  });
+});
+
+describe('Anthropic API provider', () => {
+  // Same (ESM) build of the SDK that lib/agent-anthropic.js imports, so error classes match.
+  const sdk = () => import('@anthropic-ai/sdk').then((m) => m.default);
+  const { anthropicModelId, anthropicToolDefinitions, anthropicErrorMessage } = require('../lib/agent-anthropic.js');
+  const { getAgentProvider, isAgentConfigured } = require('../lib/ai-client.js');
+
+  /**
+   * Fake client: each messages.create or messages.stream call gets the next scripted response.
+   * A streamed response sends its `pieces` (default: each text block) as text deltas; a
+   * function entry gets (params, opts) and returns the response or throws.
+   */
+  function fakeClient(script) {
+    const requests = [];
+    const next = (params, opts, streamed) => {
+      requests.push({ params: JSON.parse(JSON.stringify(params)), opts, streamed });
+      const entry = script[requests.length - 1];
+      if (!entry) throw new Error('unexpected extra AI call');
+      return entry;
+    };
+    return {
+      requests,
+      messages: {
+        create: async (params, opts) => {
+          let entry = next(params, opts, false);
+          if (typeof entry === 'function') entry = await entry(params, opts);
+          if (entry instanceof Error) throw entry;
+          return { model: 'claude-haiku-5-5', ...entry };
+        },
+        stream: (params, opts) => {
+          const entry = next(params, opts, true);
+          const final = (async () => {
+            const res = typeof entry === 'function' ? await entry(params, opts) : entry;
+            if (res instanceof Error) throw res;
+            return { model: 'claude-haiku-5-5', ...res };
+          })();
+          final.catch(() => {});
+          return {
+            async *[Symbol.asyncIterator]() {
+              const res = await final;
+              const pieces = res.pieces || res.content.filter((b) => b.type === 'text').map((b) => b.text);
+              for (const text of pieces) yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } };
+            },
+            finalMessage: () => final.then(({ pieces, ...res }) => res)
+          };
+        }
+      }
+    };
+  }
+  const toolUse = (id, name, input) => ({ type: 'tool_use', id, name, input });
+  const thinking = { type: 'thinking', thinking: '', signature: 'sig' };
+
+  it('runs read tools and answers, sending the documented request shape', async () => {
+    const { hong, run } = setup();
+    const client = fakeClient([
+      { stop_reason: 'tool_use', content: [thinking, toolUse('t1', 'search_students', { query: '홍길동' })] },
+      { stop_reason: 'end_turn', content: [{ type: 'text', text: '홍길동 학생을 찾았습니다.' }] }
+    ]);
+    const out = await runAgentTurn({ message: '홍길동 찾아줘' }, run, { provider: 'anthropic', client });
+    assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
+    assert.equal(out.model, 'claude-haiku-5-5');
+    const [first, second] = client.requests;
+    assert.equal(first.params.model, 'claude-haiku-5-5');
+    assert.match(first.params.system, /오늘: 2026-09-14/);
+    assert.deepEqual(first.params.cache_control, { type: 'ephemeral' });
+    assert.deepEqual(first.params.output_config, { effort: 'low' });
+    assert.equal('temperature' in first.params, false);
+    assert.equal('thinking' in first.params, false);
+    assert.equal(first.opts.maxRetries, 0);
+    assert.ok(first.params.tools.every((t) => t.input_schema && t.input_schema.type === 'object'));
+    // The assistant turn goes back unchanged (thinking block included), then all results in one user message.
+    const msgs = second.params.messages;
+    assert.deepEqual(msgs[msgs.length - 2], { role: 'assistant', content: [thinking, toolUse('t1', 'search_students', { query: '홍길동' })] });
+    const results = msgs[msgs.length - 1];
+    assert.equal(results.role, 'user');
+    assert.equal(results.content.length, 1);
+    assert.equal(results.content[0].type, 'tool_result');
+    assert.equal(results.content[0].tool_use_id, 't1');
+    assert.match(results.content[0].content, new RegExp(hong.student_id));
+    assert.equal(results.content[0].is_error, undefined);
+  });
+
+  it('turns write tools into a pending proposal and marks failed tools as errors', async () => {
+    const { hong, lessonOf, run } = setup();
+    const lesson = lessonOf(hong.student_id);
+    const client = fakeClient([
+      { stop_reason: 'tool_use', content: [
+        toolUse('w1', 'update_attendance', { lesson_id: lesson.lesson_id, attendance: '결석' }),
+        toolUse('w2', 'update_attendance', { lesson_id: 'LES-9999', attendance: '결석' })
+      ] },
+      { stop_reason: 'end_turn', content: [{ type: 'text', text: '승인해 주세요.' }] }
+    ]);
+    const out = await runAgentTurn({ message: '홍길동 결석' }, run, { provider: 'anthropic', client });
+    assert.equal(out.message.proposal.calls.length, 1);
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+    const results = client.requests[1].params.messages.at(-1).content;
+    assert.deepEqual(results.map((r) => r.tool_use_id), ['w1', 'w2']);
+    assert.equal(results[0].is_error, undefined);
+    assert.equal(results[1].is_error, true);
+  });
+
+  it('shows a notice on refusal or a cut-off reply instead of running tools', async () => {
+    const { run } = setup();
+    const refused = fakeClient([{ stop_reason: 'refusal', content: [] }]);
+    const a = await runAgentTurn({ message: '...' }, run, { provider: 'anthropic', client: refused });
+    assert.match(a.message.content, /처리하지 않았습니다/);
+    const cut = fakeClient([{ stop_reason: 'max_tokens', content: [{ type: 'text', text: '목록:' }, toolUse('t', 'list_classes', {})] }]);
+    const b = await runAgentTurn({ message: '...' }, run, { provider: 'anthropic', client: cut });
+    assert.match(b.message.content, /^목록:\n\n답변이 길어/);
+    assert.equal(cut.requests.length, 1);
+  });
+
+  it('maps SDK errors to Korean messages and saves nothing', async () => {
+    const { api, run } = setup();
+    const Anthropic = await sdk();
+    const err = new Anthropic.RateLimitError(429, { error: { message: 'slow down' } }, 'slow down', new Headers());
+    const client = fakeClient([err]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client }), /잠시 후/);
+    assert.equal(api.listAgentConversations().length, 0);
+    assert.match(anthropicErrorMessage(new Anthropic.AuthenticationError(401, {}, 'bad key', new Headers())), /ANTHROPIC_API_KEY/);
+    assert.match(anthropicErrorMessage(new Anthropic.APIConnectionError({ message: 'down' })), /연결할 수 없습니다/);
+  });
+
+  it('normalises the model ID', () => {
+    assert.equal(anthropicModelId(''), 'claude-haiku-5-5');
+    assert.equal(anthropicModelId('claude-sonnet-5-5'), 'claude-sonnet-5-5');
+    assert.equal(anthropicModelId('anthropic/claude-haiku-5.5'), 'claude-haiku-5-5');
+    assert.throws(() => anthropicModelId('google/gemini-3.7-flash'), /Claude 모델 ID/);
+    assert.equal(anthropicToolDefinitions().length, AGENT_TOOLS.length);
+  });
+
+  it('uses AGENT_MODEL on the Anthropic API', async () => {
+    const { run } = setup();
+    const client = fakeClient([{ stop_reason: 'end_turn', content: [{ type: 'text', text: '네' }] }]);
+    await withEnv({ AGENT_MODEL: 'anthropic/claude-sonnet-5.5' }, () =>
+      runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client }));
+    assert.equal(client.requests[0].params.model, 'claude-sonnet-5-5');
+  });
+
+  it('picks the provider from ANTHROPIC_API_KEY', () => {
+    withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test', AI_API_KEY: undefined, OPENAI_API_KEY: undefined }, () => {
+      assert.equal(getAgentProvider(), 'anthropic');
+      assert.equal(isAgentConfigured(), true);
+    });
+    withEnv({ ANTHROPIC_API_KEY: undefined, AI_API_KEY: 'k' }, () => {
+      assert.equal(getAgentProvider(), 'openrouter');
+      assert.equal(isAgentConfigured(), true);
+    });
+    withEnv({ ANTHROPIC_API_KEY: '  ', AI_API_KEY: undefined, OPENAI_API_KEY: undefined }, () => {
+      assert.equal(isAgentConfigured(), false);
+    });
+  });
+
+  it('streams text deltas and tool steps with onEvent, and only then', async () => {
+    const { run } = setup();
+    const client = fakeClient([
+      { stop_reason: 'tool_use', content: [{ type: 'text', text: '찾아볼게요.' }, toolUse('t1', 'search_students', { query: '홍길동' })] },
+      { stop_reason: 'end_turn', content: [{ type: 'text', text: '홍길동 학생을 찾았습니다.' }], pieces: ['홍길동 학생을 ', '찾았습니다.'] }
+    ]);
+    const events = [];
+    const out = await runAgentTurn({ message: '홍길동 찾아줘' }, run, { provider: 'anthropic', client, onEvent: (e) => events.push(e) });
+    assert.deepEqual(events, [
+      { type: 'text', delta: '찾아볼게요.' },
+      { type: 'text_reset' },
+      { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'running' },
+      { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'done', ok: true },
+      { type: 'text', delta: '홍길동 학생을 ' },
+      { type: 'text', delta: '찾았습니다.' }
+    ]);
+    assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
+    assert.deepEqual(client.requests.map((r) => r.streamed), [true, true]);
+    assert.ok(client.requests[0].opts.signal instanceof AbortSignal);
+    assert.equal(client.requests[0].opts.maxRetries, 0);
+    // The tool_use turn goes back to the model from the streamed final message.
+    assert.equal(client.requests[1].params.messages.at(-2).content[1].id, 't1');
+
+    const plain = fakeClient([{ stop_reason: 'end_turn', content: [{ type: 'text', text: '네' }] }]);
+    await runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client: plain });
+    assert.equal(plain.requests[0].streamed, false);
+  });
+
+  it('streams a stop notice after the text', async () => {
+    const { run } = setup();
+    const client = fakeClient([{ stop_reason: 'max_tokens', content: [{ type: 'text', text: '목록:' }] }]);
+    const deltas = [];
+    const out = await runAgentTurn({ message: '...' }, run, { provider: 'anthropic', client, onEvent: (e) => e.type === 'text' && deltas.push(e.delta) });
+    assert.equal(deltas.join(''), out.message.content);
+  });
+
+  it('stops on abort while streaming, gives the slot back and saves nothing', async () => {
+    const { store, run } = setup();
+    const Anthropic = await sdk();
+    const controller = new AbortController();
+    const client = fakeClient([(params, opts) => new Promise((resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new Anthropic.APIUserAbortError()));
+      controller.abort();
+    })]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, {
+      provider: 'anthropic', client, onEvent: () => {}, signal: controller.signal, rateLimit: 5, now: Date.parse('2026-09-14T01:00:00Z')
+    }), (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(['AgentUsage', 'AgentConversations', 'AgentMessages'].map((t) => store.readTable(t).length), [0, 0, 0]);
+
+    const already = new AbortController();
+    already.abort();
+    const idle = fakeClient([]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client: idle, signal: already.signal }), (e) => e.code === 'REQUEST_ABORTED');
+    assert.equal(idle.requests.length, 0);
+  });
+
+  it('reports a timeout when the whole reply runs past the step deadline', async () => {
+    const { createAnthropicProvider } = require('../lib/agent-anthropic.js');
+    const client = fakeClient([(params, opts) => new Promise((resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new Error('Request was aborted.')));
+    })]);
+    const provider = createAnthropicProvider({ system: 's', history: [], message: '안녕' }, { client });
+    await assert.rejects(provider.send(20, { onText: () => {} }), /너무 오래/);
   });
 });
