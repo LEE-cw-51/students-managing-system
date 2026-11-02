@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/Toast';
 import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import ScrollRow from '@/components/domain/exam/ScrollRow';
-import { api } from '@/lib/client-api';
+import { api, notifyDataChanged } from '@/lib/client-api';
 import { shortDate } from '@/lib/format';
 
 const UNDO_MS = 5000;
@@ -151,6 +151,7 @@ function StateTag({ m }) {
 /** Hides the member right away and removes the assignment once the undo window closes. */
 function useDelayedRemove(onRemoved) {
   const toast = useToast();
+  const { refresh } = useBoot();
   const [pending, setPending] = useState([]);
   const mounted = useRef(true);
   useEffect(() => {
@@ -170,7 +171,13 @@ function useDelayedRemove(onRemoved) {
       try {
         await api('removeTempAssignment', m.rel_id);
         toast(`${m.name} 학생을 뺐습니다.`);
-        if (mounted.current) onRemoved();
+        if (mounted.current) {
+          onRemoved();
+        } else {
+          // The page was left during the undo window: the screens now open still show the student.
+          refresh();
+          notifyDataChanged();
+        }
       } catch (err) {
         if (mounted.current) unhide();
         toast(`${m.name} 학생을 빼지 못해 다시 표시했습니다. ${err.message}`, 'error');

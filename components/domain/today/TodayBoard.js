@@ -7,8 +7,8 @@ import { useToast } from '@/components/ui/Toast';
 import Badges from '@/components/domain/Badges';
 import MakeupForm from './MakeupForm';
 import { api, useApi } from '@/lib/client-api';
-import { shortDate } from '@/lib/format';
-import { dDayLabel } from '@/lib/term';
+import { dateRange, shortDate } from '@/lib/format';
+import { examDDayLabel } from '@/lib/term';
 
 const TASK_LABEL = {
   counsel_parent: '학부모 상담', counsel_student: '학생 상담', admin: '행정', other: '기타', homework_check: '과제 확인'
@@ -131,7 +131,7 @@ export default function TodayBoard({ date, onOpenClass }) {
                     <div key={x.school_exam_id}>
                       <div className="split">
                         <strong>{x.school} {x.grade}</strong>
-                        <span>{shortDate(x.exam_date)} <span className="tag danger">{dDayLabel(x.d_day)}</span></span>
+                        <span>{dateRange(x.exam_date, x.exam_end_date)} <span className="tag danger">{examDDayLabel(x.d_day, x.in_progress)}</span></span>
                       </div>
                       <div className="muted prewrap">{[x.textbook, x.scope].filter(Boolean).join(' · ') || '범위 미입력'} · {x.students.map((s) => s.name).join(', ')}</div>
                     </div>

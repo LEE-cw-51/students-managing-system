@@ -626,7 +626,7 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
 .eb-hint { margin: 0; }
 .eb-table td { padding: 6px 8px; vertical-align: middle; }
 .eb-table td.eb-school { padding-left: 12px; width: 28%; }
-.eb-table td:nth-child(2) { width: 170px; }
+.eb-table td:nth-child(2), .eb-table td:nth-child(3) { width: 160px; }
 .eb-field { display: block; }
 .eb-label { display: none; }
 
@@ -723,7 +723,7 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
   .eb-table, .eb-table tbody, .eb-table tr, .eb-table td { display: block; }
   .eb-table thead { display: none; }
   .eb-table tr { margin-bottom: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
-  .eb-table td, .eb-table td.eb-school, .eb-table td:nth-child(2) { width: auto; padding: 4px 0; border: 0; }
+  .eb-table td, .eb-table td.eb-school, .eb-table td:nth-child(2), .eb-table td:nth-child(3) { width: auto; padding: 4px 0; border: 0; }
   .eb-label { display: block; margin-bottom: 2px; font-size: 12px; color: var(--muted); font-weight: 600; }
   .app .eb-table input { min-height: 42px; }
   .pl-nav { top: 62px; }

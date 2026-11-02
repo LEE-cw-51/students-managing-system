@@ -200,12 +200,18 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
     });
   };
 
-  const existingKeys = new Set(cards.filter((c) => c.existing).map((c) => classNameKey(c.class_name)));
+  const existingIds = new Map();
+  cards.forEach((c) => {
+    const k = classNameKey(c.class_name);
+    if (c.existing && !existingIds.has(k)) existingIds.set(k, c.class_id);
+  });
   const mergeInto = mergeTargets(cards);
-  const mergesExisting = (c) => !c.existing && existingKeys.has(classNameKey(c.class_name));
+  const mergesExisting = (c) => !c.existing && existingIds.has(classNameKey(c.class_name));
   const active = cards.filter((c) => c.students.length);
   const studentCount = active.reduce((n, c) => n + c.students.length, 0);
-  const classCount = active.length - mergeInto.filter((t) => t >= 0).length;
+  // Cards sharing a name become one class, and a new card named like an existing class fills that class.
+  const targetOf = (c) => (c.existing ? c.class_id : existingIds.get(classNameKey(c.class_name)) || 'new:' + classNameKey(c.class_name));
+  const classCount = new Set(active.map(targetOf)).size;
 
   const apply = async () => {
     setError('');
@@ -347,7 +353,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
             {groups.length ? (
               <div className="table-wrap pl-pool">
                 <table className="data-table">
-                  <thead><tr><th className="check-col" /><th>이름</th><th>원래 반</th><th>학교 · 학년</th><th>학교 시험일</th></tr></thead>
+                  <thead><tr><th className="check-col" /><th>이름</th><th>원래 반</th><th>학교 · 학년</th><th>학교 시험 종료일</th></tr></thead>
                   {groups.map((g) => {
                     const ids = g.students.map((s) => s.student_id);
                     const on = ids.filter((sid) => sel.selected.has(sid)).length;
@@ -358,7 +364,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
                       <tbody key={g.key}>
                         <tr className="pl-group-head">
                           <td colSpan={5}>
-                            <label className="check-label"><SelectAllCheckbox sel={gsel} label={`${label} 전체 선택`} /> {label}<span className="muted">{examDate ? ` · 시험 ${shortDate(examDate)}` : ''} · {ids.length}명</span></label>
+                            <label className="check-label"><SelectAllCheckbox sel={gsel} label={`${label} 전체 선택`} /> {label}<span className="muted">{examDate ? ` · 시험 ~${shortDate(examDate)}` : ''} · {ids.length}명</span></label>
                           </td>
                         </tr>
                         {g.students.map((s) => (

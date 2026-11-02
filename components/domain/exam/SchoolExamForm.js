@@ -9,18 +9,26 @@ import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 
-/** Create / edit one school's math exam (date, textbook, scope). */
+/** Create / edit one school's math exam (date range, textbook, scope). */
 export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
   const confirm = useConfirm();
   const boot = useBoot();
   const toast = useToast();
   const [form, setForm] = useState(() => ({
-    school: '', grade: '', exam_date: '', textbook: '', scope: '', memo: '', title: '', ...initial
+    school: '', grade: '', exam_date: '', exam_end_date: '', textbook: '', scope: '', memo: '', title: '', ...initial
   }));
   const [error, setError] = useState('');
   const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const setStart = (e) => {
+    const start = e.target.value;
+    setForm((f) => ({
+      ...f,
+      exam_date: start,
+      exam_end_date: !f.exam_end_date || (start && f.exam_end_date < start) ? start : f.exam_end_date
+    }));
+  };
   const isEdit = !!form.school_exam_id;
 
   const submit = async (e) => {
@@ -79,7 +87,10 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
           {form.exam_type === '기타' ? (
             <Field label="시험 이름">{(id) => <input id={id} value={form.title} onChange={set('title')} placeholder="예: 수행평가" />}</Field>
           ) : null}
-          <Field label="수학 시험일">{(id) => <input id={id} type="date" value={form.exam_date} onChange={set('exam_date')} />}</Field>
+          <Field label="시험 시작일">{(id) => <input id={id} type="date" value={form.exam_date} onChange={setStart} />}</Field>
+          <Field label="시험 종료일" hint="하루만 보면 시작일과 같게 두세요.">{(id) => (
+            <input id={id} type="date" min={form.exam_date || undefined} value={form.exam_end_date} onChange={set('exam_end_date')} />
+          )}</Field>
           <Field label="교재" wide>{(id) => <input id={id} value={form.textbook} onChange={set('textbook')} placeholder="예: 교과서(천재), 익힘책" />}</Field>
           <Field label="시험 범위" wide>{(id) => <textarea id={id} rows={3} value={form.scope} onChange={set('scope')} placeholder="예: 1단원 삼각형의 성질 ~ 2단원 사각형의 성질, 교과서 p.10~78" />}</Field>
           <Field label="메모" wide>{(id) => <textarea id={id} rows={2} value={form.memo} onChange={set('memo')} />}</Field>

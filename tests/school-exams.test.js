@@ -84,6 +84,42 @@ describe('school exams', () => {
     assert.deepEqual(dates, { 가: '2026-11-12', 나: '2026-11-12', 다: '', 라: '' }, 'spellings match; other exam types and out-of-period dates do not');
   });
 
+  it('saves a date range; an empty end means a one-day exam', () => {
+    const { api } = setup();
+    const ranged = api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-11-03', exam_end_date: '2026-11-06' });
+    assert.equal(ranged.exam_end_date, '2026-11-06');
+    const single = api.saveSchoolExam({ ...base, grade: '중3', school: '한빛중', exam_date: '2026-11-04' });
+    assert.equal(single.exam_end_date, '2026-11-04');
+    const row = api.getSchoolExams({ school_year: '2026' }).find((x) => x.grade === '중2');
+    assert.equal(row.d_day, 10, 'D-day counts from the first day');
+    assert.equal(row.in_progress, false);
+  });
+
+  it('rejects an end before the start or without a start', () => {
+    const { api } = setup();
+    assert.throws(() => api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-11-06', exam_end_date: '2026-11-03' }), /종료일이 시작일보다 빠릅니다/);
+    assert.throws(() => api.saveSchoolExam({ ...base, school: '한빛중', exam_end_date: '2026-11-03' }), /시작일/);
+  });
+
+  it('keeps an exam in progress in upcoming lists until its last day', () => {
+    const { api, cls } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-10-22', exam_end_date: '2026-10-27' });
+    const exams = api.getClassOverview(cls.class_id).exams;
+    assert.equal(exams.length, 1);
+    assert.equal(exams[0].in_progress, true);
+    assert.equal(exams[0].d_day, -2);
+    const student = api.getStudentList({}).find((s) => s.name === '가');
+    assert.deepEqual([student.next_exam.date, student.next_exam.end_date], ['2026-10-22', '2026-10-27']);
+  });
+
+  it('exam planning returns students on the last exam day of a range overlapping the period', () => {
+    const { api } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-10-30', exam_end_date: '2026-11-04' });
+    const period = api.saveExamPeriod({ title: '기말', start_date: '2026-11-02', end_date: '2026-11-30', exam_year: '2026', exam_semester: '2', exam_type: '기말' });
+    const dates = Object.fromEntries(api.proposeExamGroups(period.exam_period_id).students.map((s) => [s.name, s.exam_date]));
+    assert.equal(dates['가'], '2026-11-04');
+  });
+
   it('deletes', () => {
     const { api } = setup();
     const row = api.saveSchoolExam({ ...base, school: '한빛중' });
