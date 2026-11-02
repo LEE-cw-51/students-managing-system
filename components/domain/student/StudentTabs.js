@@ -8,8 +8,8 @@ import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
-import { dDayLabel } from '@/lib/term';
+import { dateRange, formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
+import { examDDayLabel } from '@/lib/term';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
@@ -283,7 +283,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
               <li key={x.school_exam_id}>
                 <strong>{x.label}</strong>
                 <span className="muted">{x.school}</span>
-                <span>{shortDate(x.exam_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{dDayLabel(x.d_day)}</span></span>
+                <span>{dateRange(x.exam_date, x.exam_end_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(x.d_day, x.in_progress)}</span></span>
                 <span className="sd-line-text">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</span>
               </li>
             ))}

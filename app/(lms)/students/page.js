@@ -14,8 +14,8 @@ import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { relativeDay, shortDate, telHref } from '@/lib/format';
-import { dDayLabel } from '@/lib/term';
+import { dateRange, relativeDay, shortDate, telHref } from '@/lib/format';
+import { examDDayLabel } from '@/lib/term';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useUrlState } from '@/components/ui/useUrlState';
 import { SortTh, useSort } from '@/components/ui/useSort';
@@ -56,7 +56,7 @@ function StudentsView() {
 }
 
 function ExamTag({ exam }) {
-  return <span className={'tag ' + (exam.d_day <= 7 ? 'danger' : exam.d_day <= 21 ? 'amber' : '')}>{dDayLabel(exam.d_day)}</span>;
+  return <span className={'tag ' + (exam.d_day <= 7 ? 'danger' : exam.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(exam.d_day, exam.d_day < 0)}</span>;
 }
 
 function ClassTags({ r, none }) {
@@ -157,7 +157,7 @@ function StudentList({ onCreate }) {
                     <td>{[r.grade, r.school].filter(Boolean).join(' · ') || '-'}{!r.school && r.status === '재원' ? <span className="tag warn" style={{ marginLeft: 4 }}>학교 미입력</span> : null}</td>
                     <td><ClassTags r={r} none="없음" /></td>
                     <td>{r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : <span className="muted">-</span>}</td>
-                    <td>{r.next_exam ? <>{shortDate(r.next_exam.date)} <ExamTag exam={r.next_exam} /></> : <span className="muted">-</span>}</td>
+                    <td>{r.next_exam ? <>{dateRange(r.next_exam.date, r.next_exam.end_date)} <ExamTag exam={r.next_exam} /></> : <span className="muted">-</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -186,7 +186,7 @@ function StudentList({ onCreate }) {
                   </div>
                   <div className="st-card-line muted">
                     <span>최근 수업 {r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : '-'}</span>
-                    <span>시험 {r.next_exam ? <>{shortDate(r.next_exam.date)} <ExamTag exam={r.next_exam} /></> : '-'}</span>
+                    <span>시험 {r.next_exam ? <>{dateRange(r.next_exam.date, r.next_exam.end_date)} <ExamTag exam={r.next_exam} /></> : '-'}</span>
                   </div>
                   {telHref(r.parent_phone) ? <a className="btn secondary sm st-call" href={telHref(r.parent_phone)}>학부모 {r.parent_phone}</a> : null}
                 </li>

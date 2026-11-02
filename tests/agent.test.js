@@ -378,7 +378,8 @@ describe('runAgentTurn', () => {
       { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'running' },
       { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'done', ok: false },
       { type: 'text', delta: '홍길동 학생을 ' },
-      { type: 'text', delta: '찾았습니다.' }
+      { type: 'text', delta: '찾았습니다.' },
+      { type: 'saving' }
     ]);
     assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
     assert.deepEqual(out.steps.map((s) => s.ok), [true, false]);
@@ -413,6 +414,15 @@ describe('runAgentTurn', () => {
       (e) => e.code === 'REQUEST_ABORTED');
     assert.deepEqual(saved(), [0, 0, 0, 0]);
     assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
+
+  it('a saved turn can be found again by the browser\'s turn id', async () => {
+    const { api, run } = setup();
+    const { fetch } = scriptedFetch([{ role: 'assistant', content: '네' }]);
+    const out = await runAgentTurn({ message: '안녕', clientTurnId: 'turn-1' }, run, { config: CONFIG, fetch });
+    assert.deepEqual(api.findAgentTurn('turn-1'), { conversation_id: out.conversation_id });
+    assert.equal(api.findAgentTurn('turn-2'), null);
+    assert.equal(api.findAgentTurn(''), null);
   });
 });
 
@@ -805,7 +815,8 @@ describe('Anthropic API provider', () => {
       { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'running' },
       { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'done', ok: true },
       { type: 'text', delta: '홍길동 학생을 ' },
-      { type: 'text', delta: '찾았습니다.' }
+      { type: 'text', delta: '찾았습니다.' },
+      { type: 'saving' }
     ]);
     assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
     assert.deepEqual(client.requests.map((r) => r.streamed), [true, true]);

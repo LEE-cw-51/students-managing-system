@@ -64,7 +64,8 @@ LMS.TABLES = {
   ],
   SchoolExams: [
     'school_exam_id', 'school_year', 'semester', 'exam_type', 'title', 'school', 'school_key',
-    'grade', 'exam_date', 'textbook', 'scope', 'memo', 'created_at', 'updated_at'
+    'grade', 'exam_date', 'textbook', 'scope', 'memo', 'created_at', 'updated_at',
+    'exam_end_date'
   ],
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
@@ -100,7 +101,7 @@ LMS.TABLES = {
     'created_at', 'updated_at'
   ],
   AgentConversations: ['conversation_id', 'title', 'created_at', 'updated_at'],
-  AgentMessages: ['message_id', 'conversation_id', 'role', 'content', 'proposal_id', 'created_at'],
+  AgentMessages: ['message_id', 'conversation_id', 'role', 'content', 'proposal_id', 'created_at', 'client_turn_id'],
   AgentProposals: [
     'proposal_id', 'conversation_id', 'summary', 'calls', 'status', 'result',
     'verification_status', 'created_at', 'executed_at'
@@ -1622,7 +1623,11 @@ LMS.validateSchoolExamInput = function (data) {
   var title = LMS.toStr(data.title);
   if (type === '기타' && !title) throw new Error('기타 시험은 시험 이름을 입력해 주세요.');
   var date = LMS.toStr(data.exam_date);
-  if (date && !LMS.isIsoDate(date)) throw new Error('시험일 형식이 올바르지 않습니다.');
+  if (date && !LMS.isIsoDate(date)) throw new Error('시험 시작일 형식이 올바르지 않습니다.');
+  var end = LMS.toStr(data.exam_end_date);
+  if (end && !LMS.isIsoDate(end)) throw new Error('시험 종료일 형식이 올바르지 않습니다.');
+  if (end && !date) throw new Error('시험 시작일을 입력해 주세요.');
+  if (end && end < date) throw new Error('종료일이 시작일보다 빠릅니다.');
   return {
     school_exam_id: LMS.toStr(data.school_exam_id),
     school_year: year,
@@ -1633,10 +1638,18 @@ LMS.validateSchoolExamInput = function (data) {
     school_key: LMS.schoolGroupKey(school, grade),
     grade: grade,
     exam_date: date,
+    exam_end_date: end || date,
     textbook: LMS.toStr(data.textbook),
     scope: LMS.toStr(data.scope),
     memo: LMS.toStr(data.memo)
   };
+};
+
+/** Last day of a school exam; rows saved before ranges existed have only `exam_date`. */
+LMS.schoolExamEnd = function (row) {
+  var start = LMS.toStr(row && row.exam_date);
+  var end = LMS.toStr(row && row.exam_end_date);
+  return end && end >= start ? end : start;
 };
 
 /** Identity of a school exam: same year/semester/type/school+grade (and title for 기타). */

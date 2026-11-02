@@ -207,6 +207,14 @@ LMS.createAgent = function (ctx) {
     };
   }
 
+  /** Where a turn the browser stopped waiting for was saved, or null if it never was. */
+  function findAgentTurn(clientTurnId) {
+    var id = LMS.toStr(clientTurnId);
+    if (!id) return null;
+    var hit = table('AgentMessages').filter(function (m) { return LMS.toStr(m.client_turn_id) === id; })[0];
+    return hit ? { conversation_id: hit.conversation_id } : null;
+  }
+
   /** Server-only: the last messages of a conversation as model history ({ role, content }). */
   function getAgentHistory(conversationId, limit) {
     if (!conversationId) return [];
@@ -341,7 +349,10 @@ LMS.createAgent = function (ctx) {
 
     var messages = table('AgentMessages');
     var ids = ctx.nextIds('AGM', 2);
-    var userMsg = { message_id: ids[0], conversation_id: conv.conversation_id, role: 'user', content: userText, proposal_id: '', created_at: ts };
+    var userMsg = {
+      message_id: ids[0], conversation_id: conv.conversation_id, role: 'user', content: userText, proposal_id: '', created_at: ts,
+      client_turn_id: LMS.toStr(data.client_turn_id)
+    };
     var reply = {
       message_id: ids[1], conversation_id: conv.conversation_id, role: 'assistant',
       content: LMS.toStr(data.reply), proposal_id: proposal ? proposal.proposal_id : '', created_at: ts
@@ -425,6 +436,7 @@ LMS.createAgent = function (ctx) {
   return {
     listAgentConversations: listAgentConversations,
     getAgentConversation: getAgentConversation,
+    findAgentTurn: findAgentTurn,
     getAgentHistory: getAgentHistory,
     getAgentContext: getAgentContext,
     previewAgentAction: previewAgentAction,

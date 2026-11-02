@@ -13,8 +13,8 @@ import SchoolExamForm from '@/components/domain/exam/SchoolExamForm';
 import PeriodForm from '@/components/domain/exam/PeriodForm';
 import { useRouter } from 'next/navigation';
 import { api, apiBatch, useApi } from '@/lib/client-api';
-import { formatDate } from '@/lib/format';
-import { currentTerm, dDayLabel } from '@/lib/term';
+import { dateRange, formatDate, shortDate } from '@/lib/format';
+import { currentTerm, examDDayLabel } from '@/lib/term';
 
 const TABS = [
   { key: 'schedule', label: '학교 시험 일정' },
@@ -33,13 +33,14 @@ function defaultExamType(today) {
   return midterm ? '중간' : '기말';
 }
 
-function DDay({ d }) {
+function DDay({ d, inProgress }) {
   if (d === null || d === undefined) return null;
-  const tone = d < 0 ? 'muted' : d <= 7 ? 'danger' : d <= 21 ? 'amber' : '';
-  return <span className={'tag ' + tone}>{dDayLabel(d)}</span>;
+  const tone = inProgress ? 'danger' : d < 0 ? 'muted' : d <= 7 ? 'danger' : d <= 21 ? 'amber' : '';
+  return <span className={'tag ' + tone}>{examDDayLabel(d, inProgress)}</span>;
 }
 
-const BULK_COLS = ['exam_date', 'textbook', 'scope'];
+const BULK_COLS = ['exam_date', 'exam_end_date', 'textbook', 'scope'];
+const DATE_COLS = new Set(['exam_date', 'exam_end_date']);
 
 /** Enter moves down the same column (phones: to the next field); the last row never submits. */
 function onBulkKey(e) {
@@ -56,22 +57,27 @@ function onBulkKey(e) {
 /** One editable row per school+grade that has no exam yet; saves all filled rows at once. */
 function BulkModal({ groups, term, examType, onClose, onSaved }) {
   const toast = useToast();
-  const [rows, setRows] = useState(() => groups.map((g) => ({ ...g, exam_date: '', textbook: '', scope: '' })));
+  const [rows, setRows] = useState(() => groups.map((g) => ({ ...g, exam_date: '', exam_end_date: '', textbook: '', scope: '' })));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const dirty = useDirty(rows);
-  const set = (i, key) => (e) => setRows((list) => list.map((r, j) => (j === i ? { ...r, [key]: e.target.value } : r)));
-  const filled = rows.filter((r) => r.exam_date || r.scope || r.textbook);
+  const patch = (r, key, value) => {
+    if (key !== 'exam_date') return { ...r, [key]: value };
+    const end = !r.exam_end_date || (value && r.exam_end_date < value) ? value : r.exam_end_date;
+    return { ...r, exam_date: value, exam_end_date: end };
+  };
+  const set = (i, key) => (e) => setRows((list) => list.map((r, j) => (j === i ? patch(r, key, e.target.value) : r)));
+  const filled = rows.filter((r) => r.exam_date || r.exam_end_date || r.scope || r.textbook);
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!filled.length) return setError('시험일이나 범위를 한 곳 이상 입력해 주세요.');
+    if (!filled.length) return setError('시험 기간이나 범위를 한 곳 이상 입력해 주세요.');
     setSaving(true);
     setError('');
     try {
       await api('saveSchoolExamsBatch', filled.map((r) => ({
         school: r.school, grade: r.grade, school_year: term.year, semester: term.semester,
-        exam_type: examType, exam_date: r.exam_date, textbook: r.textbook, scope: r.scope
+        exam_type: examType, exam_date: r.exam_date, exam_end_date: r.exam_end_date, textbook: r.textbook, scope: r.scope
       })));
       toast(`${filled.length}개 학교 시험 일정을 저장했습니다.`);
       onSaved();
@@ -82,7 +88,7 @@ function BulkModal({ groups, term, examType, onClose, onSaved }) {
     }
   };
 
-  const labels = { exam_date: '시험일', textbook: '교재', scope: '범위' };
+  const labels = { exam_date: '시작일', exam_end_date: '종료일', textbook: '교재', scope: '범위' };
   return (
     <Modal title={`${term.year} ${term.semester}학기 ${examType === '기말' ? '기말고사' : '중간고사'} 한 번에 입력`}
       titleMeta={<span className="muted desktop-only">{rows.length}곳</span>}
@@ -100,7 +106,7 @@ function BulkModal({ groups, term, examType, onClose, onSaved }) {
         <p className="hint eb-hint">아는 것만 채우세요. 빈 줄은 저장하지 않습니다.<span className="desktop-only"> Tab은 오른쪽, Enter는 아래 칸으로 갑니다.</span></p>
         <div className="table-wrap eb-wrap">
           <table className="data-table eb-table" onKeyDown={onBulkKey}>
-            <thead><tr><th>학교 · 학년</th><th>시험일</th><th>교재</th><th>범위</th></tr></thead>
+            <thead><tr><th>학교 · 학년</th><th>시작일</th><th>종료일</th><th>교재</th><th>범위</th></tr></thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.school_key}>
@@ -109,7 +115,8 @@ function BulkModal({ groups, term, examType, onClose, onSaved }) {
                     <td key={key}>
                       <label className="eb-field">
                         <span className="eb-label">{labels[key]}</span>
-                        <input type={key === 'exam_date' ? 'date' : 'text'} data-col={key} enterKeyHint="next" value={r[key]} onChange={set(i, key)}
+                        <input type={DATE_COLS.has(key) ? 'date' : 'text'} data-col={key} enterKeyHint="next" value={r[key]} onChange={set(i, key)}
+                          min={key === 'exam_end_date' && r.exam_date ? r.exam_date : undefined}
                           aria-label={`${r.school} ${r.grade} ${labels[key]}`} />
                       </label>
                     </td>
@@ -207,13 +214,13 @@ function ScheduleTab({ tabs }) {
                   <>
                     <div className="table-wrap ex-table">
                       <table className="data-table">
-                        <thead><tr><th>학교 · 학년</th><th>수학 시험일</th><th>교재</th><th>시험 범위</th><th className="num">학생</th><th /></tr></thead>
+                        <thead><tr><th>학교 · 학년</th><th>시험 기간</th><th>교재</th><th>시험 범위</th><th className="num">학생</th><th /></tr></thead>
                         <tbody>
                           {exams.map((x) => (
                             <Fragment key={x.school_exam_id}>
                               <tr>
                                 <td><strong>{x.school}</strong> <span className="muted">{x.grade}</span>{x.exam_type === '기타' ? <div className="muted">{x.title}</div> : null}</td>
-                                <td>{x.exam_date ? <>{formatDate(x.exam_date)} <DDay d={x.d_day} /></> : <span className="tag warn">미정</span>}</td>
+                                <td>{x.exam_date ? <>{dateRange(x.exam_date, x.exam_end_date, formatDate)} <DDay d={x.d_day} inProgress={x.in_progress} /></> : <span className="tag warn">미정</span>}</td>
                                 <td>{x.textbook || <span className="muted">-</span>}</td>
                                 <td className="prewrap">{x.scope || <span className="muted">미입력</span>}</td>
                                 <td className="num">
@@ -235,7 +242,7 @@ function ScheduleTab({ tabs }) {
                         <li key={x.school_exam_id} className="ex-card">
                           <div className="ex-card-head">
                             <strong>{x.school} {x.grade}</strong>
-                            {x.exam_date ? <span className="ex-card-date">{formatDate(x.exam_date)} <DDay d={x.d_day} /></span> : <span className="tag warn">미정</span>}
+                            {x.exam_date ? <span className="ex-card-date">{dateRange(x.exam_date, x.exam_end_date, shortDate)} <DDay d={x.d_day} inProgress={x.in_progress} /></span> : <span className="tag warn">미정</span>}
                           </div>
                           {x.exam_type === '기타' && x.title ? <div className="muted">{x.title}</div> : null}
                           <div className="prewrap">

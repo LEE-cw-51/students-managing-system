@@ -28,7 +28,12 @@ export async function POST(req) {
   if (message.length > 2000) {
     return NextResponse.json({ ok: false, error: '메시지는 2000자까지 보낼 수 있습니다.' }, { status: 400 });
   }
-  const turn = { conversationId: String(body.conversation_id || ''), message };
+  const clientTurnId = String(body.client_turn_id || '');
+  const turn = {
+    conversationId: String(body.conversation_id || ''),
+    message,
+    clientTurnId: /^[\w-]{1,64}$/.test(clientTurnId) ? clientTurnId : ''
+  };
   if (body.stream === true) return streamTurn(turn, req.signal);
   try {
     const data = await runAgentTurn(turn, withService);

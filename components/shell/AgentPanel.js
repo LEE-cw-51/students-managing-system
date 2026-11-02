@@ -98,6 +98,24 @@ async function streamAgent(body, signal, onEvent) {
   throw new ApiError('응답이 중간에 끊겼습니다. 다시 시도해 주세요.');
 }
 
+function newTurnId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+/** After a stop, looks for the turn a few times: the server may have been saving it as the request closed. */
+async function findStoppedTurn(turnId) {
+  for (const ms of [300, 700, 1500]) {
+    await new Promise((r) => setTimeout(r, ms));
+    try {
+      const hit = await api('findAgentTurn', turnId);
+      if (hit) return hit;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Suggested prompts for the empty chat, from today's weekday, the hour and the classes in boot. */
 function pickSuggestions(today, classes, hour) {
   const [y, m, d] = String(today || '').split('-').map(Number);
@@ -407,6 +425,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
   const [conversations, setConversations] = useState(null);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [live, setLive] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState('');
@@ -552,6 +571,8 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
       setLive((l) => (l ? { ...l, text: l.text + (ev.delta || '') } : l));
     } else if (ev.type === 'text_reset') {
       setLive((l) => (l ? { ...l, text: '' } : l));
+    } else if (ev.type === 'saving') {
+      setSaving(true);
     } else if (ev.type === 'step') {
       setLive((l) => {
         if (!l) return l;
@@ -581,7 +602,8 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
     setMessages((list) => [...list, temp]);
     const controller = new AbortController();
     abortRef.current = controller;
-    const ask = (id) => streamAgent({ conversation_id: id, message: text }, controller.signal, onEvent);
+    const turnId = newTurnId();
+    const ask = (id) => streamAgent({ conversation_id: id, message: text, client_turn_id: turnId }, controller.signal, onEvent);
     try {
       let data;
       try {
@@ -601,10 +623,17 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
       setStepNote('');
       setDoneNote(plainText(data.message && data.message.content, names).replace(/\t/g, ' '));
     } catch (e) {
+      const stopped = controller.signal.aborted;
+      const kept = stopped ? await findStoppedTurn(turnId) : null;
+      setStepNote('');
+      if (kept) {
+        // Stopped too late: the server had already saved the turn, so show it instead of undoing it.
+        await loadConversation(kept.conversation_id);
+        return;
+      }
       setMessages((list) => list.filter((m) => m !== temp));
       setInput(text);
-      setStepNote('');
-      if (controller.signal.aborted) {
+      if (stopped) {
         // Stopped by the user: the text is back in the input, nothing else to say.
       } else if (e.code === 'AGENT_RATE_LIMITED') {
         toast(e.message, 'error');
@@ -615,6 +644,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
     } finally {
       abortRef.current = null;
       setBusy(false);
+      setSaving(false);
       setLive(null);
       setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
     }
@@ -723,7 +753,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
                   readOnly={busy}
                 />
                 {busy ? (
-                  <button type="button" className="btn secondary sm" onClick={stop}>중지</button>
+                  <button type="button" className="btn secondary sm" onClick={stop} disabled={saving} title={saving ? '답변을 저장하는 중이라 중지할 수 없습니다.' : undefined}>중지</button>
                 ) : (
                   <button type="submit" className="btn sm" disabled={!input.trim()}>보내기</button>
                 )}
