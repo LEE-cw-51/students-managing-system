@@ -1,16 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import Modal from '@/components/ui/Modal';
+import { useEffect, useRef, useState } from 'react';
+import Modal, { ModalCancel } from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import { EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
+import ScrollRow from '@/components/domain/exam/ScrollRow';
 import { api } from '@/lib/client-api';
 import { shortDate } from '@/lib/format';
-import { useConfirm } from '@/components/ui/ConfirmDialog';
+
+const UNDO_MS = 5000;
 
 function ReturnModal({ member, period, onClose, onDone }) {
   const { today } = useBoot();
@@ -71,35 +73,41 @@ function AddModal({ cls, period, onClose, onDone }) {
     }
   };
   return (
-    <Modal title={`${cls.class_name}에 학생 추가`} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
+    <Modal title={`${cls.class_name}에 학생 추가`} onClose={onClose} className="po-add-modal"
+      footer={(
+        <>
+          <div className="po-add-dates">
+            <Field label="시작일">{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={start} onChange={(e) => setStart(e.target.value)} />}</Field>
+            <Field label="마지막 수업일">{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={end} onChange={(e) => setEnd(e.target.value)} />}</Field>
+          </div>
+          {picked.length > 1 ? <p className="hint" style={{ margin: 0 }}>고른 학생 모두에게 같은 기간을 적용합니다.</p> : null}
+          {error ? <div className="error-box prewrap" role="alert">{error}</div> : null}
+          <div className="po-add-buttons">
+            <span className="save-state">{picked.length}명 선택됨</span>
+            <span className="cluster">
+              <ModalCancel />
+              <button type="submit" form="po-add-form" className="btn" disabled={saving}>{saving ? '추가 중…' : picked.length > 1 ? `${picked.length}명 추가` : '추가'}</button>
+            </span>
+          </div>
+        </>
+      )}>
+      <form id="po-add-form" className="stack" onSubmit={submit}>
         <Field label="학생 찾기">{(id) => <input id={id} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="이름 또는 학교" />}</Field>
-        <div className="split">
-          <label className="check-label"><SelectAllCheckbox sel={sel} label="검색 결과 전체 선택" /> 검색 결과 전체 선택</label>
-          <span className="muted" aria-live="polite">{picked.length}명 선택됨</span>
-        </div>
-        <div className="table-wrap" style={{ maxHeight: 240, overflow: 'auto' }}>
-          <table className="data-table">
+        <label className="check-label"><SelectAllCheckbox sel={sel} label="검색 결과 전체 선택" /> 검색 결과 전체 선택</label>
+        <div className="table-wrap">
+          <table className="data-table po-add-list">
             <tbody>
               {visible.length ? visible.map((s) => (
-                <tr key={s.id} className="clickable" onClick={() => sel.toggle(s.id)} aria-selected={sel.selected.has(s.id)}
-                  style={sel.selected.has(s.id) ? { background: 'var(--navy-soft)' } : undefined}>
+                <tr key={s.id} className="clickable" onClick={() => sel.toggle(s.id)} aria-selected={sel.selected.has(s.id)}>
                   <td className="check-col"><input type="checkbox" checked={sel.selected.has(s.id)} onChange={() => sel.toggle(s.id)} onClick={(e) => e.stopPropagation()} aria-label={`${s.name} 선택`} /></td>
-                  <td><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span></td>
-                  <td>{(s.classes || []).length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</td>
+                  <td>
+                    <strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span>
+                    <div>{(s.classes || []).length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</div>
+                  </td>
                 </tr>
               )) : <tr><td className="muted">{students.length ? '검색 결과가 없습니다.' : '추가할 수 있는 재원생이 없습니다.'}</td></tr>}
             </tbody>
           </table>
-        </div>
-        <div className="form-grid">
-          <Field label="시작일">{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={start} onChange={(e) => setStart(e.target.value)} />}</Field>
-          <Field label="마지막 수업일" hint={picked.length > 1 ? '고른 학생 모두에게 같은 기간을 적용합니다.' : undefined}>{(id) => <input id={id} type="date" min={period.start_date} max={period.end_date} value={end} onChange={(e) => setEnd(e.target.value)} />}</Field>
-        </div>
-        {error ? <div className="error-box prewrap" role="alert">{error}</div> : null}
-        <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
-          <button type="submit" className="btn" disabled={saving}>{saving ? '추가 중…' : picked.length > 1 ? `${picked.length}명 추가` : '추가'}</button>
         </div>
       </form>
     </Modal>
@@ -136,71 +144,131 @@ function SuspendModal({ detail, onClose, onDone }) {
 
 const STATE_TAG = { 예정: 'muted', '수업 중': 'ok', 복귀: '' };
 
-export default function PeriodOperation({ detail, onChanged }) {
-  const confirm = useConfirm();
+function StateTag({ m }) {
+  return <span className={'tag ' + (STATE_TAG[m.state] || '')}>{m.state === '복귀' ? '원래 반 복귀' : m.state}</span>;
+}
+
+/** Hides the member right away and removes the assignment once the undo window closes. */
+function useDelayedRemove(onRemoved) {
   const toast = useToast();
+  const [pending, setPending] = useState([]);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const remove = (m) => {
+    let undone = false;
+    const unhide = () => setPending((list) => list.filter((id) => id !== m.rel_id));
+    setPending((list) => (list.includes(m.rel_id) ? list : [...list, m.rel_id]));
+    toast(`${m.name} 학생을 ${UNDO_MS / 1000}초 뒤 이 반에서 뺍니다.`, 'ok', {
+      duration: UNDO_MS,
+      action: { label: '되돌리기', onClick: () => { undone = true; unhide(); } }
+    });
+    setTimeout(async () => {
+      if (undone) return;
+      try {
+        await api('removeTempAssignment', m.rel_id);
+        toast(`${m.name} 학생을 뺐습니다.`);
+        onRemoved();
+      } catch (err) {
+        if (mounted.current) unhide();
+        toast(`${m.name} 학생을 빼지 못해 다시 표시했습니다. ${err.message}`, 'error');
+      }
+    }, UNDO_MS);
+  };
+  return { pending, remove };
+}
+
+export default function PeriodOperation({ detail, onChanged }) {
   const [returning, setReturning] = useState(null);
   const [adding, setAdding] = useState(null);
   const [editSuspend, setEditSuspend] = useState(false);
+  const { pending, remove } = useDelayedRemove(onChanged);
   const period = detail.period;
   const done = () => { setReturning(null); setAdding(null); setEditSuspend(false); onChanged(); };
-
-  const remove = async (m) => {
-    if (!(await confirm({ message: `${m.name} 학생을 이 시험대비 반에서 뺄까요?`, confirmLabel: '빼기', danger: true }))) return;
-    try {
-      await api('removeTempAssignment', m.rel_id);
-      toast('뺐습니다.');
-      onChanged();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
+  const jump = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  const showJump = detail.classes.length + (detail.suspended.length ? 1 : 0) > 1;
 
   return (
-    <div className="stack">
+    <div className="stack period-op">
       {detail.unplaced_count ? (
-        <div className="notice-bar">휴강하는 반 학생 중 {detail.unplaced_count}명은 시험대비 반이 없어 기간 동안 수업이 없습니다. 아래 ‘휴강 반’에서 확인하세요.</div>
+        <div className="notice-bar po-unplaced">
+          <span>휴강하는 반 학생 중 {detail.unplaced_count}명은 시험대비 반이 없어 기간 동안 수업이 없습니다.</span>
+          <button type="button" className="link-btn" onClick={() => jump('po-suspended')}>휴강 반 보기 ↓</button>
+        </div>
       ) : null}
-      {detail.classes.map((c) => (
-        <section key={c.class_id} className="card">
-          <div className="card-head">
-            <div>
-              <h2 style={{ marginBottom: 2 }}><Link href={`/classes/${c.class_id}`}>{c.class_name}</Link>{c.status !== '운영' ? <span className="tag muted" style={{ marginLeft: 6 }}>{c.status}</span> : null}</h2>
-              <span className="muted">{c.schedule_label} · 수업 {c.lesson_days}회</span>
+      {showJump ? (
+        <ScrollRow className="po-jump" label="반 바로 가기">
+          {detail.classes.map((c) => (
+            <button key={c.class_id} type="button" className="btn secondary sm" onClick={() => jump(`po-class-${c.class_id}`)}>
+              {c.class_name} <span className="muted">{c.students.filter((m) => !pending.includes(m.rel_id)).length}</span>
+            </button>
+          ))}
+          {detail.suspended.length ? <button type="button" className="btn secondary sm" onClick={() => jump('po-suspended')}>휴강 반 <span className="muted">{detail.suspended.length}</span></button> : null}
+        </ScrollRow>
+      ) : null}
+      {detail.classes.map((c) => {
+        const members = c.students.filter((m) => !pending.includes(m.rel_id));
+        return (
+          <section key={c.class_id} id={`po-class-${c.class_id}`} className="card po-class">
+            <div className="card-head">
+              <div className="po-class-title">
+                <h2><Link href={`/classes/${c.class_id}`}>{c.class_name}</Link></h2>
+                {c.status !== '운영' ? <span className="tag muted">{c.status}</span> : null}
+                <span className="muted">{c.schedule_label} · 수업 {c.lesson_days}회</span>
+              </div>
+              <span className="cluster po-class-actions">
+                <Link className="btn secondary sm" href={`/today?class=${c.class_id}`}>수업 기록하기</Link>
+                <Link className="btn ghost sm" href={`/reports?tab=daily&class=${c.class_id}`}>일일 리포트</Link>
+                <button type="button" className="btn secondary sm" onClick={() => setAdding(c)}>학생 추가</button>
+              </span>
             </div>
-            <span className="cluster">
-              <Link className="btn secondary sm" href={`/today?class=${c.class_id}`}>수업 기록하기</Link>
-              <Link className="btn ghost sm" href={`/reports?tab=daily&class=${c.class_id}`}>일일 리포트</Link>
-              <button type="button" className="btn secondary sm" onClick={() => setAdding(c)}>학생 추가</button>
-            </span>
-          </div>
-          {c.students.length ? (
-            <div className="table-wrap">
-              <table className="data-table stack-mobile">
-                <thead><tr><th>학생</th><th>원래 반</th><th>기간</th><th>상태</th><th /></tr></thead>
-                <tbody>
-                  {c.students.map((m) => (
-                    <tr key={m.rel_id}>
-                      <td className="primary"><Link href={`/students/${m.student_id}`}>{m.name}</Link></td>
-                      <td data-label="원래 반">{m.source_class_name || '-'}</td>
-                      <td data-label="기간">{shortDate(m.start_date)} ~ {shortDate(m.end_date)}</td>
-                      <td data-label="상태"><span className={'tag ' + (STATE_TAG[m.state] || '')}>{m.state === '복귀' ? '원래 반 복귀' : m.state}</span></td>
-                      <td>
-                        <span className="cluster">
-                          <button type="button" className="btn secondary sm" onClick={() => setReturning(m)}>복귀일 변경</button>
-                          {!m.has_lessons ? <button type="button" className="btn ghost sm" onClick={() => remove(m)}>빼기</button> : null}
-                        </span>
-                      </td>
-                    </tr>
+            {members.length ? (
+              <>
+                <div className="table-wrap po-members">
+                  <table className="data-table">
+                    <thead><tr><th>학생</th><th>원래 반</th><th>기간</th><th>상태</th><th /></tr></thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.rel_id}>
+                          <td><Link href={`/students/${m.student_id}`}>{m.name}</Link></td>
+                          <td>{m.source_class_name || '-'}</td>
+                          <td>{shortDate(m.start_date)} ~ {shortDate(m.end_date)}</td>
+                          <td><StateTag m={m} /></td>
+                          <td className="num">
+                            <span className="cluster po-member-actions">
+                              <button type="button" className="btn secondary sm" onClick={() => setReturning(m)}>복귀일 변경</button>
+                              {!m.has_lessons ? <button type="button" className="btn ghost sm danger-text" onClick={() => remove(m)}>빼기</button> : null}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ul className="po-cards">
+                  {members.map((m) => (
+                    <li key={m.rel_id} className="po-card">
+                      <div className="po-card-head"><Link className="po-card-name" href={`/students/${m.student_id}`}>{m.name}</Link><StateTag m={m} /></div>
+                      <span className="muted">원래 반 {m.source_class_name || '-'} · {shortDate(m.start_date)} ~ {shortDate(m.end_date)}</span>
+                      <div className="po-card-actions">
+                        <button type="button" className="btn secondary sm" onClick={() => setReturning(m)}>복귀일 변경</button>
+                        {!m.has_lessons ? <button type="button" className="btn ghost sm danger-text" onClick={() => remove(m)}>빼기</button> : null}
+                      </div>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          ) : <EmptyState>학생이 없습니다.</EmptyState>}
-        </section>
-      ))}
-      <section className="card">
-        <div className="card-head"><h2>휴강 반</h2><button type="button" className="btn secondary sm" onClick={() => setEditSuspend(true)}>휴강 반 변경</button></div>
+                </ul>
+              </>
+            ) : <EmptyState>학생이 없습니다.</EmptyState>}
+          </section>
+        );
+      })}
+      <section id="po-suspended" className="card po-class">
+        <div className="card-head"><h2>휴강 반 {detail.suspended.length}</h2><button type="button" className="btn secondary sm" onClick={() => setEditSuspend(true)}>휴강 반 변경</button></div>
         {detail.suspended.length ? (
           <div className="table-wrap">
             <table className="data-table stack-mobile">

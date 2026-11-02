@@ -76,14 +76,23 @@
       "created_at": "2026-11-02T02:44:15+00:00",
       "lint": "pass",
       "sha256": "0db5269638ea524163652b024d1a9cb3a7144f1ff2dc9978a9fea07efc9e4d6f"
+    },
+    {
+      "v": 9,
+      "file": "wireframes/v9.html",
+      "from": 8,
+      "note": "exams screen",
+      "created_at": "2026-11-02T02:56:47+00:00",
+      "lint": "pass",
+      "sha256": "cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c"
     }
   ],
   "lock": {
-    "version": 8,
-    "source": "wireframes/v8.html",
-    "sha256_source": "0db5269638ea524163652b024d1a9cb3a7144f1ff2dc9978a9fea07efc9e4d6f",
-    "sha256_lock": "57f03387038adc7eaefe0af12ba1ca287aec91f10799ae5376df1540a1693012",
-    "approved_at": "2026-11-02T02:50:02+00:00",
+    "version": 9,
+    "source": "wireframes/v9.html",
+    "sha256_source": "cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c",
+    "sha256_lock": "d7cc3bbd15c84640f8d8b88111f9397ada4263e6fb69b69e9959fc1c2e276ff0",
+    "approved_at": "2026-11-02T02:59:37+00:00",
     "quote": "좋아요, 위 답대로 확정하고 구현",
     "evidence": "unverified"
   },
@@ -507,6 +516,46 @@
       "ts": "2026-11-02T02:50:02+00:00",
       "event": "approve",
       "v": 8,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T02:56:47+00:00",
+      "event": "reopen",
+      "was": 8,
+      "reason": "시험 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T02:56:47+00:00",
+      "event": "new",
+      "v": 9,
+      "from": 8,
+      "note": "exams screen"
+    },
+    {
+      "ts": "2026-11-02T02:57:54+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 8
+    },
+    {
+      "ts": "2026-11-02T02:58:06+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 6
+    },
+    {
+      "ts": "2026-11-02T02:58:20+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:59:37+00:00",
+      "event": "approve",
+      "v": 9,
       "evidence": "unverified"
     }
   ]

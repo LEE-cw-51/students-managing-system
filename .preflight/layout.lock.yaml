@@ -3,11 +3,11 @@
 preflight_lock: layout
 version: 1
 status: approved
-source: {file: wireframes/v8.html, sha256: "0db5269638ea524163652b024d1a9cb3a7144f1ff2dc9978a9fea07efc9e4d6f"}
-extracted_at: "2026-11-02T02:50:02+00:00"
+source: {file: wireframes/v9.html, sha256: cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c}
+extracted_at: "2026-11-02T02:59:37+00:00"
 platform: responsive
 breakpoints: {mobile: 375, desktop: 1280}
-approved: {version: 8, at: "2026-11-02T02:50:02+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
+approved: {version: 9, at: "2026-11-02T02:59:37+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
 screens:
   shell-expanded:
     mobile:
@@ -1214,3 +1214,322 @@ screens:
           arrange: single
           sticky: bottom
       hidden: [menu-toggle]
+  exam-schedule:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, exam-tabs, ex-filters, ex-missing, ex-cards, ex-no-school]
+          arrange: column
+        ex-filters:
+          children: [ex-pick]
+          arrange: single
+        ex-missing:
+          children: [ex-missing-chips]
+          arrange: single
+        ex-cards:
+          children: [ex-card]
+          arrange: single
+      hidden: [brand, ex-head, ex-roster, ex-row, ex-row-2, ex-row-3, ex-table, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, exam-tabs, ex-filters, ex-missing, ex-table, ex-no-school]
+          arrange: column
+        ex-filters:
+          children: [ex-pick]
+          arrange: single
+        ex-missing:
+          children: [ex-missing-chips]
+          arrange: single
+        ex-table:
+          children: [ex-head, ex-row, ex-row-2, ex-row-3, ex-roster]
+          arrange: column
+      hidden: [ex-card, ex-cards, menu-toggle]
+  exam-schedule-bulk:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [eb-dialog]
+          arrange: single
+        eb-dialog:
+          children: [eb-title, eb-cards, eb-actions]
+          arrange: grid
+          columns: 2
+          rows: 2
+        eb-title: {sticky: top}
+        eb-cards:
+          children: [eb-card]
+          arrange: single
+        eb-actions: {sticky: bottom}
+      hidden: [brand, eb-head, eb-row, eb-row-2, eb-row-3, eb-table, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [eb-dialog]
+          arrange: single
+        eb-dialog:
+          children: [eb-title, eb-table, eb-actions]
+          arrange: column
+        eb-title: {sticky: top}
+        eb-table:
+          children: [eb-head, eb-row, eb-row-2, eb-row-3]
+          arrange: column
+        eb-actions: {sticky: bottom}
+      hidden: [eb-card, eb-cards, menu-toggle]
+  exam-periods:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, exam-tabs, ep-intro, ep-cards]
+          arrange: column
+        ep-cards:
+          children: [ep-card]
+          arrange: single
+      hidden: [brand, ep-table, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, exam-tabs, ep-intro, ep-table]
+          arrange: column
+      hidden: [ep-card, ep-cards, menu-toggle]
+  exam-planner:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, pl-steps, pl-classes, pl-save, pl-pool, pl-suspend]
+          arrange: grid
+          columns: 2
+          rows: 5
+        page-header:
+          children: [pl-actions]
+          arrange: single
+        pl-steps: {sticky: top}
+        pl-classes:
+          children: [pl-class-grid]
+          arrange: single
+        pl-class-grid:
+          children: [pl-class-card, pl-class-card-2, pl-class-card-new]
+          arrange: column
+        pl-class-card:
+          children: [pl-class-fields, pl-class-students]
+          arrange: column
+        pl-pool:
+          children: [pl-pick-bar, pl-pool-cards]
+          arrange: column
+        pl-pick-bar:
+          children: [pl-filter]
+          arrange: single
+          sticky: top
+        pl-suspend:
+          children: [pl-suspend-chips]
+          arrange: single
+        pl-save: {sticky: bottom}
+      hidden: [brand, nav, pl-pool-group, pl-pool-group-2, pl-pool-list, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, pl-steps, pl-classes, pl-save, pl-pool, pl-suspend]
+          arrange: grid
+          columns: 2
+          rows: 5
+        page-header:
+          children: [pl-actions]
+          arrange: single
+        pl-steps: {sticky: top}
+        pl-classes:
+          children: [pl-class-grid]
+          arrange: single
+        pl-class-grid:
+          children: [pl-class-card, pl-class-card-2, pl-class-card-new]
+          arrange: grid
+          columns: 2
+          rows: 2
+        pl-class-card:
+          children: [pl-class-fields, pl-class-students]
+          arrange: column
+        pl-pool:
+          children: [pl-pick-bar, pl-pool-list]
+          arrange: column
+        pl-pick-bar:
+          children: [pl-filter]
+          arrange: single
+          sticky: top
+        pl-pool-list:
+          children: [pl-pool-group, pl-pool-group-2]
+          arrange: column
+        pl-suspend:
+          children: [pl-suspend-chips]
+          arrange: single
+        pl-save: {sticky: bottom}
+      hidden: [menu-toggle, pl-pool-cards]
+  exam-period-op:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, po-unplaced, po-jump, po-class, po-suspended]
+          arrange: column
+        page-header:
+          children: [po-actions]
+          arrange: single
+        po-class:
+          children: [po-cards]
+          arrange: single
+        po-cards:
+          children: [po-card]
+          arrange: single
+      hidden: [brand, nav, po-member, po-member-2, po-member-3, po-members, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, po-unplaced, po-jump, po-class, po-suspended]
+          arrange: column
+        page-header:
+          children: [po-actions]
+          arrange: single
+        po-class:
+          children: [po-members]
+          arrange: single
+        po-members:
+          children: [po-member, po-member-2, po-member-3]
+          arrange: column
+      hidden: [menu-toggle, po-card, po-cards]
