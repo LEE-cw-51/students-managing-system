@@ -3,11 +3,11 @@
 preflight_lock: layout
 version: 1
 status: approved
-source: {file: wireframes/v7.html, sha256: db3ad892caf3d2eea8e422deeb1c8f9212eddbbba5541561101940b98b735a0a}
-extracted_at: "2026-11-02T02:37:23+00:00"
+source: {file: wireframes/v8.html, sha256: "0db5269638ea524163652b024d1a9cb3a7144f1ff2dc9978a9fea07efc9e4d6f"}
+extracted_at: "2026-11-02T02:50:02+00:00"
 platform: responsive
 breakpoints: {mobile: 375, desktop: 1280}
-approved: {version: 7, at: "2026-11-02T02:37:23+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
+approved: {version: 8, at: "2026-11-02T02:50:02+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
 screens:
   shell-expanded:
     mobile:
@@ -1027,4 +1027,190 @@ screens:
           children: [field-textbook, field-textbook-start]
           arrange: row
           widths: [0.64, 0.36]
+      hidden: [menu-toggle]
+  report-daily:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, report-tabs, rd-filters, rd-missing, report-cards]
+          arrange: column
+        page-header:
+          children: [rd-copy-all]
+          arrange: single
+        rd-filters:
+          children: [rd-pick, rd-class-chips]
+          arrange: column
+        report-cards:
+          children: [report-card, report-card-2, report-card-3, report-card-4]
+          arrange: column
+      hidden: [brand, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, report-tabs, rd-filters, rd-missing, report-cards]
+          arrange: column
+        page-header:
+          children: [rd-copy-all]
+          arrange: single
+        rd-filters:
+          children: [rd-pick, rd-class-chips]
+          arrange: row
+          widths: [0.47, 0.53]
+        report-cards:
+          children: [report-card, report-card-2, report-card-3, report-card-4]
+          arrange: grid
+          columns: 2
+          rows: 2
+      hidden: [menu-toggle]
+  report-monthly:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, report-tabs, rm-filters, rm-bulk, rm-rows]
+          arrange: column
+        rm-filters:
+          children: [rm-pick, rm-status]
+          arrange: column
+        rm-bulk:
+          children: [rm-progress]
+          arrange: single
+          sticky: top
+        rm-rows:
+          children: [rm-row]
+          arrange: single
+      hidden: [brand, nav, rm-table, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, report-tabs, rm-filters, rm-bulk, rm-table]
+          arrange: column
+        rm-filters:
+          children: [rm-pick, rm-status]
+          arrange: row
+          widths: [0.49, 0.51]
+        rm-bulk:
+          children: [rm-progress]
+          arrange: single
+          sticky: top
+      hidden: [menu-toggle, rm-row, rm-rows]
+  report-monthly-editor:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [rm-editor]
+          arrange: single
+        rm-editor:
+          children: [rm-editor-head, rm-regen, rm-editor-actions, rm-text]
+          arrange: grid
+          columns: 2
+          rows: 3
+        rm-editor-head:
+          children: [rm-editor-title]
+          arrange: single
+          sticky: top
+        rm-editor-actions:
+          children: [rm-editor-buttons]
+          arrange: single
+          sticky: bottom
+      hidden: [brand, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [rm-editor]
+          arrange: single
+        rm-editor:
+          children: [rm-editor-head, rm-regen, rm-text, rm-editor-actions]
+          arrange: column
+        rm-editor-head:
+          children: [rm-editor-title]
+          arrange: single
+          sticky: top
+        rm-editor-actions:
+          children: [rm-editor-buttons]
+          arrange: single
+          sticky: bottom
       hidden: [menu-toggle]

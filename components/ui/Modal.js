@@ -15,8 +15,11 @@ export function ModalCancel({ children = '취소', className = 'btn secondary' }
   return <button type="button" className={className} onClick={requestClose}>{children}</button>;
 }
 
-/** `dirty` asks before Escape, backdrop click, ✕ or <ModalCancel> throws away unsaved input. */
-export default function Modal({ title, onClose, children, footer, wide, dirty, className = '' }) {
+/**
+ * `dirty` asks before Escape, backdrop click, ✕ or <ModalCancel> throws away unsaved input.
+ * `titleMeta` sits beside the title, `headActions` before ✕.
+ */
+export default function Modal({ title, titleMeta, headActions, onClose, children, footer, wide, dirty, className = '' }) {
   const ref = useRef(null);
   const confirm = useConfirm();
   // Callers pass inline handlers; keep the latest in refs so the mount effect runs once.
@@ -70,8 +73,13 @@ export default function Modal({ title, onClose, children, footer, wide, dirty, c
         <div className={'modal ' + className} role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}
           style={wide ? { width: 'min(880px, 100%)' } : undefined}>
           <div className="modal-head">
-            <h2>{title}</h2>
-            <button type="button" className="btn ghost modal-close" onClick={requestClose} aria-label="닫기">✕</button>
+            {titleMeta ? <div className="modal-title"><h2>{title}</h2>{titleMeta}</div> : <h2>{title}</h2>}
+            {headActions ? (
+              <div className="modal-head-actions">
+                {headActions}
+                <button type="button" className="btn ghost modal-close" onClick={requestClose} aria-label="닫기">✕</button>
+              </div>
+            ) : <button type="button" className="btn ghost modal-close" onClick={requestClose} aria-label="닫기">✕</button>}
           </div>
           <div className="modal-body">{children}</div>
           {footer ? <div className="modal-foot">{footer}</div> : null}

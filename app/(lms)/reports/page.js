@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import DailyReports from '@/components/domain/report/DailyReports';
@@ -26,13 +26,27 @@ function ReportsView() {
   };
   const date = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : boot.today;
   const month = /^\d{4}-\d{2}$/.test(params.get('month') || '') ? params.get('month') : boot.today.slice(0, 7);
-  const classId = params.get('class') || '';
-  return (
+  // Old links used ?tab=monthly&class=X; the monthly class now lives in `mclass`.
+  const [legacyClass, setLegacyClass] = useState(() => (tab === 'monthly' && !params.has('mclass') ? params.get('class') || '' : ''));
+  useEffect(() => {
+    if (legacyClass) set({ mclass: legacyClass, class: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (params.has('mclass')) setLegacyClass('');
+  }, [params]);
+  const head = (sub, actions) => (
     <>
-      <PageHeader title="보고서" sub={tab === 'daily' ? '반·날짜별 학생 일일 보고서를 확인하고 학부모님께 보낼 문구를 복사합니다.' : '반·월별 월간 보고서 상태를 보고, 한 번에 만들고, 확정·PDF 저장합니다.'} />
+      <PageHeader title="보고서" sub={sub} actions={actions} />
       <Tabs tabs={TABS} current={tab} />
-      {tab === 'daily' ? <DailyReports date={date} classId={classId} onChange={set} /> : <MonthlyBoard ym={month} classId={classId} onChange={set} />}
     </>
+  );
+  return (
+    <div className="reports-page">
+      {tab === 'daily'
+        ? <DailyReports date={date} classId={params.get('class') || ''} onChange={set} head={head} />
+        : <MonthlyBoard ym={month} classId={legacyClass || params.get('mclass') || ''} onChange={set} head={head} />}
+    </div>
   );
 }
 

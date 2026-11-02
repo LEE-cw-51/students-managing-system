@@ -7,8 +7,13 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/client-api';
 import { downloadMonthlyPdf, generateMonthlyAi } from '@/lib/report-client';
 
-/** Edit one student's monthly report: regenerate (basic / AI), save draft, confirm, copy, PDF. */
-export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
+export const STATUS_TAG = { 미작성: 'warn', 임시: 'amber', 확정: 'ok' };
+
+/**
+ * Edit one student's monthly report: regenerate (basic / AI), save draft, confirm, copy, PDF.
+ * `prev` / `next` are the neighbouring rows in the board's current order.
+ */
+export default function MonthlyEditor({ row, year, month, prev, next, onNavigate, onClose, onSaved }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [text, setText] = useState('');
@@ -18,10 +23,21 @@ export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let live = true;
+    setText('');
+    setSaved('');
+    setError('');
+    setStatus(row.status);
     api('generateMonthlyReport', row.student_id, year, month)
-      .then((d) => { setText(d.text); setSaved(d.existing ? d.text : ''); })
-      .catch((e) => setError(e.message));
-  }, [row.student_id, year, month]);
+      .then((d) => {
+        if (!live) return;
+        setText(d.text);
+        setSaved(d.existing ? d.text : '');
+        setStatus(d.existing ? String(d.existing.status || '임시') : '미작성');
+      })
+      .catch((e) => live && setError(e.message));
+    return () => { live = false; };
+  }, [row.student_id, row.status, year, month]);
 
   const run = async (label, fn) => {
     setBusy(label);
@@ -54,23 +70,35 @@ export default function MonthlyEditor({ row, year, month, onClose, onSaved }) {
   const pdf = () => run('pdf', () => downloadMonthlyPdf(row.student_id, year, month, text, row.name));
   const copy = () => navigator.clipboard.writeText(text).then(() => toast('복사했습니다.'), () => toast('복사하지 못했습니다.', 'error'));
   const dirty = text !== saved;
+  const go = async (target) => {
+    if (dirty && !(await confirm({ message: '저장하지 않은 내용이 있습니다. 다른 학생으로 넘어갈까요?', confirmLabel: '넘어가기', danger: true }))) return;
+    onNavigate(target);
+  };
 
   return (
-    <Modal title={`${row.name} ${month}월 보고서`} onClose={onClose} dirty={dirty} wide
+    <Modal title={`${row.name} ${month}월 보고서`} onClose={onClose} dirty={dirty} className="rp-editor"
+      titleMeta={<span className="rp-editor-meta"><span className={'tag ' + (STATUS_TAG[status] || 'muted')}>{status}</span><span className="muted">수업 {row.lesson_count}회</span></span>}
+      headActions={(
+        <span className="rp-editor-nav">
+          <button type="button" className="btn ghost sm" onClick={() => go(prev)} disabled={!prev || !!busy} aria-label={prev ? `이전 학생 ${prev.name}` : '이전 학생 없음'}>‹ 이전</button>
+          <button type="button" className="btn ghost sm" onClick={() => go(next)} disabled={!next || !!busy} aria-label={next ? `다음 학생 ${next.name}` : '다음 학생 없음'}>다음 ›</button>
+        </span>
+      )}
       footer={(
         <>
-          <span className={'save-state ' + (dirty ? 'dirty' : '')} style={{ marginRight: 'auto' }}>{dirty ? '● 저장 안 됨' : `상태: ${status}`}</span>
-          <button type="button" className="btn secondary" onClick={copy} disabled={!text}>복사</button>
-          <button type="button" className="btn secondary" onClick={pdf} disabled={!text || !!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 저장'}</button>
-          <button type="button" className="btn secondary" onClick={() => save('임시')} disabled={!text || !!busy}>임시 저장</button>
-          <button type="button" className="btn ok" onClick={() => save('확정')} disabled={!text || !!busy}>확정</button>
+          <span className={'save-state ' + (dirty ? 'dirty' : '')}>{dirty ? '● 저장 안 됨' : `상태: ${status}`}</span>
+          <span className="rp-editor-buttons">
+            <button type="button" className="btn secondary" onClick={copy} disabled={!text}>복사</button>
+            <button type="button" className="btn secondary" onClick={pdf} disabled={!text || !!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 저장'}</button>
+            <button type="button" className="btn secondary" onClick={() => save('임시')} disabled={!text || !!busy}>임시 저장</button>
+            <button type="button" className="btn ok" onClick={() => save('확정')} disabled={!text || !!busy}>확정</button>
+          </span>
         </>
       )}>
       <div className="stack">
         <div className="cluster">
           <button type="button" className="btn secondary sm" onClick={regenerate} disabled={!!busy}>{busy === 'basic' ? '만드는 중…' : '기본 보고서로 다시 만들기'}</button>
           <button type="button" className="btn secondary sm" onClick={regenerateAi} disabled={!!busy}>{busy === 'ai' ? 'AI 분석 중… (최대 1분)' : 'AI 분석 포함으로 다시 만들기'}</button>
-          <span className="muted">수업 {row.lesson_count}회 기준</span>
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={18} aria-label="보고서 내용" className="report-editor" />
