@@ -58,14 +58,23 @@
       "created_at": "2026-11-02T01:59:23+00:00",
       "lint": "pass",
       "sha256": "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426"
+    },
+    {
+      "v": 7,
+      "file": "wireframes/v7.html",
+      "from": 6,
+      "note": "class list and form",
+      "created_at": "2026-11-02T02:20:28+00:00",
+      "lint": "pass",
+      "sha256": "db3ad892caf3d2eea8e422deeb1c8f9212eddbbba5541561101940b98b735a0a"
     }
   ],
   "lock": {
-    "version": 6,
-    "source": "wireframes/v6.html",
-    "sha256_source": "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426",
-    "sha256_lock": "0612ea54241103c25c0d6ef0451c40219fc6a521cf56a2b2f21acffa42e72d9c",
-    "approved_at": "2026-11-02T02:08:54+00:00",
+    "version": 7,
+    "source": "wireframes/v7.html",
+    "sha256_source": "db3ad892caf3d2eea8e422deeb1c8f9212eddbbba5541561101940b98b735a0a",
+    "sha256_lock": "cd62beb1b672cf6a4f19386c92377e85649c423dffa62dbaffd79a7b8a0ee952",
+    "approved_at": "2026-11-02T02:37:23+00:00",
     "quote": "좋아요, 위 답대로 확정하고 구현",
     "evidence": "unverified"
   },
@@ -340,6 +349,78 @@
       "ts": "2026-11-02T02:08:54+00:00",
       "event": "approve",
       "v": 6,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T02:20:28+00:00",
+      "event": "reopen",
+      "was": 6,
+      "reason": "반 목록·등록 폼 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T02:20:28+00:00",
+      "event": "new",
+      "v": 7,
+      "from": 6,
+      "note": "class list and form"
+    },
+    {
+      "ts": "2026-11-02T02:21:28+00:00",
+      "event": "check",
+      "v": 7,
+      "lint_errors": 4,
+      "rules": [
+        "lock/unnamed-group"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:21:34+00:00",
+      "event": "check",
+      "v": 7,
+      "lint_errors": 4,
+      "rules": [
+        "lock/unnamed-group"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:21:48+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-02T02:21:59+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-02T02:22:09+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:22:30+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:22:45+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:37:23+00:00",
+      "event": "approve",
+      "v": 7,
       "evidence": "unverified"
     }
   ]

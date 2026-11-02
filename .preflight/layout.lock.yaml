@@ -3,11 +3,11 @@
 preflight_lock: layout
 version: 1
 status: approved
-source: {file: wireframes/v6.html, sha256: "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426"}
-extracted_at: "2026-11-02T02:08:54+00:00"
+source: {file: wireframes/v7.html, sha256: db3ad892caf3d2eea8e422deeb1c8f9212eddbbba5541561101940b98b735a0a}
+extracted_at: "2026-11-02T02:37:23+00:00"
 platform: responsive
 breakpoints: {mobile: 375, desktop: 1280}
-approved: {version: 6, at: "2026-11-02T02:08:54+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
+approved: {version: 7, at: "2026-11-02T02:37:23+00:00", quote: "좋아요, 위 답대로 확정하고 구현", evidence: unverified}
 screens:
   shell-expanded:
     mobile:
@@ -821,3 +821,210 @@ screens:
           arrange: row
           widths: [0.33, 0.33, 0.33]
       hidden: [menu-toggle, trend-months]
+  class-list:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [page-header, cl-filters, class-cards]
+          arrange: column
+        cl-filters:
+          children: [cl-filter-group, cl-exam-link]
+          arrange: column
+        cl-filter-group:
+          children: [cl-status, cl-exam-only]
+          arrange: column
+        class-cards:
+          children: [class-card]
+          arrange: single
+      hidden: [brand, class-table, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [page-header, cl-filters, class-table]
+          arrange: column
+        cl-filters:
+          children: [cl-filter-group, cl-exam-link]
+          arrange: row
+          widths: [0.68, 0.32]
+        cl-filter-group:
+          children: [cl-status, cl-exam-only]
+          arrange: row
+          widths: [0.63, 0.38]
+      hidden: [class-card, class-cards, menu-toggle]
+  class-form:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [class-dialog]
+          arrange: single
+        class-dialog:
+          children: [dialog-head, form-basic, form-textbook, form-more, form-actions]
+          arrange: column
+        dialog-head: {sticky: top}
+        form-basic:
+          children: [field-row, field-schedule]
+          arrange: column
+        field-row:
+          children: [field-name, field-grade]
+          arrange: column
+        field-schedule:
+          children: [weekdays, schedule-rows]
+          arrange: column
+      hidden: [brand, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [class-dialog]
+          arrange: single
+        class-dialog:
+          children: [dialog-head, form-basic, form-textbook, form-more, form-actions]
+          arrange: column
+        dialog-head: {sticky: top}
+        form-basic:
+          children: [field-row, field-schedule]
+          arrange: column
+        field-row:
+          children: [field-name, field-grade]
+          arrange: row
+          widths: [0.73, 0.27]
+        field-schedule:
+          children: [weekdays, schedule-rows]
+          arrange: column
+      hidden: [menu-toggle]
+  class-form-edit:
+    mobile:
+      order: [app]
+      regions:
+        app:
+          children: [main]
+          arrange: single
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [menu-toggle, search, agent-toggle]
+          arrange: row
+          widths: [0.22, 0.22, 0.56]
+          sticky: top
+        content:
+          children: [class-dialog]
+          arrange: single
+        class-dialog:
+          children: [dialog-head, form-basic, form-textbook, form-more, form-actions-edit]
+          arrange: column
+        dialog-head: {sticky: top}
+        form-basic:
+          children: [field-row, field-schedule]
+          arrange: column
+        field-row:
+          children: [field-name, field-grade, field-status]
+          arrange: column
+        field-schedule:
+          children: [weekdays, schedule-rows]
+          arrange: column
+        form-textbook:
+          children: [textbook-row, textbook-history, unit-rows]
+          arrange: column
+        textbook-row:
+          children: [field-textbook, field-textbook-start]
+          arrange: column
+      hidden: [brand, nav, sidebar, sidebar-foot]
+    desktop:
+      order: [app]
+      regions:
+        app:
+          children: [sidebar, main]
+          arrange: row
+          widths: [0.16, 0.84]
+        sidebar:
+          children: [brand, nav, sidebar-foot]
+          arrange: column
+        main:
+          children: [topbar, content]
+          arrange: column
+        topbar:
+          children: [search, agent-toggle]
+          arrange: row
+          widths: [0.85, 0.15]
+          sticky: top
+        content:
+          children: [class-dialog]
+          arrange: single
+        class-dialog:
+          children: [dialog-head, form-basic, form-textbook, form-more, form-actions-edit]
+          arrange: column
+        dialog-head: {sticky: top}
+        form-basic:
+          children: [field-row, field-schedule]
+          arrange: column
+        field-row:
+          children: [field-name, field-grade, field-status]
+          arrange: row
+          widths: [0.44, 0.28, 0.28]
+        field-schedule:
+          children: [weekdays, schedule-rows]
+          arrange: column
+        form-textbook:
+          children: [textbook-row, textbook-history, unit-rows]
+          arrange: column
+        textbook-row:
+          children: [field-textbook, field-textbook-start]
+          arrange: row
+          widths: [0.64, 0.36]
+      hidden: [menu-toggle]

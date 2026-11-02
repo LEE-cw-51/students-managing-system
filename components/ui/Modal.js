@@ -16,7 +16,7 @@ export function ModalCancel({ children = '취소', className = 'btn secondary' }
 }
 
 /** `dirty` asks before Escape, backdrop click, ✕ or <ModalCancel> throws away unsaved input. */
-export default function Modal({ title, onClose, children, footer, wide, dirty }) {
+export default function Modal({ title, onClose, children, footer, wide, dirty, className = '' }) {
   const ref = useRef(null);
   const confirm = useConfirm();
   // Callers pass inline handlers; keep the latest in refs so the mount effect runs once.
@@ -67,7 +67,7 @@ export default function Modal({ title, onClose, children, footer, wide, dirty })
   return (
     <CloseContext.Provider value={requestClose}>
       <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
-        <div className="modal" role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}
+        <div className={'modal ' + className} role="dialog" aria-modal="true" aria-label={title} ref={ref} tabIndex={-1}
           style={wide ? { width: 'min(880px, 100%)' } : undefined}>
           <div className="modal-head">
             <h2>{title}</h2>

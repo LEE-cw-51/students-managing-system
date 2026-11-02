@@ -840,6 +840,85 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
   .cl-card-actions .btn.sm { min-height: 42px; min-width: 64px; }
 }
 
+/* ---------- Class list ---------- */
+.cls-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.cls-count { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.cls-exam-link { margin-left: auto; font-size: 13px; color: var(--navy); text-decoration: none; font-weight: 600; }
+.cls-exam-link:hover { text-decoration: underline; }
+.cls-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cls-name a { margin-right: 2px; }
+.cls-table tbody tr:hover { background: #fbf8f2; }
+.cls-cards { display: none; list-style: none; margin: 0; padding: 0; gap: 8px; }
+.cls-card { display: grid; gap: 4px; padding: 6px 12px 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; font-size: 14px; }
+.cls-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cls-card-name { display: inline-flex; align-items: center; gap: 4px; min-height: 42px; margin-right: 2px; font-weight: 700; font-size: 16px; color: var(--navy); text-decoration: none; }
+.cls-card-next { margin-left: auto; font-size: 13px; }
+.cls-card-line { line-height: 1.5; }
+.cls-count-line { white-space: nowrap; }
+@media (max-width: 640px) {
+  .classes-page .page-header .page-actions .btn { min-height: 42px; }
+  .cls-filters > .segmented { flex: 1 1 100%; }
+  .cls-filters > .segmented button { flex: 1; min-height: 42px; }
+  .cls-filters .btn.sm { min-height: 42px; }
+  .cls-exam-link { display: inline-flex; align-items: center; min-height: 42px; }
+  .cls-table { display: none; }
+  .cls-cards { display: grid; }
+}
+
+/* ---------- Class form ---------- */
+.modal.cf-modal { display: flex; flex-direction: column; overflow: hidden; }
+.cf-modal .modal-head { flex: none; }
+.cf-modal .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-top: 14px; padding-bottom: 6px; }
+.cf-modal .modal-foot { flex: none; padding: 12px 20px; border-top: 1px solid var(--line); }
+.cf-form { display: grid; }
+.cf-basic { display: grid; gap: 14px; padding-bottom: 16px; }
+.cf-row { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) 160px; align-items: start; }
+.cf-row.has-status { grid-template-columns: minmax(0, 1fr) 140px auto; }
+.cf-row.cf-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.cf-row .field { min-width: 0; }
+.cf-row > .cf-name:only-child { grid-column: 1 / -1; }
+.cf-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.cf-status button { min-height: 42px; padding: 8px 16px; }
+.cf-closing { margin: -6px 0 0; font-size: 12px; color: var(--amber); }
+.schedule-row .schedule-copy { font-weight: 500; }
+.cf-section { border-top: 1px solid var(--line); }
+.cf-section-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; width: 100%; min-height: 48px;
+  padding: 10px 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer;
+}
+.cf-section-head:hover .cf-section-title { color: var(--navy); }
+.cf-section-title { flex: none; font-weight: 700; }
+.cf-section-title small { font-size: 12px; font-weight: 500; color: var(--muted); }
+.cf-caret { display: inline-block; width: 1.1em; color: var(--muted); }
+.cf-section-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
+.cf-section-body { padding: 2px 0 16px; }
+.cf-history { font-size: 14px; }
+.cf-history summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 600; min-height: 32px; display: flex; align-items: center; gap: 4px; list-style: none; }
+.cf-history summary::-webkit-details-marker { display: none; }
+.cf-history summary::before { content: '▸'; display: inline-block; width: 1.1em; }
+.cf-history[open] summary::before { content: '▾'; }
+.cf-history ul { margin: 4px 0 0; padding-left: 20px; }
+.cf-form > .error-box { margin-bottom: 12px; }
+@media (max-width: 640px) {
+  .modal-backdrop:has(> .cf-modal) { padding: 0; }
+  .modal.cf-modal { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .cf-modal .modal-head { padding: 8px 8px 8px 16px; }
+  .cf-modal .modal-close { min-width: 42px; min-height: 42px; }
+  .cf-modal .modal-body { padding: 12px 16px 6px; }
+  .cf-modal .modal-foot { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .cf-modal .modal-foot .btn { min-height: 44px; }
+  .cf-row, .cf-row.has-status { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cf-row.cf-row-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cf-row .cf-name { grid-column: 1 / -1; }
+  .cf-row-3 .field:last-child { grid-column: 1 / -1; }
+  .cf-status { display: flex; }
+  .cf-status button { flex: 1; }
+  .cf-section-head { flex-wrap: wrap; }
+  .cf-section-summary { flex-basis: 100%; padding-left: 1.1em; }
+  .app .cf-modal .btn.sm { min-height: 42px; }
+  .curriculum-rows li .btn.sm { min-height: 42px; min-width: 42px; }
+}
+
 /* ---------- AI assistant panel ---------- */
 .agent-toggle {
   display: inline-flex; align-items: center; gap: 6px; flex: none;

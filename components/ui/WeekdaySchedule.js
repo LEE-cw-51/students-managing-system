@@ -3,9 +3,13 @@
 import TimeInput from './TimeInput';
 
 const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const WITH = { 월: '월과', 화: '화와', 수: '수와', 목: '목과', 금: '금과', 토: '토와', 일: '일과' };
 
-/** Per-weekday schedule editor: value = [{ day, start, end }]. */
-export default function WeekdaySchedule({ value, onChange }) {
+/**
+ * Per-weekday schedule editor: value = [{ day, start, end }].
+ * `copyPrevious` puts "월과 같게" on every row after the first instead of the apply-to-all link.
+ */
+export default function WeekdaySchedule({ value, onChange, copyPrevious }) {
   const list = value || [];
   const byDay = Object.fromEntries(list.map((s) => [s.day, s]));
   const emit = (next) => onChange(DAYS.map((d) => next[d]).filter(Boolean));
@@ -38,16 +42,24 @@ export default function WeekdaySchedule({ value, onChange }) {
       </div>
       {sorted.length ? (
         <div className="schedule-rows">
-          {sorted.map((s) => (
-            <div className="schedule-row" key={s.day}>
-              <span className="day">{s.day}</span>
-              <TimeInput value={s.start} label={`${s.day}요일 시작 시간`} onChange={(t) => setTime(s.day, 'start', t)} />
-              <span aria-hidden="true">~</span>
-              <TimeInput value={s.end} label={`${s.day}요일 종료 시간`} onChange={(t) => setTime(s.day, 'end', t)} />
-              {badEnd(s) ? <span className="error-text">종료가 시작보다 늦어야 합니다</span> : null}
-            </div>
-          ))}
-          {sorted.length > 1 ? (
+          {sorted.map((s, i) => {
+            const prev = sorted[i - 1];
+            return (
+              <div className="schedule-row" key={s.day}>
+                <span className="day">{s.day}</span>
+                <TimeInput value={s.start} label={`${s.day}요일 시작 시간`} onChange={(t) => setTime(s.day, 'start', t)} />
+                <span aria-hidden="true">~</span>
+                <TimeInput value={s.end} label={`${s.day}요일 종료 시간`} onChange={(t) => setTime(s.day, 'end', t)} />
+                {copyPrevious && prev ? (
+                  <button type="button" className="btn ghost sm schedule-copy" disabled={!prev.start && !prev.end}
+                    onClick={() => emit({ ...byDay, [s.day]: { ...s, start: prev.start, end: prev.end } })}
+                    aria-label={`${s.day}요일 시간을 ${prev.day}요일과 같게`}>{WITH[prev.day]} 같게</button>
+                ) : null}
+                {badEnd(s) ? <span className="error-text">종료가 시작보다 늦어야 합니다</span> : null}
+              </div>
+            );
+          })}
+          {sorted.length > 1 && !copyPrevious ? (
             <div><button type="button" className="link-btn" onClick={applyFirst}>첫 줄 시간을 전체에 적용</button></div>
           ) : null}
         </div>
