@@ -29,7 +29,7 @@ export function searchIndex(index, query) {
     scored.push({
       kind: 'student',
       key: 'S' + s.id,
-      href: `/students/${s.id}`,
+      href: `/students/${encodeURIComponent(s.id)}`,
       title: s.name,
       meta: [s.grade, s.school, s.classes.join(', '), s.status !== '재원' ? s.status : ''].filter(Boolean).join(' · '),
       score
@@ -45,7 +45,7 @@ export function searchIndex(index, query) {
     scored.push({
       kind: 'class',
       key: 'C' + c.id,
-      href: `/classes/${c.id}`,
+      href: `/classes/${encodeURIComponent(c.id)}`,
       title: c.name,
       meta: [c.class_type === '시험대비' ? '시험대비' : '', c.schedule_label, c.status !== '운영' ? c.status : ''].filter(Boolean).join(' · '),
       score

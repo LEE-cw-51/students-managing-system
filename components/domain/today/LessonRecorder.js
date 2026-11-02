@@ -119,9 +119,7 @@ function useUnsavedGuard(dirty, confirm) {
   const router = useRouter();
   useEffect(() => {
     if (!dirty) return undefined;
-    let leaving = false;
     const onBeforeUnload = (e) => {
-      if (leaving) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -131,6 +129,8 @@ function useUnsavedGuard(dirty, confirm) {
       const a = e.target.closest && e.target.closest('a[href]');
       const href = a ? a.getAttribute('href') || '' : '';
       if (!a || a.target === '_blank' || a.hasAttribute('download') || !href || href.startsWith('#') || href.startsWith('tel:') || href.startsWith('mailto:')) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
       e.preventDefault();
       e.stopPropagation();
       confirm({
@@ -139,14 +139,7 @@ function useUnsavedGuard(dirty, confirm) {
         confirmLabel: '저장하지 않고 떠나기',
         danger: true
       }).then((ok) => {
-        if (!ok) return;
-        const url = new URL(a.href, window.location.href);
-        if (url.origin === window.location.origin) {
-          router.push(url.pathname + url.search + url.hash);
-        } else {
-          leaving = true;
-          window.location.assign(url.href);
-        }
+        if (ok) router.push(url.pathname + url.search + url.hash);
       });
     };
     window.addEventListener('beforeunload', onBeforeUnload);
