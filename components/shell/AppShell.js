@@ -7,9 +7,22 @@ import { api } from '@/lib/client-api';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import GlobalSearch from './GlobalSearch';
-import AgentPanel from './AgentPanel';
+import AgentPanel, { AGENT_MODAL_QUERY, AGENT_WIDTH, clampAgentWidth } from './AgentPanel';
 
 const BootContext = createContext(null);
+const AGENT_OPEN_KEY = 'lms.agent.open';
+const AGENT_WIDTH_KEY = 'lms.agent.width';
+const NAV_COLLAPSED_KEY = 'lms.nav.collapsed';
+// Must match .app-sidebar widths in app.css.
+const SIDEBAR_WIDTH = 184;
+const SIDEBAR_RAIL_WIDTH = 56;
+
+function readPref(key) {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+function writePref(key, value) {
+  try { window.localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+}
 
 /** Settings, today and the search index loaded by the layout; refresh() re-reads them. */
 export function useBoot() {
@@ -29,19 +42,54 @@ function isActive(pathname, href) {
   return pathname === href || pathname.startsWith(href + '/');
 }
 
-function formatToday(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-').map(Number);
-  const day = '일월화수목금토'[new Date(y, m - 1, d).getDay()];
-  return `${y}년 ${m}월 ${d}일 (${day})`;
-}
-
 export default function AppShell({ boot: initialBoot, children }) {
   const pathname = usePathname();
   const [boot, setBoot] = useState(initialBoot);
   const [open, setOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const sidebarWidth = navCollapsed ? SIDEBAR_RAIL_WIDTH : SIDEBAR_WIDTH;
   const [agentOpen, setAgentOpen] = useState(false);
-  const closeAgent = useCallback(() => setAgentOpen(false), []);
+  const [agentWidth, setAgentWidth] = useState(AGENT_WIDTH);
+  const [agentResizing, setAgentResizing] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  // No push transition or slide-in until the user first opens or closes the panel, so a
+  // panel restored on load appears in place.
+  const [instant, setInstant] = useState(true);
+  const toggleAgent = useCallback(() => { setInstant(false); setAgentOpen((v) => !v); }, []);
+  const closeAgent = useCallback(() => { setInstant(false); setAgentOpen(false); }, []);
+  const resizeAgent = useCallback((w, phase) => {
+    const next = clampAgentWidth(w, sidebarWidth);
+    setAgentWidth(next);
+    setAgentResizing(phase === 'move');
+    if (phase === 'end') writePref(AGENT_WIDTH_KEY, String(next));
+  }, [sidebarWidth]);
+  const toggleNav = () => {
+    setNavCollapsed(!navCollapsed);
+    writePref(NAV_COLLAPSED_KEY, String(!navCollapsed));
+  };
+
+  // Restored after mount so the server render stays the same; reopening only where it pushes the page.
+  useEffect(() => {
+    const saved = Number(readPref(AGENT_WIDTH_KEY));
+    if (saved) setAgentWidth(saved);
+    if (readPref(AGENT_OPEN_KEY) === 'true' && !window.matchMedia(AGENT_MODAL_QUERY).matches) setAgentOpen(true);
+    if (readPref(NAV_COLLAPSED_KEY) === 'true') setNavCollapsed(true);
+    setPrefsLoaded(true);
+  }, []);
+
+  // Only the user's own open/close is saved, so a visit on a narrow screen keeps the preference.
+  useEffect(() => {
+    if (!instant) writePref(AGENT_OPEN_KEY, String(agentOpen));
+  }, [instant, agentOpen]);
+
+  // A smaller window shows the panel narrower; the chosen width comes back when it grows again.
+  const [, setViewport] = useState(0);
+  useEffect(() => {
+    const onResize = () => setViewport(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const shownWidth = prefsLoaded ? clampAgentWidth(agentWidth, sidebarWidth) : agentWidth;
 
   // Server-only flags (ai_enabled, agent_enabled) come from the layout and survive a refresh.
   const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled, agent_enabled: prev.agent_enabled }))).catch(() => {}), []);
@@ -55,12 +103,12 @@ export default function AppShell({ boot: initialBoot, children }) {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'j') {
         e.preventDefault();
-        setAgentOpen((v) => !v);
+        toggleAgent();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [toggleAgent]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -85,26 +133,43 @@ export default function AppShell({ boot: initialBoot, children }) {
       <ToastProvider>
       <ConfirmProvider>
         <a className="skip-link" href="#main">본문으로 건너뛰기</a>
-        <div className="app">
+        <div
+          className="app"
+          data-agent-open={agentOpen ? 'true' : 'false'}
+          data-nav-collapsed={navCollapsed ? 'true' : 'false'}
+          data-instant={instant ? '' : undefined}
+          data-resizing={agentResizing ? '' : undefined}
+          style={{ '--agent-w': shownWidth + 'px' }}
+        >
           {open ? <div className="app-scrim" onClick={() => setOpen(false)} aria-hidden="true" /> : null}
           <aside className="app-sidebar" id="app-sidebar" data-open={open ? 'true' : 'false'}>
-            <div className="brand">
+            <div className="brand" title={navCollapsed ? brand : undefined}>
               <div className="brand-mark" aria-hidden="true">{teacher ? teacher.slice(0, 1) : '학'}</div>
-              <div>
-                <strong className="display">{brand}</strong>
-                <span>수업 · 성적 · 상담</span>
-              </div>
+              <strong className="display nav-label">{brand}</strong>
             </div>
             <nav className="app-nav" aria-label="주요 메뉴">
               {NAV.map((item) => (
-                <Link key={item.href} href={item.href} aria-current={isActive(pathname, item.href) ? 'page' : undefined}>
+                <Link key={item.href} href={item.href} title={navCollapsed ? item.label : undefined} aria-current={isActive(pathname, item.href) ? 'page' : undefined}>
                   <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                  {item.label}
+                  <span className="nav-label">{item.label}</span>
                 </Link>
               ))}
             </nav>
             <div className="app-sidebar-foot">
-              <button type="button" onClick={logout}>로그아웃</button>
+              <button
+                type="button"
+                className="nav-collapse"
+                aria-label={navCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+                title={navCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+                onClick={toggleNav}
+              >
+                <span aria-hidden="true">{navCollapsed ? '»' : '«'}</span>
+                <span className="nav-label">접기</span>
+              </button>
+              <button type="button" className="nav-logout" title={navCollapsed ? '로그아웃' : undefined} onClick={logout}>
+                <span className="nav-icon" aria-hidden="true">⎋</span>
+                <span className="nav-label">로그아웃</span>
+              </button>
             </div>
           </aside>
           <div className="app-main">
@@ -118,21 +183,30 @@ export default function AppShell({ boot: initialBoot, children }) {
                 onClick={() => setOpen((v) => !v)}
               >☰</button>
               <GlobalSearch index={boot.search} />
-              <span className="today">{formatToday(boot.today)}</span>
               <button
                 type="button"
                 className="agent-toggle"
                 aria-expanded={agentOpen}
                 aria-keyshortcuts="Control+J"
                 title="AI 비서 (Ctrl+J)"
-                onClick={() => setAgentOpen((v) => !v)}
+                onClick={toggleAgent}
               >
                 <span aria-hidden="true">✦</span> AI 비서
               </button>
             </header>
             <main className="app-content" id="main" tabIndex={-1}>{children}</main>
           </div>
-          <AgentPanel open={agentOpen} onClose={closeAgent} aiEnabled={Boolean(boot.agent_enabled)} />
+          <AgentPanel
+            open={agentOpen}
+            onClose={closeAgent}
+            aiEnabled={Boolean(boot.agent_enabled)}
+            today={boot.today}
+            classes={boot.search && boot.search.classes}
+            students={boot.search && boot.search.students}
+            width={shownWidth}
+            sidebarWidth={sidebarWidth}
+            onResize={resizeAgent}
+          />
         </div>
       </ConfirmProvider>
       </ToastProvider>

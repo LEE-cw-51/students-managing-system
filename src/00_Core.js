@@ -105,6 +105,7 @@ LMS.TABLES = {
     'proposal_id', 'conversation_id', 'summary', 'calls', 'status', 'result',
     'verification_status', 'created_at', 'executed_at'
   ],
+  AgentUsage: ['used_at'],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };

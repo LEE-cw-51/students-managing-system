@@ -53,7 +53,7 @@ export default function CurriculumEditor({ value, onChange, textbook }) {
               <span className="cluster">
                 <button type="button" className="btn ghost sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="위로">▲</button>
                 <button type="button" className="btn ghost sm" onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label="아래로">▼</button>
-                <button type="button" className="btn ghost sm" onClick={() => remove(i)} aria-label="빼기">✕</button>
+                <button type="button" className="btn ghost sm danger-text" onClick={() => remove(i)} aria-label={`${r.title || `${i + 1}번째 단원`} 빼기`}>빼기</button>
               </span>
             </li>
           ))}

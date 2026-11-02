@@ -139,6 +139,7 @@ Anthropic API로 직접 부를 때는 temperature를 보내지 않고, 답변 �
 - **변경은 승인 후**: 출결 변경(이미 기록된 수업만), 상담 기록 추가(후속 할 일 포함), 할 일 상태 변경. AI는 바꾸지 않고 **변경 제안 카드**를 만들고, `승인하고 반영`을 누르면 그때 수동 화면과 같은 서비스 함수(`updateLessonAttendance`, `saveCounselingNote`, `updateTaskStatus`)로 실행합니다.
 - **검증**: 실행 직후 저장된 값을 다시 읽어 `확인됨`/`불일치`를 표시합니다. 하나라도 실패하면 그 제안의 변경을 모두 되돌리고 실패 사유를 남깁니다. 같은 제안을 두 번 승인해도 한 번만 실행됩니다.
 - **안 하는 일**: 성적 입력, 진도 수정, 문자 발송은 아직 도구가 없어 해당 화면을 안내합니다. AI가 SQL이나 테이블을 직접 건드리지 않습니다.
+- **사용량 제한**: AI 비용이 늘지 않도록 한 시간에 `AGENT_RATE_LIMIT_PER_HOUR`번(기본 60, `0`이면 제한 없음)까지만 대화를 처리합니다. 횟수는 DB(`AgentUsage`)에 남겨 서버 인스턴스가 여럿이어도 함께 셉니다. 넘으면 429와 함께 몇 분 뒤에 다시 쓸 수 있는지 알려 줍니다. 승인(`/api/agent/apply`)은 AI를 부르지 않고 제안마다 한 번만 실행되므로 세지 않습니다.
 - **기록**: 대화(`AgentConversations`, `AgentMessages`)와 제안(`AgentProposals`: 변경 전/후, 상태, 검증 결과, 실행 시각)은 따로 저장합니다. 대화는 참고용이고, 학생 데이터의 기준은 언제나 업무 테이블입니다. 90일 동안 이어지지 않은 대화는 새 대화를 저장할 때 메시지와 함께 지웁니다(승인 대기 제안이 있는 대화는 남김). 제안 기록은 지우지 않습니다.
 - 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 `lib/agent-anthropic.js`(Anthropic) 또는 OpenRouter) · 승인은 `/api/agent/apply` · 도구 목록 `lib/agent-tools.js` · 제안·검증 `src/07_Agent.js`.
 

@@ -57,7 +57,7 @@ describe('browser API allowlist', () => {
   it('keeps internal and unlisted functions off the browser API', () => {
     ['saveAiPlanDraft', 'getClassPlanContext', 'createSplitDraft', 'setDailyPlanDone', 'ensureSchema',
       'saveLesson', 'closeClass', 'saveAgentTurn', 'applyAgentProposal', 'markAgentProposalFailed',
-      'previewAgentAction', 'getAgentHistory', 'getAgentContext', 'toString', 'constructor', 'hasOwnProperty', '__proto__', 'nope'].forEach((n) => {
+      'previewAgentAction', 'reserveAgentTurn', 'releaseAgentTurn', 'getAgentHistory', 'getAgentContext', 'toString', 'constructor', 'hasOwnProperty', '__proto__', 'nope'].forEach((n) => {
       assert.equal(isPublicApi(api, n), false, n);
     });
   });

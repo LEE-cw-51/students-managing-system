@@ -22,6 +22,19 @@ describe('errorResponse', () => {
     assert.equal(logged.length, 4);
   });
 
+  it('keeps known error codes with their status and ignores others', async () => {
+    const coded = (message, code) => Object.assign(new Error(message), { code });
+    const gone = errorResponse(coded('대화를 찾을 수 없습니다.', 'CONVERSATION_NOT_FOUND'));
+    assert.equal(gone.status, 404);
+    assert.deepEqual(await gone.json(), { ok: false, error: '대화를 찾을 수 없습니다.', code: 'CONVERSATION_NOT_FOUND' });
+    const busy = errorResponse(coded('잠시 뒤에 다시 시도해 주세요.', 'AGENT_RATE_LIMITED'));
+    assert.equal(busy.status, 429);
+    assert.equal((await busy.json()).code, 'AGENT_RATE_LIMITED');
+    const other = errorResponse(coded('연결 오류', 'ECONNREFUSED'));
+    assert.equal(other.status, 200);
+    assert.deepEqual(await other.json(), { ok: false, error: '연결 오류' });
+  });
+
   it('handles non-Error throws', async () => {
     const res = errorResponse('문자열 오류');
     assert.equal(res.status, 200);

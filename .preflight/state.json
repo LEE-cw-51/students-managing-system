@@ -1,0 +1,620 @@
+{
+  "schema": 1,
+  "title": "공통 틀 컴팩트화",
+  "platform": "responsive",
+  "created_at": "2026-11-01T18:30:31+00:00",
+  "stage": "locked",
+  "versions": [
+    {
+      "v": 1,
+      "file": "wireframes/v1.html",
+      "from": null,
+      "note": "first draft",
+      "created_at": "2026-11-01T18:30:31+00:00",
+      "lint": "pass",
+      "sha256": "4837afa8c5653f05dd0774b377bcdd32fe7d4968102311227b58fb335409e31c"
+    },
+    {
+      "v": 2,
+      "file": "wireframes/v2.html",
+      "from": 1,
+      "note": "remove topbar date; sidebar expanded by default",
+      "created_at": "2026-11-01T18:38:31+00:00",
+      "lint": "pass",
+      "sha256": "f3786cce8efa32f2bdb0156772253136bd8522f560baee24ed4eeb6c40379919"
+    },
+    {
+      "v": 3,
+      "file": "wireframes/v3.html",
+      "from": 2,
+      "note": "today screen",
+      "created_at": "2026-11-01T18:58:09+00:00",
+      "lint": "pass",
+      "sha256": "d40d422000f8911b629090a5b53cc27e9e752b46424b45d2792e2cb1a9b3bfaa"
+    },
+    {
+      "v": 4,
+      "file": "wireframes/v4.html",
+      "from": 3,
+      "note": "student detail screen",
+      "created_at": "2026-11-01T19:07:41+00:00",
+      "lint": "pass",
+      "sha256": "2ed4c4fe1f5b960065956c03e6a61d3d3857637b103b4de64ecb0e389e5623d1"
+    },
+    {
+      "v": 5,
+      "file": "wireframes/v5.html",
+      "from": 4,
+      "note": "student list screen",
+      "created_at": "2026-11-01T19:25:51+00:00",
+      "lint": "pass",
+      "sha256": "7c766bc66fc6dc3aadce43a8f8bfe9da55348e451f4c421bdc0b2fd202455b7c"
+    },
+    {
+      "v": 6,
+      "file": "wireframes/v6.html",
+      "from": 5,
+      "note": "class detail screen",
+      "created_at": "2026-11-02T01:59:23+00:00",
+      "lint": "pass",
+      "sha256": "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426"
+    },
+    {
+      "v": 7,
+      "file": "wireframes/v7.html",
+      "from": 6,
+      "note": "class list and form",
+      "created_at": "2026-11-02T02:20:28+00:00",
+      "lint": "pass",
+      "sha256": "db3ad892caf3d2eea8e422deeb1c8f9212eddbbba5541561101940b98b735a0a"
+    },
+    {
+      "v": 8,
+      "file": "wireframes/v8.html",
+      "from": 7,
+      "note": "reports screen",
+      "created_at": "2026-11-02T02:44:15+00:00",
+      "lint": "pass",
+      "sha256": "0db5269638ea524163652b024d1a9cb3a7144f1ff2dc9978a9fea07efc9e4d6f"
+    },
+    {
+      "v": 9,
+      "file": "wireframes/v9.html",
+      "from": 8,
+      "note": "exams screen",
+      "created_at": "2026-11-02T02:56:47+00:00",
+      "lint": "pass",
+      "sha256": "cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c"
+    },
+    {
+      "v": 10,
+      "file": "wireframes/v10.html",
+      "from": 9,
+      "note": "settings screen",
+      "created_at": "2026-11-02T03:11:24+00:00",
+      "lint": "pass",
+      "sha256": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140"
+    }
+  ],
+  "lock": {
+    "version": 10,
+    "source": "wireframes/v10.html",
+    "sha256_source": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140",
+    "sha256_lock": "9fc58c8b90df731306c2cbe2127441a44fbd2e6642e9ba57b66e6b5eedc0b8cd",
+    "approved_at": "2026-11-02T03:14:12+00:00",
+    "quote": "좋아요, 위 답대로 확정하고 구현",
+    "evidence": "unverified"
+  },
+  "gate": {
+    "skipped": false,
+    "extra_paths": [],
+    "ignore_paths": []
+  },
+  "history": [
+    {
+      "ts": "2026-11-01T18:30:31+00:00",
+      "event": "init"
+    },
+    {
+      "ts": "2026-11-01T18:30:31+00:00",
+      "event": "new",
+      "v": 1,
+      "from": null,
+      "note": "first draft"
+    },
+    {
+      "ts": "2026-11-01T18:30:54+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 0
+    },
+    {
+      "ts": "2026-11-01T18:31:12+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 0
+    },
+    {
+      "ts": "2026-11-01T18:37:09+00:00",
+      "event": "check",
+      "v": 1,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:38:31+00:00",
+      "event": "new",
+      "v": 2,
+      "from": 1,
+      "note": "remove topbar date; sidebar expanded by default"
+    },
+    {
+      "ts": "2026-11-01T18:38:41+00:00",
+      "event": "check",
+      "v": 2,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:38:48+00:00",
+      "event": "approve",
+      "v": 2,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T18:58:09+00:00",
+      "event": "reopen",
+      "was": 2,
+      "reason": "오늘/수업 기록 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T18:58:09+00:00",
+      "event": "new",
+      "v": 3,
+      "from": 2,
+      "note": "today screen"
+    },
+    {
+      "ts": "2026-11-01T18:59:05+00:00",
+      "event": "check",
+      "v": 3,
+      "lint_errors": 4,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-01T18:59:15+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:59:39+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T18:59:46+00:00",
+      "event": "check",
+      "v": 3,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:00:56+00:00",
+      "event": "approve",
+      "v": 3,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T19:07:41+00:00",
+      "event": "reopen",
+      "was": 3,
+      "reason": "학생 상세 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T19:07:41+00:00",
+      "event": "new",
+      "v": 4,
+      "from": 3,
+      "note": "student detail screen"
+    },
+    {
+      "ts": "2026-11-01T19:08:16+00:00",
+      "event": "check",
+      "v": 4,
+      "lint_errors": 5,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-01T19:08:25+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-01T19:08:38+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:08:51+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:09:02+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:09:14+00:00",
+      "event": "check",
+      "v": 4,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:11:07+00:00",
+      "event": "approve",
+      "v": 4,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-01T19:25:50+00:00",
+      "event": "reopen",
+      "was": 4,
+      "reason": "학생 목록 화면 구성"
+    },
+    {
+      "ts": "2026-11-01T19:25:51+00:00",
+      "event": "new",
+      "v": 5,
+      "from": 4,
+      "note": "student list screen"
+    },
+    {
+      "ts": "2026-11-01T19:26:20+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-01T19:26:34+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:26:46+00:00",
+      "event": "check",
+      "v": 5,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-01T19:27:57+00:00",
+      "event": "approve",
+      "v": 5,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T01:59:23+00:00",
+      "event": "reopen",
+      "was": 5,
+      "reason": "반 상세 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T01:59:23+00:00",
+      "event": "new",
+      "v": 6,
+      "from": 5,
+      "note": "class detail screen"
+    },
+    {
+      "ts": "2026-11-02T02:00:43+00:00",
+      "event": "check",
+      "v": 6,
+      "lint_errors": 3,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:01:03+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:01:28+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:01:47+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:02:21+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:06:57+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:08:54+00:00",
+      "event": "approve",
+      "v": 6,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T02:20:28+00:00",
+      "event": "reopen",
+      "was": 6,
+      "reason": "반 목록·등록 폼 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T02:20:28+00:00",
+      "event": "new",
+      "v": 7,
+      "from": 6,
+      "note": "class list and form"
+    },
+    {
+      "ts": "2026-11-02T02:21:28+00:00",
+      "event": "check",
+      "v": 7,
+      "lint_errors": 4,
+      "rules": [
+        "lock/unnamed-group"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:21:34+00:00",
+      "event": "check",
+      "v": 7,
+      "lint_errors": 4,
+      "rules": [
+        "lock/unnamed-group"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:21:48+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-02T02:21:59+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 7
+    },
+    {
+      "ts": "2026-11-02T02:22:09+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:22:30+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:22:45+00:00",
+      "event": "check",
+      "v": 7,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:37:23+00:00",
+      "event": "approve",
+      "v": 7,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T02:44:15+00:00",
+      "event": "reopen",
+      "was": 7,
+      "reason": "보고서 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T02:44:15+00:00",
+      "event": "new",
+      "v": 8,
+      "from": 7,
+      "note": "reports screen"
+    },
+    {
+      "ts": "2026-11-02T02:44:48+00:00",
+      "event": "check",
+      "v": 8,
+      "lint_errors": 3,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:45:17+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 6
+    },
+    {
+      "ts": "2026-11-02T02:45:31+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:45:43+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:45:54+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:46:07+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:46:23+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:46:54+00:00",
+      "event": "check",
+      "v": 8,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:50:02+00:00",
+      "event": "approve",
+      "v": 8,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T02:56:47+00:00",
+      "event": "reopen",
+      "was": 8,
+      "reason": "시험 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T02:56:47+00:00",
+      "event": "new",
+      "v": 9,
+      "from": 8,
+      "note": "exams screen"
+    },
+    {
+      "ts": "2026-11-02T02:57:54+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 8
+    },
+    {
+      "ts": "2026-11-02T02:58:06+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 6
+    },
+    {
+      "ts": "2026-11-02T02:58:20+00:00",
+      "event": "check",
+      "v": 9,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:59:37+00:00",
+      "event": "approve",
+      "v": 9,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T03:11:24+00:00",
+      "event": "reopen",
+      "was": 9,
+      "reason": "설정 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T03:11:24+00:00",
+      "event": "new",
+      "v": 10,
+      "from": 9,
+      "note": "settings screen"
+    },
+    {
+      "ts": "2026-11-02T03:12:16+00:00",
+      "event": "check",
+      "v": 10,
+      "lint_errors": 9,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-02T03:12:28+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T03:12:48+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T03:13:02+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T03:14:12+00:00",
+      "event": "approve",
+      "v": 10,
+      "evidence": "unverified"
+    }
+  ]
+}

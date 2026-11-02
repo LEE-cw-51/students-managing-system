@@ -9,8 +9,8 @@ import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { currentTerm } from '@/lib/term';
 
-/** Create / edit an exam-prep period and the school exam it is for. */
-export default function PeriodForm({ initial, onClose, onSaved }) {
+/** Create / edit an exam-prep period and the school exam it is for. `onDelete` adds the delete button. */
+export default function PeriodForm({ initial, onClose, onSaved, onDelete }) {
   const { today } = useBoot();
   const toast = useToast();
   const term = currentTerm(today);
@@ -61,6 +61,7 @@ export default function PeriodForm({ initial, onClose, onSaved }) {
         {isEdit ? <p className="hint" style={{ margin: 0 }}>기간을 줄이면 범위를 벗어난 임시 배정 날짜도 함께 줄어듭니다.</p> : null}
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
+          {onDelete ? <button type="button" className="btn ghost danger-text" style={{ marginRight: 'auto' }} onClick={onDelete}>기간 삭제</button> : null}
           <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : isEdit ? '저장' : '만들고 편성하기'}</button>
         </div>

@@ -16,8 +16,12 @@ export async function POST(req) {
   if (!proposalId) {
     return NextResponse.json({ ok: false, error: '제안을 찾을 수 없습니다.' }, { status: 400 });
   }
+  const selected = body.selected === undefined || body.selected === null ? undefined : body.selected;
+  if (Array.isArray(selected) && !selected.length) {
+    return NextResponse.json({ ok: false, error: '반영할 항목을 하나 이상 선택해 주세요.' }, { status: 400 });
+  }
   try {
-    const data = await applyProposal(proposalId, withService);
+    const data = await applyProposal(proposalId, withService, selected);
     return NextResponse.json({ ok: true, data });
   } catch (e) {
     return errorResponse(e);

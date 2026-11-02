@@ -1,36 +1,115 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import LMS from '../../../src/00_Core.js';
 import PageHeader from '@/components/ui/PageHeader';
 import Field from '@/components/ui/Field';
 import Modal from '@/components/ui/Modal';
 import { Async } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 
+const GRADE_KEYS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const SECTIONS = [
-  {
-    title: '학원 정보',
-    hint: '사이드바와 보고서·PDF 머리말에 들어갑니다.',
-    fields: [['academy_name', '학원명'], ['teacher_name', '담당 강사명'], ['contact', '연락처']]
-  },
-  {
-    title: '보고서 문구',
-    hint: '일일·월간 보고서의 처음과 끝에 들어갑니다.',
-    fields: [['report_greeting', '인사말'], ['report_closing', '맺음말', true]]
-  },
-  {
-    title: '과제 이행 등급 기준',
-    hint: '보고서에 등급과 함께 표시되는 설명입니다. 항목 등급 A 100, B 89, C 79, D 69, E 59, F 50을 평균 내 A 90점 이상, B 80점 이상, C 70점 이상, D 60점 이상, E 51점 이상, 그 아래는 F로 바꿉니다.',
-    fields: [['assignment_A', 'A 기준'], ['assignment_B', 'B 기준'], ['assignment_C', 'C 기준'], ['assignment_D', 'D 기준'], ['assignment_E', 'E 기준'], ['assignment_F', 'F 기준']]
-  }
+  { id: 'academy', title: '학원 정보', keys: ['academy_name', 'teacher_name', 'contact'] },
+  { id: 'report', title: '보고서 문구', keys: ['report_greeting', 'report_closing'] },
+  { id: 'assignment', title: '과제 이행 등급 기준', keys: GRADE_KEYS.map((g) => `assignment_${g}`) }
 ];
+const KEYS = SECTIONS.flatMap((s) => s.keys);
+const PLACEHOLDERS = { ...LMS.DEFAULT_SETTINGS, academy_name: '학원' };
+const PREVIEW_NAME = '○○○';
+
+const value = (obj, key) => (obj && obj[key]) || '';
+
+function useUnsavedGuard(dirty) {
+  const router = useRouter();
+  const confirm = useConfirm();
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    const onClick = (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target.closest && e.target.closest('a[href]');
+      const href = a ? a.getAttribute('href') || '' : '';
+      if (!a || a.target === '_blank' || a.hasAttribute('download') || !href || href.startsWith('#') || href.startsWith('tel:') || href.startsWith('mailto:')) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      e.preventDefault();
+      e.stopPropagation();
+      confirm({
+        title: '저장하지 않은 설정',
+        message: '설정 저장을 누르지 않은 변경이 있습니다. 이 화면을 떠날까요?',
+        confirmLabel: '저장하지 않고 떠나기',
+        danger: true
+      }).then((ok) => {
+        if (ok) router.push(url.pathname + url.search + url.hash);
+      });
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, [dirty, confirm, router]);
+}
+
+function HelpRow({ text, label, children }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div className="st-help-row">
+        <span>{text}</span>
+        <button type="button" className="st-more" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)}>{label}</button>
+      </div>
+      {open ? <div id={id} className="st-more-body">{children}</div> : null}
+    </>
+  );
+}
+
+function SectionHead({ title, changed, children }) {
+  return (
+    <div className="st-head">
+      <h2>{title}</h2>
+      {children}
+      {changed ? <span className="st-changed">● 변경</span> : null}
+    </div>
+  );
+}
+
+function ReportPreview({ form, date }) {
+  const [open, setOpen] = useState(false);
+  const greeting = form.report_greeting || LMS.DEFAULT_SETTINGS.report_greeting;
+  const closing = form.report_closing || LMS.DEFAULT_SETTINGS.report_closing;
+  const teacher = form.teacher_name || LMS.DEFAULT_SETTINGS.teacher_name;
+  const contact = form.contact || LMS.DEFAULT_SETTINGS.contact;
+  const head = ['<' + LMS.formatKoreanDate(date) + '>', greeting, '오늘 ' + PREVIEW_NAME + ' 학생 학습 알림입니다.'].join('\n');
+  const tail = [closing, '', teacher + ' 드림', '연락처: ' + contact].join('\n');
+  return (
+    <div className={'st-preview' + (open ? ' open' : '')}>
+      <strong className="st-preview-title">일일 보고서 미리보기</strong>
+      <button type="button" className="st-preview-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>미리보기</button>
+      <div className="st-preview-body" aria-live="polite">
+        <div className="st-preview-text">{head}</div>
+        <div className="st-preview-gap">… 테스트·과제·진도 (학생마다 다름) …</div>
+        <div className="st-preview-text">{tail}</div>
+      </div>
+    </div>
+  );
+}
 
 function PromotionModal({ onClose, onDone }) {
   const toast = useToast();
   const state = useApi(() => api('previewGradePromotion'), []);
   const [busy, setBusy] = useState(false);
+  const total = state.data ? state.data.total : 0;
   const run = async () => {
     setBusy(true);
     try {
@@ -44,12 +123,12 @@ function PromotionModal({ onClose, onDone }) {
     }
   };
   return (
-    <Modal title="학년 올리기 (새 학년도)" onClose={onClose}
-      footer={<><button type="button" className="btn secondary" onClick={onClose}>취소</button><button type="button" className="btn" disabled={busy || !state.data || !state.data.total} onClick={run}>{busy ? '처리 중…' : '학년 올리기'}</button></>}>
+    <Modal title="학년 올리기 (새 학년도)" onClose={onClose} className="st-promo-modal"
+      footer={<><button type="button" className="btn secondary" onClick={onClose}>취소</button><button type="button" className="btn" disabled={busy || !total} onClick={run}>{busy ? '처리 중…' : `${total}명 학년 올리기`}</button></>}>
       <Async state={state}>
         {(d) => (
           <div className="stack-sm">
-            <p style={{ margin: 0 }}>재원생 <strong>{d.total}명</strong>의 학년을 한 단계씩 올립니다. 되돌리려면 학생 정보에서 직접 고쳐야 합니다.</p>
+            <p className="st-promo-notice">재원생 <strong>{d.total}명</strong>의 학년을 한 단계씩 올립니다. 한 번에 되돌릴 수 없고, 학생 정보에서 한 명씩 고쳐야 합니다.</p>
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr><th>지금</th><th>바뀐 후</th><th className="num">학생 수</th></tr></thead>
@@ -69,23 +148,34 @@ function PromotionModal({ onClose, onDone }) {
 export default function SettingsPage() {
   const boot = useBoot();
   const toast = useToast();
+  const [saved, setSaved] = useState(boot.settings || {});
   const [form, setForm] = useState(boot.settings || {});
-  const [saved, setSaved] = useState(JSON.stringify(boot.settings || {}));
   const [saving, setSaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
   useEffect(() => {
-    setForm(boot.settings || {});
-    setSaved(JSON.stringify(boot.settings || {}));
+    const next = boot.settings || {};
+    const prev = savedRef.current;
+    setForm((f) => {
+      const kept = KEYS.filter((k) => value(f, k) !== value(prev, k)).map((k) => [k, f[k]]);
+      return { ...next, ...Object.fromEntries(kept) };
+    });
+    setSaved(next);
   }, [boot.settings]);
-  const dirty = JSON.stringify(form) !== saved;
+
+  const changedKeys = new Set(KEYS.filter((k) => value(form, k) !== value(saved, k)));
+  const changed = SECTIONS.filter((s) => s.keys.some((k) => changedKeys.has(k)));
+  const isChanged = (id) => changed.some((s) => s.id === id);
+  const dirty = changed.length > 0;
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  useUnsavedGuard(dirty && !saving);
 
   const save = async () => {
     setSaving(true);
     try {
-      const keys = SECTIONS.flatMap((s) => s.fields.map((f) => f[0]));
-      const next = await api('saveSettings', Object.fromEntries(keys.map((k) => [k, form[k] || ''])));
-      setSaved(JSON.stringify(next));
+      const next = await api('saveSettings', Object.fromEntries(KEYS.map((k) => [k, form[k] || ''])));
+      setSaved(next);
       toast('설정을 저장했습니다.');
       boot.refresh();
     } catch (e) {
@@ -95,38 +185,88 @@ export default function SettingsPage() {
     }
   };
 
+  const saveRef = useRef(save);
+  saveRef.current = () => { if (dirty && !saving && !document.querySelector('.modal')) save(); };
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const input = (key, label, props = {}) => (
+    <Field key={key} label={label}>
+      {(id) => <input id={id} value={value(form, key)} placeholder={PLACEHOLDERS[key] || ''} onChange={set(key)} {...props} />}
+    </Field>
+  );
+
   return (
-    <>
-      <PageHeader title="설정" />
+    <div className="settings-page">
+      <PageHeader title="설정" sub="보고서·PDF에 들어가는 정보" />
       <div className="stack">
-        {SECTIONS.map((sec) => (
-          <section key={sec.title} className="card">
-            <h2>{sec.title}</h2>
-            <p className="hint" style={{ marginTop: -6 }}>{sec.hint}</p>
-            <div className="form-grid">
-              {sec.fields.map(([key, label, area]) => (
-                <Field key={key} label={label} wide={!!area}>
-                  {(id) => area
-                    ? <textarea id={id} rows={3} value={form[key] || ''} onChange={set(key)} />
-                    : <input id={id} value={form[key] || ''} onChange={set(key)} />}
-                </Field>
-              ))}
-            </div>
-          </section>
-        ))}
         <section className="card">
-          <h2>새 학년도 준비</h2>
-          <div className="split">
-            <span className="muted">3월에 한 번, 재원생 학년을 한 단계씩 올립니다(중2 → 중3). 미리 보기에서 확인한 뒤 적용합니다.</span>
-            <button type="button" className="btn secondary" onClick={() => setPromoting(true)}>학년 올리기…</button>
+          <SectionHead title="학원 정보" changed={isChanged('academy')} />
+          <p className="st-hint">사이드바와 보고서·PDF에 들어갑니다.</p>
+          <div className="st-academy">
+            {input('academy_name', '학원명')}
+            {input('teacher_name', '담당 강사명')}
+            {input('contact', '연락처', { inputMode: 'tel' })}
           </div>
         </section>
+
+        <section className="card">
+          <SectionHead title="보고서 문구" changed={isChanged('report')} />
+          <p className="st-hint">일일·월간 보고서의 처음과 끝에 들어갑니다.</p>
+          <div className="st-report">
+            <div className="st-report-fields">
+              {input('report_greeting', '인사말')}
+              <Field label="맺음말" hint="비우면 기본 문구가 들어갑니다.">
+                {(id) => <textarea id={id} rows={3} value={value(form, 'report_closing')} placeholder={PLACEHOLDERS.report_closing} onChange={set('report_closing')} />}
+              </Field>
+            </div>
+            <ReportPreview form={form} date={boot.today} />
+          </div>
+        </section>
+
+        <section className="card">
+          <SectionHead title="과제 이행 등급 기준" changed={isChanged('assignment')} />
+          <HelpRow text="보고서에 등급과 함께 표시되는 설명입니다." label="등급 계산 방법">
+            <p>항목 등급을 점수로 바꿔 평균을 냅니다: {GRADE_KEYS.map((g) => `${g} ${LMS.ASSIGNMENT_POINTS[g]}`).join(' · ')}</p>
+            <p>평균이 A 90점 이상, B 80점 이상, C 70점 이상, D 60점 이상, E 51점 이상, 그 아래는 F입니다.</p>
+          </HelpRow>
+          <div className="st-grades">
+            {GRADE_KEYS.map((g) => input(`assignment_${g}`, `${g} 기준`))}
+          </div>
+        </section>
+
+        <section className="card st-promote">
+          <div className="st-promote-text">
+            <SectionHead title="새 학년도 준비">
+              <span className="tag muted">저장과 별개 · 바로 적용</span>
+            </SectionHead>
+            <HelpRow text="재원생 학년을 한 단계씩 올립니다(중2 → 중3)." label="자세히">
+              <p>3월에 한 번 쓰는 작업입니다. 창에서 학년별 인원을 확인한 뒤 적용하며, 설정 저장과 상관없이 바로 반영됩니다. 입력 중인 설정은 그대로 남습니다.</p>
+            </HelpRow>
+          </div>
+          <button type="button" className="btn secondary" onClick={() => setPromoting(true)}>학년 올리기…</button>
+        </section>
+
         <div className="save-bar">
-          <span className={'save-state ' + (dirty ? 'dirty' : '')}>{dirty ? '● 저장하지 않은 변경이 있습니다' : '저장됨'}</span>
-          <button type="button" className="btn" disabled={!dirty || saving} onClick={save}>{saving ? '저장 중…' : '설정 저장'}</button>
+          <span className={'save-state ' + (dirty ? 'dirty' : '')}>
+            <span className="sb-long">{dirty ? `● 저장하지 않은 변경 ${changed.length}곳 (${changed.map((s) => s.title).join(' · ')})` : '저장됨'}</span>
+            <span className="sb-short">{dirty ? `● 변경 ${changed.length}곳` : '저장됨'}</span>
+          </span>
+          <span className="cluster save-actions">
+            <button type="button" className="btn secondary" disabled={!dirty || saving} onClick={() => setForm(saved)}>변경 취소</button>
+            <button type="button" className="btn" disabled={!dirty || saving} onClick={save} title="설정 저장 (Ctrl+S)">{saving ? '저장 중…' : '설정 저장'}</button>
+          </span>
         </div>
       </div>
       {promoting ? <PromotionModal onClose={() => setPromoting(false)} onDone={() => { setPromoting(false); boot.refresh(); }} /> : null}
-    </>
+    </div>
   );
 }

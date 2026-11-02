@@ -48,7 +48,7 @@ export default function CancelDayDialog({ classId, className, date, onClose, onD
             {onReplan ? (
               <button type="button" className="btn" onClick={() => { onReplan(month); onClose(); }}>초안 다시 만들기</button>
             ) : (
-              <Link className="btn" href={`/classes/${classId}?tab=plans`}>강의 계획에서 정리하기</Link>
+              <Link className="btn" href={`/classes/${classId}?tab=lessons`}>수업 계획에서 정리하기</Link>
             )}
           </div>
         </div>

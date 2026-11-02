@@ -15,6 +15,16 @@ LMS.AGENT_PROPOSAL_STATUS = ['pending', 'applied', 'rejected', 'failed'];
 LMS.AGENT_HISTORY_LIMIT = 20;
 // Conversations untouched this long are removed (with their messages) when a new turn is saved.
 LMS.AGENT_CONVERSATION_KEEP_DAYS = 90;
+// The rate limit counts chat turns in this sliding window (AgentUsage rows, epoch ms).
+LMS.AGENT_RATE_WINDOW_MS = 60 * 60 * 1000;
+// Error codes the API passes to the browser (lib/api-error.js maps them to HTTP statuses).
+LMS.AGENT_CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND';
+
+function conversationNotFound_() {
+  var e = new Error('대화를 찾을 수 없습니다.');
+  e.code = LMS.AGENT_CONVERSATION_NOT_FOUND;
+  return e;
+}
 
 function agentStudentName_(table, studentId) {
   var s = LMS.findById(table('Students'), 'student_id', studentId);
@@ -186,7 +196,7 @@ LMS.createAgent = function (ctx) {
   /** One conversation with its messages; assistant messages carry their proposal. */
   function getAgentConversation(conversationId) {
     var conv = LMS.findById(table('AgentConversations'), 'conversation_id', conversationId);
-    if (!conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (!conv) throw conversationNotFound_();
     var proposals = table('AgentProposals');
     return {
       conversation: conv,
@@ -201,7 +211,7 @@ LMS.createAgent = function (ctx) {
   function getAgentHistory(conversationId, limit) {
     if (!conversationId) return [];
     var conv = LMS.findById(table('AgentConversations'), 'conversation_id', conversationId);
-    if (!conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (!conv) throw conversationNotFound_();
     var proposals = table('AgentProposals');
     return conversationMessages(conversationId).slice(-(limit || LMS.AGENT_HISTORY_LIMIT)).map(function (m) {
       var content = LMS.toStr(m.content);
@@ -231,6 +241,37 @@ LMS.createAgent = function (ctx) {
   }
 
   /**
+   * Server-only: count one chat turn against `limit` turns per AGENT_RATE_WINDOW_MS. The count
+   * lives in the database, so every serverless instance shares it. When the limit is used up
+   * nothing is counted and { ok: false, retry_after_ms } comes back. On success `used_at`
+   * identifies the slot for releaseAgentTurn.
+   */
+  function reserveAgentTurn(nowMs, limit) {
+    var cutoff = nowMs - LMS.AGENT_RATE_WINDOW_MS;
+    var recent = table('AgentUsage').filter(function (u) { return Number(u.used_at) > cutoff; });
+    if (recent.length >= limit) {
+      var oldest = Math.min.apply(null, recent.map(function (u) { return Number(u.used_at); }));
+      return { ok: false, retry_after_ms: Math.max(0, oldest + LMS.AGENT_RATE_WINDOW_MS - nowMs) };
+    }
+    recent.push({ used_at: nowMs });
+    saveTable('AgentUsage', recent);
+    return { ok: true, retry_after_ms: 0, used_at: nowMs };
+  }
+
+  /** Server-only: give back one slot taken by reserveAgentTurn when the turn was not saved. */
+  function releaseAgentTurn(usedAt) {
+    var dropped = false;
+    // Slots with the same time are interchangeable; drop just one.
+    var rows = table('AgentUsage').filter(function (u) {
+      if (dropped || Number(u.used_at) !== Number(usedAt)) return true;
+      dropped = true;
+      return false;
+    });
+    if (dropped) saveTable('AgentUsage', rows);
+    return dropped;
+  }
+
+  /**
    * Every request loads every table, so old chat must not pile up. Drops conversations not
    * updated for AGENT_CONVERSATION_KEEP_DAYS and their messages. A conversation that still
    * has a pending proposal is kept; proposals themselves stay as the record of changes.
@@ -255,7 +296,10 @@ LMS.createAgent = function (ctx) {
 
   /**
    * Server-only: store one chat turn. Creates the conversation on the first turn and a
-   * pending proposal when the assistant asked for changes ([{ tool, args }]).
+   * pending proposal when the assistant asked for changes ([{ tool, args, preview? }]).
+   * A call that carries its preview (made by previewAgentAction during the turn) is stored as
+   * is: the data may have changed during the AI wait, and the turn must not be lost for it.
+   * Approval checks every change again against the data at that time.
    */
   function saveAgentTurn(data) {
     data = data || {};
@@ -265,7 +309,7 @@ LMS.createAgent = function (ctx) {
     pruneOldConversations_();
     var convs = table('AgentConversations');
     var conv = data.conversation_id ? LMS.findById(convs, 'conversation_id', data.conversation_id) : null;
-    if (data.conversation_id && !conv) throw new Error('대화를 찾을 수 없습니다.');
+    if (data.conversation_id && !conv) throw conversationNotFound_();
     if (!conv) {
       conv = { conversation_id: ctx.nextIds('AGC', 1)[0], title: userText.slice(0, 40), created_at: ts, updated_at: ts };
       convs.push(conv);
@@ -275,7 +319,7 @@ LMS.createAgent = function (ctx) {
 
     var proposal = null;
     var calls = (Array.isArray(data.calls) ? data.calls : []).map(function (c) {
-      var preview = previewAgentAction(c.tool, c.args);
+      var preview = c.preview || previewAgentAction(c.tool, c.args);
       return { tool: c.tool, label: writeAction(c.tool).label, args: preview.args, target: preview.target, before: preview.before, after: preview.after, text: preview.text };
     });
     if (calls.length) {
@@ -315,13 +359,28 @@ LMS.createAgent = function (ctx) {
    * Server-only (the apply route records failures): run every change of a pending proposal,
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
+   * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
    */
-  function applyAgentProposal(proposalId) {
+  function applyAgentProposal(proposalId, selected) {
     var row = requireProposal(proposalId);
     if (row.status === 'applied') return slimProposal(row);
     if (row.status !== 'pending') throw new Error('이미 처리된 제안입니다.');
+    var calls = row.calls || [];
+    var chosen = null;
+    if (Array.isArray(selected)) {
+      chosen = {};
+      selected.forEach(function (i) {
+        if (Number(i) >= 0 && Number(i) < calls.length && Math.floor(Number(i)) === Number(i)) chosen[Number(i)] = true;
+      });
+      if (!Object.keys(chosen).length) {
+        var none = new Error('반영할 항목을 하나 이상 선택해 주세요.');
+        none.code = 'AGENT_NOTHING_SELECTED';
+        throw none;
+      }
+    }
     var s = svc();
-    var results = (row.calls || []).map(function (c) {
+    var results = calls.map(function (c, i) {
+      if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
       var action = writeAction(c.tool);
       // Re-check against the current data: something may have changed since the proposal.
       var preview = action.preview(s, c.args);
@@ -333,7 +392,7 @@ LMS.createAgent = function (ctx) {
     row = LMS.findById(rows, 'proposal_id', proposalId);
     row.status = 'applied';
     row.result = results;
-    row.verification_status = results.every(function (r) { return r.ok; }) ? 'verified' : 'mismatch';
+    row.verification_status = results.every(function (r) { return r.skipped || r.ok; }) ? 'verified' : 'mismatch';
     row.executed_at = ctx.now();
     saveTable('AgentProposals', rows);
     return slimProposal(row);
@@ -369,6 +428,8 @@ LMS.createAgent = function (ctx) {
     getAgentHistory: getAgentHistory,
     getAgentContext: getAgentContext,
     previewAgentAction: previewAgentAction,
+    reserveAgentTurn: reserveAgentTurn,
+    releaseAgentTurn: releaseAgentTurn,
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,

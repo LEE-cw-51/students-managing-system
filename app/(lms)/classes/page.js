@@ -29,6 +29,18 @@ function ExamTag({ exam }) {
   return null;
 }
 
+function ClassTags({ c }) {
+  return (
+    <>
+      {c.grade ? <span className="tag muted">{c.grade}</span> : null}
+      {c.status !== '운영' ? <span className="tag muted">{c.status}</span> : null}
+      <ExamTag exam={c.exam} />
+    </>
+  );
+}
+
+const isSuspended = (c) => !!(c.exam && c.exam.period && c.exam.kind === 'suspended');
+
 const SORT = {
   name: (c) => c.class_name,
   students: (c) => c.student_count,
@@ -36,35 +48,54 @@ const SORT = {
 };
 
 function ClassTable({ rows, today }) {
-  const router = useRouter();
   const sort = useSort(rows, SORT);
   return (
-    <div className="table-wrap">
-      <table className="data-table stack-mobile">
+    <div className="table-wrap cls-table">
+      <table className="data-table">
         <thead>
           <tr><SortTh sort={sort} col="name">반</SortTh><th>요일 · 시간</th><SortTh sort={sort} col="students" className="num">학생</SortTh><SortTh sort={sort} col="next">다음 수업</SortTh><th>현재 진도</th><th>교재</th></tr>
         </thead>
         <tbody>
           {sort.rows.map((c) => (
-            <tr key={c.class_id} className="clickable" onClick={() => router.push(`/classes/${c.class_id}`)}>
+            <tr key={c.class_id}>
               <td className="primary">
-                <Link href={`/classes/${c.class_id}`} onClick={(e) => e.stopPropagation()}>{c.class_name}</Link>
-                <div className="cluster" style={{ marginTop: 4 }}>
-                  {c.grade ? <span className="tag muted">{c.grade}</span> : null}
-                  {c.status !== '운영' ? <span className="tag muted">{c.status}</span> : null}
-                  <ExamTag exam={c.exam} />
-                </div>
+                <span className="cls-name">
+                  <Link href={`/classes/${c.class_id}`}>{c.class_name}</Link>
+                  <ClassTags c={c} />
+                </span>
               </td>
-              <td data-label="요일 · 시간">{c.schedule_label || <span className="tag warn">시간표 없음</span>}</td>
-              <td data-label="학생" className="num">{c.student_count}명</td>
-              <td data-label="다음 수업"><NextCell next={c.next} today={today} /></td>
-              <td data-label="현재 진도">{c.current_progress || <span className="muted">-</span>}</td>
-              <td data-label="교재">{c.textbook || <span className="muted">-</span>}</td>
+              <td>{c.schedule_label || <span className="tag warn">시간표 없음</span>}</td>
+              <td className="num">{c.student_count}명</td>
+              <td><NextCell next={c.next} today={today} /></td>
+              <td>{c.current_progress || <span className="muted">-</span>}</td>
+              <td>{c.textbook || <span className="muted">-</span>}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ClassCards({ rows, today }) {
+  return (
+    <ul className="cls-cards" aria-label="반">
+      {rows.map((c) => (
+        <li key={c.class_id} className="cls-card">
+          <div className="cls-card-head">
+            <Link className="cls-card-name" href={`/classes/${c.class_id}`}>{c.class_name} <span aria-hidden="true">›</span></Link>
+            <ClassTags c={c} />
+            {c.next ? <span className="cls-card-next"><NextCell next={c.next} today={today} /></span> : null}
+          </div>
+          <div className="cls-card-line">
+            {c.schedule_label || <span className="tag warn">시간표 없음</span>} <span className="cls-count-line">· {c.student_count}명</span>
+          </div>
+          <div className="cls-card-line muted">
+            {[`진도 ${c.current_progress || '-'}`, c.textbook].filter(Boolean).join(' · ')}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -78,40 +109,62 @@ export default function ClassesPage() {
 
 function ClassesView() {
   const router = useRouter();
-  const { today } = useBoot();
+  const { today, search } = useBoot();
   const [status, setStatus] = useUrlState('status', '운영');
+  const [exam, setExam] = useUrlState('exam', '');
+  const examOnly = exam === '1';
   const [creating, setCreating] = useState(false);
-  const state = useApi(() => api('getClassList', { class_type: '정규', status }), [status]);
+  const state = useApi(() => api('getClassList', { class_type: '정규' }), []);
+
+  const regular = (search.classes || []).filter((c) => c.class_type === '정규');
+  const count = (s) => regular.filter((c) => c.status === s).length;
+  const students = (search.students || []).filter((s) => s.status === '재원' && (s.class_ids || []).length).length;
+  const byStatus = (state.data || []).filter((c) => !status || c.status === status);
+  const rows = examOnly ? byStatus.filter(isSuspended) : byStatus;
+  const suspendedCount = byStatus.filter(isSuspended).length;
 
   return (
-    <>
+    <div className="classes-page">
       <PageHeader
         title="반"
-        sub={<>반을 누르면 진도·숙제·테스트·강의 계획을 한 곳에서 관리합니다. 시험대비 반은 <Link href="/exams?tab=periods">시험 탭</Link>에서 편성합니다.</>}
+        sub={`운영 ${count('운영')}개 · 학생 ${students}명`}
         actions={<button type="button" className="btn" onClick={() => setCreating(true)}>반 등록</button>}
       />
-      <div className="split" style={{ marginBottom: 14 }}>
+      <div className="cls-filters">
         <div className="segmented" role="group" aria-label="운영 상태">
-          {[['운영', '운영 중'], ['종료', '종료'], ['', '전체']].map(([v, label]) => (
-            <button key={label} type="button" aria-pressed={status === v} onClick={() => setStatus(v)}>{label}</button>
+          {[['운영', '운영 중', count('운영')], ['종료', '종료', count('종료')], ['', '전체']].map(([v, label, n]) => (
+            <button key={label} type="button" aria-pressed={status === v} onClick={() => setStatus(v)}>
+              {label}{n !== undefined ? <span className="cls-count"> {n}</span> : null}
+            </button>
           ))}
         </div>
+        <button type="button" className={'btn sm ' + (examOnly ? '' : 'secondary')} aria-pressed={examOnly} onClick={() => setExam(examOnly ? '' : '1')}>
+          시험대비 휴강만{state.data ? ` (${suspendedCount})` : ''}
+        </button>
+        <Link className="cls-exam-link" href="/exams?tab=periods">시험대비 반 편성은 시험 탭 →</Link>
       </div>
       <Async state={state}>
-        {(rows) => rows.length ? (
-          <ClassTable rows={rows} today={today} />
+        {() => rows.length ? (
+          <>
+            <ClassTable rows={rows} today={today} />
+            <ClassCards rows={rows} today={today} />
+          </>
         ) : (
           <div className="card">
-            <EmptyState title={status === '종료' ? '종료된 반이 없습니다' : '등록된 반이 없습니다'}
-              action={status !== '종료' ? <button type="button" className="btn" onClick={() => setCreating(true)}>첫 반 등록하기</button> : null}>
-              반을 등록하고 학생을 배정하면 수업 기록을 시작할 수 있습니다.
-            </EmptyState>
+            {examOnly && byStatus.length ? (
+              <EmptyState title="시험대비 휴강 중인 반이 없습니다">‘시험대비 휴강만’을 끄면 모든 반이 보입니다.</EmptyState>
+            ) : (
+              <EmptyState title={status === '종료' ? '종료된 반이 없습니다' : '등록된 반이 없습니다'}
+                action={status !== '종료' ? <button type="button" className="btn" onClick={() => setCreating(true)}>첫 반 등록하기</button> : null}>
+                반을 등록하고 학생을 배정하면 수업 기록을 시작할 수 있습니다.
+              </EmptyState>
+            )}
           </div>
         )}
       </Async>
       {creating ? (
         <ClassForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/classes/${row.class_id}`)} />
       ) : null}
-    </>
+    </div>
   );
 }

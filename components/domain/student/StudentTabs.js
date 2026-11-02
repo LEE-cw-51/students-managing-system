@@ -1,17 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Async, EmptyState, Kpi } from '@/components/ui/Feedback';
 import GradeTrend from '@/components/ui/GradeTrend';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import { formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
+import { CopyButton, QuickCounsel } from './CounselingTab';
 
 /** Add a regular class to the student (추가 수강, or the first class for a 미배정 student). */
 function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
@@ -111,110 +112,232 @@ function AttendanceSwitch({ lessonId, value, onSaved }) {
 
 // ---------------------------------------------------------------- 개요
 
-export function OverviewTab({ data, onChanged }) {
-  const { month, next, classes, exams, recent_notes: notes, counseling, open_tasks: tasks, today } = data;
+function FollowUps({ tasks, today, onChanged }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState('');
+  const done = async (t) => {
+    setBusy(t.task_id);
+    try {
+      await api('updateTaskStatus', t.task_id, '완료');
+      toast('후속 조치를 완료했습니다.');
+      onChanged();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy('');
+    }
+  };
+  return (
+    <ul className="sd-lines">
+      {tasks.map((t) => (
+        <li key={t.task_id}>
+          <span className={'tag ' + (t.due_date < today ? 'danger' : t.due_date === today ? 'amber' : '')}>{t.due_date === today ? '오늘' : shortDate(t.due_date)}</span>
+          <span className="sd-line-text">{t.title}</span>
+          <button type="button" className="link-btn sd-line-action" disabled={busy === t.task_id} onClick={() => done(t)}>완료</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Start-date fix for one assignment. Shows the check result before saving. */
+function StartDateModal({ rel, onClose, onDone }) {
+  const toast = useToast();
+  const [date, setDate] = useState(rel.start_date || '');
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const pick = (v) => { setDate(v); setPreview(null); setError(''); };
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      // First press checks; a second press saves once the warning was shown.
+      if (!preview) {
+        const p = await api('previewClassStartChange', { id: rel.id, start_date: date });
+        if (p.problem) return setError(p.problem);
+        if (p.missing_count) return setPreview(p);
+      }
+      setSaving(true);
+      await api('updateStudentClassStart', { id: rel.id, start_date: date });
+      toast('반 배정 시작일을 바꿨습니다.');
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal title={`${rel.class_name} 시작일 수정`} onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <Field label="시작일" hint="이 날부터 수업 기록 명단에 나옵니다.">{(id) => <input id={id} type="date" value={date} onChange={(e) => pick(e.target.value)} />}</Field>
+        {preview ? (
+          <div className="notice-bar" role="status">
+            {preview.missing_count}일치 수업에 이 학생 기록이 없습니다({preview.missing_dates.map(shortDate).join(', ')}). 저장하면 그 날짜 명단에 &lsquo;미기록&rsquo;으로 나옵니다.
+          </div>
+        ) : null}
+        {error ? <div className="error-box" role="alert">{error}</div> : null}
+        <div className="form-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
+          <button type="submit" className="btn" disabled={saving || !date || date === rel.start_date}>{preview ? '그래도 저장' : '저장'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ClassHistory({ studentId, onChanged }) {
+  const state = useApi(() => api('getStudent', studentId), [studentId]);
+  const [editing, setEditing] = useState(null);
+  return (
+    <Async state={state}>
+      {(s) => s.class_history.length ? (
+        <div className="table-wrap">
+          <table className="data-table stack-mobile">
+            <thead><tr><th>반</th><th>기간</th><th>구분</th><th>상태</th><th /></tr></thead>
+            <tbody>
+              {s.class_history.map((h) => (
+                <tr key={h.id}>
+                  <td className="primary"><Link href={`/classes/${h.class_id}`}>{h.class_name}</Link></td>
+                  <td data-label="기간">{h.start_date || '?'} ~ {h.end_date || '현재'}</td>
+                  <td data-label="구분">{h.assignment_type === '임시' ? <span className="tag amber">시험대비 임시</span> : <span className="tag muted">정규</span>}</td>
+                  <td data-label="상태">{h.status === '현재' ? <span className="tag ok">수강 중</span> : h.status === '임시' ? <span className="tag amber">임시</span> : <span className="tag muted">종료</span>}</td>
+                  <td className="right">{h.status !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setEditing(h)}>시작일 수정</button> : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {editing ? <StartDateModal rel={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); state.reload(); onChanged(); }} /> : null}
+        </div>
+      ) : <EmptyState>반 배정 이력이 없습니다.</EmptyState>}
+    </Async>
+  );
+}
+
+function ClassCard({ data, onChanged, historyOpen }) {
   const s = data.student;
+  const { classes } = data;
+  const upcoming = data.upcoming_classes || [];
   const [changing, setChanging] = useState(null);
   const [assigning, setAssigning] = useState(false);
-  const upcoming = data.upcoming_classes || [];
+  const [history, setHistory] = useState(!!historyOpen);
   const done = () => { setChanging(null); setAssigning(false); onChanged(); };
   return (
-    <div className="stack">
-      <div className="kpis">
+    <section className="card">
+      <div className="card-head">
+        <h2>반{data.unassigned ? <span className="tag warn" style={{ marginLeft: 8 }}>미배정</span> : null}</h2>
+        {s.status !== '퇴원' ? <button type="button" className="btn secondary sm" onClick={() => setAssigning(true)}>반 배정</button> : null}
+      </div>
+      {classes.length || upcoming.length ? (
+        <ul className="sd-lines">
+          {classes.map((c) => (
+            <li key={c.rel_id}>
+              <span className="sd-line-text">
+                <Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link>
+                {c.schedule_label ? <span className="muted"> · {c.schedule_label}</span> : null}
+                {c.assignment_type === '임시' ? <span className="tag amber" style={{ marginLeft: 6 }}>시험대비 · {c.source_class_name}에서 이동 ~{shortDate(c.end_date)}</span> : null}
+              </span>
+              {c.assignment_type !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button> : null}
+            </li>
+          ))}
+          {upcoming.map((c) => (
+            <li key={c.rel_id}>
+              <span className="sd-line-text"><Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link> <span className="tag">{shortDate(c.start_date)}부터</span></span>
+              <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button>
+            </li>
+          ))}
+        </ul>
+      ) : <EmptyState title="다니는 반이 없습니다" action={s.status !== '퇴원' ? <button type="button" className="btn" onClick={() => setAssigning(true)}>반 배정</button> : null}>
+        {s.status === '재원' ? '재원생인데 반이 없어 미배정 상태입니다.' : null}
+      </EmptyState>}
+      <div className="sd-history">
+        <button type="button" className="sd-history-toggle" aria-expanded={history} onClick={() => setHistory(!history)}>
+          지난 반 이력 <span aria-hidden="true">{history ? '▴' : '▾'}</span>
+        </button>
+        {history ? <ClassHistory studentId={s.student_id} onChanged={onChanged} /> : null}
+      </div>
+      {changing ? <ClassChangeDialog studentId={s.student_id} studentName={s.name} rel={changing} onClose={() => setChanging(null)} onDone={done} /> : null}
+      {assigning ? <AssignClassModal studentId={s.student_id} exceptIds={[...classes, ...upcoming].map((c) => c.class_id)} onClose={() => setAssigning(false)} onDone={done} /> : null}
+    </section>
+  );
+}
+
+export function OverviewTab({ data, onChanged, historyOpen }) {
+  const { month, next, exams, recent_notes: notes, counseling, open_tasks: tasks, today } = data;
+  const s = data.student;
+  return (
+    <div className="stack sd-overview">
+      <div className="kpis sd-kpis">
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${next.class_name} · ${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회 · 결석 ${month.absent_count}`} />
         <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
         <Kpi label="테스트 평균" value={month.test_average_display} note={month.test_count ? `이번 달 ${month.test_count}회 · 100점 환산` : '이번 달 테스트 없음'} />
-        <Kpi label="과제 이행 A 비율" value={percent(month.assignment_a_rate)} />
+        <Kpi label="과제 A 비율" value={percent(month.assignment_a_rate)} note="이번 달 과제 이행" />
       </div>
       {exams.length ? (
-        <section className="card">
-          <div className="card-head"><h2>학교 시험</h2><Link className="link-btn" href="/exams">시험 일정</Link></div>
-          <div className="stack-sm">
+        <section className="card sd-exams">
+          <h2>학교 시험</h2>
+          <ul className="sd-exam-list">
             {exams.map((x) => (
-              <div key={x.school_exam_id} className="split" style={{ alignItems: 'flex-start' }}>
-                <div>
-                  <strong>{x.label}</strong> <span className="muted">{x.school}</span>
-                  <div className="prewrap">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</div>
-                </div>
-                <div>{formatDate(x.exam_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{dDayLabel(x.d_day)}</span></div>
-              </div>
+              <li key={x.school_exam_id}>
+                <strong>{x.label}</strong>
+                <span className="muted">{x.school}</span>
+                <span>{shortDate(x.exam_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{dDayLabel(x.d_day)}</span></span>
+                <span className="sd-line-text">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</span>
+              </li>
             ))}
-          </div>
+          </ul>
+          <Link className="btn secondary sm" href="/exams">시험 일정</Link>
         </section>
       ) : null}
       <div className="cols-2">
         <section className="card">
-          <div className="card-head"><h2>최근 특이사항</h2><Link className="link-btn" href="?tab=lessons" scroll={false}>수업 기록 전체</Link></div>
+          <div className="card-head"><h2>상담 · 후속 조치</h2><Link className="btn secondary sm" href="?tab=counseling" scroll={false}>상담 전체</Link></div>
+          <QuickCounsel studentId={s.student_id} today={today} onSaved={onChanged} />
+          {tasks.length ? (
+            <div className="sd-sub">
+              <h3>후속 할 일</h3>
+              <FollowUps tasks={tasks} today={today} onChanged={onChanged} />
+            </div>
+          ) : null}
+          <div className="sd-sub">
+            <h3>최근 상담</h3>
+            {counseling.length ? (
+              <ul className="sd-lines">
+                {counseling.map((n) => (
+                  <li key={n.note_id}>
+                    <span className="sd-when">{shortDate(n.counsel_date)}</span>
+                    <span className={'tag ' + (n.kind === '학부모' ? '' : 'muted')}>{n.kind}</span>
+                    <span className="sd-line-text sd-clip"><strong>{n.title || '상담'}</strong> <span className="muted">{n.content}</span></span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted sd-empty">상담 기록이 없습니다.</p>}
+          </div>
+        </section>
+        <section className="card">
+          <div className="card-head"><h2>최근 특이사항</h2><Link className="btn secondary sm" href="?tab=lessons" scroll={false}>수업·출결</Link></div>
           {notes.length ? (
-            <ul className="timeline">
+            <ul className="sd-lines">
               {notes.map((n) => (
-                <li key={n.date + n.class_name}><div className="when">{shortDate(n.date)}<br />{n.class_name}</div><div className="what prewrap">{n.note}</div></li>
+                <li key={n.date + n.class_name}>
+                  <span className="sd-when">{shortDate(n.date)}</span>
+                  <span className="sd-line-text"><span className="muted">{n.class_name}</span> <span className="prewrap">{n.note}</span></span>
+                </li>
               ))}
             </ul>
           ) : <EmptyState>최근 수업 기록에 특이사항이 없습니다.</EmptyState>}
         </section>
-        <section className="card">
-          <div className="card-head"><h2>상담 · 후속 조치</h2><Link className="link-btn" href="?tab=counseling" scroll={false}>상담 전체</Link></div>
-          {tasks.length ? (
-            <div className="stack-sm" style={{ marginBottom: 12 }}>
-              {tasks.map((t) => (
-                <div key={t.task_id} className="split">
-                  <span><span className={'tag ' + (t.due_date < today ? 'danger' : t.due_date === today ? 'amber' : '')}>{t.due_date === today ? '오늘' : shortDate(t.due_date)}</span> {t.title}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {counseling.length ? (
-            <ul className="timeline">
-              {counseling.map((n) => (
-                <li key={n.note_id}><div className="when">{shortDate(n.counsel_date)}<br /><span className="tag muted">{n.kind}</span></div>
-                  <div className="what"><strong>{n.title || '상담'}</strong><span className="muted prewrap">{n.content.length > 90 ? n.content.slice(0, 90) + '…' : n.content}</span></div></li>
-              ))}
-            </ul>
-          ) : <EmptyState>상담 기록이 없습니다.</EmptyState>}
-        </section>
       </div>
       <div className="cols-2">
-        <section className="card">
-          <div className="card-head">
-            <h2>수강 중인 반{data.unassigned ? <span className="tag warn" style={{ marginLeft: 8 }}>미배정</span> : null}</h2>
-            {s.status !== '퇴원' ? <button type="button" className="btn secondary sm" onClick={() => setAssigning(true)}>반 배정</button> : null}
-          </div>
-          {classes.length || upcoming.length ? (
-            <div className="stack-sm">
-              {classes.map((c) => (
-                <div key={c.rel_id} className="split">
-                  <span>
-                    <Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link>
-                    {c.assignment_type === '임시' ? <span className="tag amber" style={{ marginLeft: 6 }}>시험대비 · {c.source_class_name}에서 이동 ~{shortDate(c.end_date)}</span> : null}
-                  </span>
-                  <span className="cluster">
-                    <span className="muted">{c.schedule_label}</span>
-                    {c.assignment_type !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button> : null}
-                  </span>
-                </div>
-              ))}
-              {upcoming.map((c) => (
-                <div key={c.rel_id} className="split">
-                  <span><Link href={`/classes/${c.class_id}`} style={{ fontWeight: 700 }}>{c.class_name}</Link> <span className="tag">{shortDate(c.start_date)}부터</span></span>
-                  <button type="button" className="btn ghost sm" onClick={() => setChanging(c)}>반 변경</button>
-                </div>
-              ))}
-            </div>
-          ) : <EmptyState title="다니는 반이 없습니다" action={s.status !== '퇴원' ? <button type="button" className="btn" onClick={() => setAssigning(true)}>반 배정</button> : null}>
-            {s.status === '재원' ? '재원생인데 반이 없어 미배정 상태입니다.' : null}
-          </EmptyState>}
-          {changing ? <ClassChangeDialog studentId={s.student_id} studentName={s.name} rel={changing} onClose={() => setChanging(null)} onDone={done} /> : null}
-          {assigning ? <AssignClassModal studentId={s.student_id} exceptIds={[...classes, ...upcoming].map((c) => c.class_id)} onClose={() => setAssigning(false)} onDone={done} /> : null}
-        </section>
+        <ClassCard data={data} onChanged={onChanged} historyOpen={historyOpen} />
         <section className="card">
           <h2>기본 정보</h2>
           <dl className="dl">
             <dt>학교</dt><dd>{s.school || <span className="tag warn">미입력 · 시험 일정과 연결되지 않음</span>}</dd>
             <dt>학생 연락처</dt><dd>{s.student_phone || '-'}</dd>
-            <dt>학부모 연락처</dt><dd>{s.parent_phone ? <a href={`tel:${s.parent_phone}`}>{s.parent_phone}</a> : '-'}</dd>
-            <dt>등록일</dt><dd>{s.enrollment_date || '-'}</dd>
+            <dt>학부모 연락처</dt><dd>{!s.parent_phone ? '-' : telHref(s.parent_phone) ? <a href={telHref(s.parent_phone)}>{s.parent_phone}</a> : s.parent_phone}</dd>
             {s.memo ? <><dt>메모</dt><dd className="prewrap">{s.memo}</dd></> : null}
           </dl>
         </section>
@@ -223,7 +346,7 @@ export function OverviewTab({ data, onChanged }) {
   );
 }
 
-// ---------------------------------------------------------------- 출결 달력
+// ---------------------------------------------------------------- 수업·출결
 
 const KIND = {
   present: { label: '출석', cls: 'att-present', mark: '●' },
@@ -239,113 +362,138 @@ function shiftMonth(ym, delta) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export function AttendanceTab({ studentId, today }) {
+function DailyReportModal({ lessonId, onClose }) {
+  const state = useApi(() => api('generateDailyReport', lessonId), [lessonId]);
+  return (
+    <Modal title="일일 보고서" onClose={onClose} footer={state.data ? <CopyButton text={state.data.text} /> : null}>
+      <Async state={state}>{(d) => <pre className="report-text">{d.text}</pre>}</Async>
+    </Modal>
+  );
+}
+
+export function LessonsTab({ studentId, today }) {
+  const boot = useBoot();
   const [ym, setYm] = useState(today.slice(0, 7));
   const [picked, setPicked] = useState(null);
-  const state = useApi(() => api('getStudentAttendanceMonth', studentId, ym), [studentId, ym]);
+  const [daily, setDaily] = useState(null);
+  const r = useRange('1m', today);
+  const month = useApi(() => api('getStudentAttendanceMonth', studentId, ym), [studentId, ym]);
+  const lessons = useApi(() => api('getStudentLessons', studentId, r.start, r.end), [studentId, r.range]);
+  const classNames = useMemo(() => Object.fromEntries((boot.search.classes || []).map((c) => [c.id, c.name])), [boot.search.classes]);
+  const listRef = useRef(null);
   const [y, m] = ym.split('-').map(Number);
+  const reloadAll = () => Promise.all([lessons.reload(), month.reload()]);
+  const moveMonth = (next) => { setYm(next); setPicked(null); };
+
+  const pick = (date) => {
+    if (picked === date) return setPicked(null);
+    setPicked(date);
+    if (date < r.start) {
+      const fit = RANGES.find((x) => addDays(today, -x.days) <= date);
+      if (fit) r.setRange(fit.key);
+    }
+  };
+
+  useEffect(() => {
+    if (!picked || !listRef.current) return;
+    const row = listRef.current.querySelector(`[data-date="${picked}"]`);
+    if (!row) return;
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    row.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+  }, [picked, lessons.data]);
+
+  const pickedDay = picked && month.data ? month.data.days.find((x) => x.date === picked) : null;
+  const pickedMissing = pickedDay && lessons.data && !lessons.data.some((l) => l.lesson_date === picked);
+
   return (
-    <div className="stack">
+    <div className="stack sd-lessons-tab">
       <div className="split">
         <div className="cluster">
-          <button type="button" className="btn secondary sm" onClick={() => { setYm(shiftMonth(ym, -1)); setPicked(null); }} aria-label="이전 달">◀</button>
-          <strong style={{ fontSize: 18 }}>{y}년 {m}월</strong>
-          <button type="button" className="btn secondary sm" onClick={() => { setYm(shiftMonth(ym, 1)); setPicked(null); }} aria-label="다음 달">▶</button>
-          {ym !== today.slice(0, 7) ? <button type="button" className="link-btn" onClick={() => setYm(today.slice(0, 7))}>이번 달</button> : null}
+          <button type="button" className="btn secondary sm" onClick={() => moveMonth(shiftMonth(ym, -1))} aria-label="이전 달">◀</button>
+          <strong className="sd-month">{y}년 {m}월</strong>
+          <button type="button" className="btn secondary sm" onClick={() => moveMonth(shiftMonth(ym, 1))} aria-label="다음 달">▶</button>
+          {ym !== today.slice(0, 7) ? <button type="button" className="btn ghost sm" onClick={() => moveMonth(today.slice(0, 7))}>이번 달</button> : null}
         </div>
         <div className="cluster att-legend" aria-label="범례">
           {Object.entries(KIND).map(([k, v]) => <span key={k} className={v.cls}><span aria-hidden="true">{v.mark}</span> {v.label}</span>)}
         </div>
       </div>
-      <Async state={state}>
-        {(d) => {
-          const first = new Date(y, m - 1, 1).getDay();
-          const lead = (first + 6) % 7;
-          const cells = [...Array(lead).fill(null), ...d.days];
-          const sel = picked && d.days.find((x) => x.date === picked);
-          return (
-            <>
-              <div className="kpis">
-                <Kpi label="출석률" value={percent(d.attendance_rate)} />
-                <Kpi label="출석" value={d.counts.present} />
-                <Kpi label="결석" value={d.counts.absent} tone={d.counts.absent ? 'red' : undefined} />
-                <Kpi label="보강" value={d.counts.makeup} />
-                <Kpi label="미입력" value={d.counts.missing} note="지난 수업일 중 기록 없음" tone={d.counts.missing ? 'terracotta' : undefined} />
-              </div>
-              <div className="att-grid" role="grid" aria-label={`${y}년 ${m}월 출결`}>
-                {['월', '화', '수', '목', '금', '토', '일'].map((w) => <div key={w} className="att-head" role="columnheader">{w}</div>)}
-                {cells.map((day, i) => day ? (
-                  <button key={day.date} type="button" role="gridcell"
-                    className={'att-cell' + (day.date === d.today ? ' is-today' : '') + (picked === day.date ? ' is-picked' : '') + (day.entries.length ? '' : ' is-empty')}
-                    onClick={() => setPicked(day.entries.length ? day.date : null)}
-                    aria-label={`${Number(day.date.slice(8))}일 ${day.entries.map((e) => KIND[e.kind].label).join(', ') || '수업 없음'}`}>
-                    <span className="att-day">{Number(day.date.slice(8))}</span>
-                    <span className="att-marks">
-                      {day.entries.map((e, j) => <span key={j} className={KIND[e.kind].cls} title={`${e.class_name} ${KIND[e.kind].label}`}>{KIND[e.kind].mark}</span>)}
-                    </span>
-                  </button>
-                ) : <div key={'pad' + i} className="att-cell is-pad" aria-hidden="true" />)}
-              </div>
-              {sel ? (
-                <section className="card">
-                  <h3>{formatDate(sel.date)}</h3>
-                  <div className="stack-sm">
-                    {sel.entries.map((e, j) => (
-                      <div key={j} className="split" style={{ alignItems: 'flex-start' }}>
-                        <span className="cluster" style={{ alignItems: 'center' }}>
-                          {e.lesson_id ? <AttendanceSwitch lessonId={e.lesson_id} value={e.kind === 'absent' ? '결석' : '출석'} onSaved={state.reload} /> : <span className={'tag ' + (e.kind === 'absent' ? 'danger' : e.kind === 'missing' ? 'warn' : e.kind === 'makeup' ? 'amber' : e.kind === 'present' ? 'ok' : 'muted')}>{KIND[e.kind].label}</span>}
-                          <strong>{e.class_name}</strong> {e.time ? <span className="muted">{timeSpan(e.time)}</span> : null}
-                        </span>
-                        <span className="muted">{[e.test && `테스트 ${e.test}`, e.test_scope && `범위 ${e.test_scope}`, e.assignment && `과제 ${e.assignment}`, e.concentration && e.kind === 'present' && `집중도 ${CONC[e.concentration] || e.concentration}`].filter(Boolean).join(' · ')}</span>
-                        {e.special_note ? <div className="prewrap" style={{ flexBasis: '100%' }}>{e.special_note}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ) : <p className="muted" style={{ margin: 0 }}>날짜를 누르면 그날의 기록이 보이고, 기록된 수업의 출결만 바꿀 수 있습니다.</p>}
-            </>
-          );
-        }}
-      </Async>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- 수업 기록
-
-export function LessonsTab({ studentId }) {
-  const boot = useBoot();
-  const r = useRange('1m', boot.today);
-  const state = useApi(() => api('getStudentLessons', studentId, r.start, r.end), [studentId, r.range]);
-  const classNames = useMemo(() => Object.fromEntries((boot.search.classes || []).map((c) => [c.id, c.name])), [boot.search.classes]);
-  return (
-    <div className="stack">
-      <div className="split"><span className="muted">출결만 여기서 바꿀 수 있습니다. 점수와 숙제는 그대로 둡니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
-      <Async state={state}>
-        {(rows) => rows.length ? (
-          <div className="table-wrap">
-            <table className="data-table stack-mobile">
-              <thead><tr><th>날짜</th><th>반</th><th>출결</th><th>테스트 (반 평균)</th><th className="center">과제</th><th className="center">집중도</th><th>진도 · 특이사항</th></tr></thead>
-              <tbody>
-                {rows.map((l) => (
-                  <tr key={l.lesson_id}>
-                    <td className="primary">{shortDate(l.lesson_date)}</td>
-                    <td data-label="반">{classNames[l.class_id] || l.class_id}</td>
-                    <td data-label="출결"><AttendanceSwitch lessonId={l.lesson_id} value={l.attendance === '결석' ? '결석' : '출석'} onSaved={state.reload} /></td>
-                    <td data-label="테스트">{l.test_status === '실시' ? <>{score(l.test_score)}/{l.test_max_score} <span className="muted">({l.class_test_average ? l.class_test_average.test_average_display : '-'})</span></> : <span className="muted">-</span>}{l.test_scope ? <div className="muted prewrap">범위: {l.test_scope}</div> : null}</td>
-                    <td data-label="과제" className="center">{l.assignment_completion || '-'}</td>
-                    <td data-label="집중도" className="center">{CONC[l.concentration] || l.concentration || '-'}</td>
-                    <td data-label="진도 · 특이사항">
-                      <span className="muted">{l.progress}</span>
-                      {l.special_note ? <div className="prewrap"><strong>{l.special_note}</strong></div> : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <Async state={month}>
+        {(d) => (
+          <div className="sd-summary" aria-label={`${m}월 출결 집계`}>
+            <span>출석률 <strong>{percent(d.attendance_rate)}</strong></span>
+            <span>출석 <strong>{d.counts.present}</strong></span>
+            <span>결석 <strong style={d.counts.absent ? { color: 'var(--red)' } : undefined}>{d.counts.absent}</strong></span>
+            <span>보강 <strong>{d.counts.makeup}</strong></span>
+            <span title="지난 수업일 중 기록 없음">미입력 <strong style={d.counts.missing ? { color: 'var(--terracotta)' } : undefined}>{d.counts.missing}</strong></span>
           </div>
-        ) : <div className="card"><EmptyState title="이 기간에 수업 기록이 없습니다" /></div>}
+        )}
       </Async>
+      <div className="sd-lessons">
+        <section className="card sd-cal">
+          <Async state={month}>
+            {(d) => {
+              const first = new Date(y, m - 1, 1).getDay();
+              const lead = (first + 6) % 7;
+              const cells = [...Array(lead).fill(null), ...d.days];
+              return (
+                <>
+                  <div className="att-grid" role="grid" aria-label={`${y}년 ${m}월 출결`}>
+                    {['월', '화', '수', '목', '금', '토', '일'].map((w) => <div key={w} className="att-head" role="columnheader">{w}</div>)}
+                    {cells.map((day, i) => day ? (
+                      <button key={day.date} type="button" role="gridcell"
+                        className={'att-cell' + (day.date === d.today ? ' is-today' : '') + (picked === day.date ? ' is-picked' : '') + (day.entries.length ? '' : ' is-empty')}
+                        aria-pressed={picked === day.date}
+                        onClick={() => (day.entries.length ? pick(day.date) : setPicked(null))}
+                        aria-label={`${Number(day.date.slice(8))}일 ${day.entries.map((e) => KIND[e.kind].label).join(', ') || '수업 없음'}`}>
+                        <span className="att-day">{Number(day.date.slice(8))}</span>
+                        <span className="att-marks">
+                          {day.entries.map((e, j) => <span key={j} className={KIND[e.kind].cls} title={`${e.class_name} ${KIND[e.kind].label}`}>{KIND[e.kind].mark}</span>)}
+                        </span>
+                      </button>
+                    ) : <div key={'pad' + i} className="att-cell is-pad" aria-hidden="true" />)}
+                  </div>
+                  {pickedMissing ? (
+                    <p className="sd-cal-note" role="status">
+                      {formatDate(picked)} · {pickedDay.entries.map((e) => `${e.class_name} ${KIND[e.kind].label}`).join(', ')} — 수업 기록이 없습니다.
+                    </p>
+                  ) : <p className="sd-cal-note muted">날짜를 누르면 수업 기록에서 그날 줄을 표시합니다. 출결은 수업 기록에서 바꿉니다.</p>}
+                </>
+              );
+            }}
+          </Async>
+        </section>
+        <section className="card sd-lesson-list" ref={listRef}>
+          <div className="card-head"><h2>수업 기록</h2><RangePicker value={r.range} onChange={r.setRange} /></div>
+          <Async state={lessons}>
+            {(rows) => rows.length ? (
+              <div className="table-wrap">
+                <table className="data-table stack-mobile">
+                  <thead><tr><th>날짜</th><th>반</th><th>출결</th><th>테스트 (반 평균)</th><th className="center">과제</th><th className="center">집중도</th><th>진도 · 특이사항</th><th className="right">보고서</th></tr></thead>
+                  <tbody>
+                    {rows.map((l) => (
+                      <tr key={l.lesson_id} data-date={l.lesson_date} className={picked === l.lesson_date ? 'is-picked' : undefined}>
+                        <td className="primary">{shortDate(l.lesson_date)}</td>
+                        <td data-label="반">{classNames[l.class_id] || l.class_id}</td>
+                        <td data-label="출결"><AttendanceSwitch lessonId={l.lesson_id} value={l.attendance === '결석' ? '결석' : '출석'} onSaved={reloadAll} /></td>
+                        <td data-label="테스트">{l.test_status === '실시' ? <>{score(l.test_score)}/{l.test_max_score} <span className="muted">({l.class_test_average ? l.class_test_average.test_average_display : '-'})</span></> : <span className="muted">-</span>}{l.test_scope ? <div className="muted prewrap">범위: {l.test_scope}</div> : null}</td>
+                        <td data-label="과제" className="center">{l.assignment_completion || '-'}</td>
+                        <td data-label="집중도" className="center">{CONC[l.concentration] || l.concentration || '-'}</td>
+                        <td data-label="진도 · 특이사항">
+                          <span className="muted">{l.progress}</span>
+                          {l.special_note ? <div className="prewrap"><strong>{l.special_note}</strong></div> : null}
+                        </td>
+                        <td data-label="일일 보고서" className="right"><button type="button" className="btn secondary sm" onClick={() => setDaily(l.lesson_id)}>보고서</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <EmptyState title="이 기간에 수업 기록이 없습니다" />}
+          </Async>
+        </section>
+      </div>
+      {daily ? <DailyReportModal lessonId={daily} onClose={() => setDaily(null)} /> : null}
     </div>
   );
 }
@@ -494,145 +642,5 @@ export function GradesTab({ studentId }) {
         ) : <div className="card"><EmptyState title="이 기간에 본 테스트가 없습니다" /></div>}
       </Async>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------- 보고서
-
-function CopyButton({ text }) {
-  const toast = useToast();
-  return (
-    <button type="button" className="btn secondary sm" onClick={() => navigator.clipboard.writeText(text).then(() => toast('복사했습니다.'), () => toast('복사하지 못했습니다.', 'error'))}>복사</button>
-  );
-}
-
-function DailyReportModal({ lessonId, onClose }) {
-  const state = useApi(() => api('generateDailyReport', lessonId), [lessonId]);
-  return (
-    <Modal title="일일 보고서" onClose={onClose} footer={state.data ? <CopyButton text={state.data.text} /> : null}>
-      <Async state={state}>{(d) => <pre className="report-text">{d.text}</pre>}</Async>
-    </Modal>
-  );
-}
-
-export function ReportsTab({ studentId }) {
-  const state = useApi(() => api('getStudentReports', studentId), [studentId]);
-  const [openMonthly, setOpenMonthly] = useState(null);
-  const [daily, setDaily] = useState(null);
-  return (
-    <Async state={state}>
-      {(d) => (
-        <div className="cols-2">
-          <section className="card">
-            <div className="card-head"><h2>월간 보고서</h2><Link className="link-btn" href="/reports">보고서 화면</Link></div>
-            {d.monthly.length ? (
-              <div className="stack-sm">
-                {d.monthly.map((r) => (
-                  <div key={r.monthly_report_id}>
-                    <div className="split">
-                      <button type="button" className="link-btn" aria-expanded={openMonthly === r.monthly_report_id}
-                        onClick={() => setOpenMonthly(openMonthly === r.monthly_report_id ? null : r.monthly_report_id)}>{r.year}년 {r.month}월</button>
-                      <span className="cluster"><span className={'tag ' + (r.status === '확정' ? 'ok' : 'muted')}>{r.status}</span><CopyButton text={r.report_text} /></span>
-                    </div>
-                    {openMonthly === r.monthly_report_id ? <pre className="report-text">{r.report_text}</pre> : null}
-                  </div>
-                ))}
-              </div>
-            ) : <EmptyState title="저장된 월간 보고서가 없습니다">보고서 화면에서 반 단위로 한 번에 만들 수 있습니다.</EmptyState>}
-          </section>
-          <section className="card">
-            <h2>일일 보고서</h2>
-            {d.lessons.length ? (
-              <div className="stack-sm">
-                {d.lessons.map((l) => (
-                  <div key={l.lesson_id} className="split">
-                    <span>{shortDate(l.date)} <span className="muted">{l.class_name}</span> {l.attendance === '결석' ? <span className="tag danger">결석</span> : null}</span>
-                    <button type="button" className="btn secondary sm" onClick={() => setDaily(l.lesson_id)}>보고서 보기</button>
-                  </div>
-                ))}
-              </div>
-            ) : <EmptyState>수업 기록이 없습니다.</EmptyState>}
-          </section>
-          {daily ? <DailyReportModal lessonId={daily} onClose={() => setDaily(null)} /> : null}
-        </div>
-      )}
-    </Async>
-  );
-}
-
-// ---------------------------------------------------------------- 반 이력
-
-/** Change when a regular assignment starts. Shows the check result before saving. */
-function StartDateModal({ rel, onClose, onDone }) {
-  const toast = useToast();
-  const [date, setDate] = useState(rel.start_date || '');
-  const [preview, setPreview] = useState(null);
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const pick = (v) => { setDate(v); setPreview(null); setError(''); };
-  const submit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      // First press checks; a second press saves once the warning was shown.
-      if (!preview) {
-        const p = await api('previewClassStartChange', { id: rel.id, start_date: date });
-        if (p.problem) return setError(p.problem);
-        if (p.missing_count) return setPreview(p);
-      }
-      setSaving(true);
-      await api('updateStudentClassStart', { id: rel.id, start_date: date });
-      toast('반 배정 시작일을 바꿨습니다.');
-      onDone();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <Modal title={`${rel.class_name} 시작일 수정`} onClose={onClose}>
-      <form className="stack" onSubmit={submit}>
-        <Field label="시작일" hint="이 날부터 수업 기록 명단에 나옵니다.">{(id) => <input id={id} type="date" value={date} onChange={(e) => pick(e.target.value)} />}</Field>
-        {preview ? (
-          <div className="notice-bar" role="status">
-            {preview.missing_count}일치 수업에 이 학생 기록이 없습니다({preview.missing_dates.map(shortDate).join(', ')}). 저장하면 그 날짜 명단에 &lsquo;미기록&rsquo;으로 나옵니다.
-          </div>
-        ) : null}
-        {error ? <div className="error-box" role="alert">{error}</div> : null}
-        <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>취소</button>
-          <button type="submit" className="btn" disabled={saving || !date || date === rel.start_date}>{preview ? '그래도 저장' : '저장'}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-export function HistoryTab({ studentId }) {
-  const state = useApi(() => api('getStudent', studentId), [studentId]);
-  const [editing, setEditing] = useState(null);
-  return (
-    <Async state={state}>
-      {(s) => s.class_history.length ? (
-        <div className="table-wrap">
-          <table className="data-table stack-mobile">
-            <thead><tr><th>반</th><th>기간</th><th>구분</th><th>상태</th><th /></tr></thead>
-            <tbody>
-              {s.class_history.map((h) => (
-                <tr key={h.id}>
-                  <td className="primary"><Link href={`/classes/${h.class_id}`}>{h.class_name}</Link></td>
-                  <td data-label="기간">{h.start_date || '?'} ~ {h.end_date || '현재'}</td>
-                  <td data-label="구분">{h.assignment_type === '임시' ? <span className="tag amber">시험대비 임시</span> : <span className="tag muted">정규</span>}</td>
-                  <td data-label="상태">{h.status === '현재' ? <span className="tag ok">수강 중</span> : h.status === '임시' ? <span className="tag amber">임시</span> : <span className="tag muted">종료</span>}</td>
-                  <td className="right">{h.status !== '임시' ? <button type="button" className="btn ghost sm" onClick={() => setEditing(h)}>시작일 수정</button> : null}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {editing ? <StartDateModal rel={editing} onClose={() => setEditing(null)} onDone={() => { setEditing(null); state.reload(); }} /> : null}
-        </div>
-      ) : <div className="card"><EmptyState title="반 배정 이력이 없습니다" /></div>}
-    </Async>
   );
 }

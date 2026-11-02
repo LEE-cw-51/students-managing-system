@@ -54,27 +54,25 @@ export default function ClassmateNav({ studentId, classes, disabled }) {
   if (!classId || index < 0) return null;
 
   return (
-    <nav className="classmate-nav" aria-label="같은 반 학생 이동">
-      {classes.length > 1 ? (
-        <select
-          aria-label="반 선택"
-          value={classId}
-          onChange={(e) => router.replace(hrefFor(studentId, e.target.value), { scroll: false })}
-        >
-          {classes.map((c) => <option key={c.class_id} value={String(c.class_id)}>{c.class_name}</option>)}
-        </select>
-      ) : (
-        <span className="classmate-nav-class">{classes[0].class_name}</span>
-      )}
-      <button type="button" className="btn secondary sm" disabled={!prev} onClick={() => go(prev.student_id)} title="이전 학생 (Alt+←)">‹ 이전</button>
+    <nav className={'classmate-nav' + (classes.length > 1 ? '' : ' is-single')} aria-label="같은 반 학생 이동">
+      <span className="classmate-nav-class">같은 반</span>
+      <select
+        className="classmate-nav-pick"
+        aria-label="반 선택"
+        value={classId}
+        onChange={(e) => router.replace(hrefFor(studentId, e.target.value), { scroll: false })}
+      >
+        {classes.map((c) => <option key={c.class_id} value={String(c.class_id)}>{c.class_name}</option>)}
+      </select>
+      <button type="button" className="btn secondary sm" disabled={!prev} onClick={() => go(prev.student_id)} title="이전 학생 (Alt+←)" aria-label="이전 학생">‹<span className="classmate-nav-word"> 이전</span></button>
       <select className="classmate-nav-student" aria-label="학생 선택" value={studentId} onChange={(e) => go(e.target.value)}>
         {roster.map((m, i) => (
           <option key={m.student_id} value={String(m.student_id)}>
-            {String(m.student_id) === studentId ? `${m.name} (${i + 1}/${roster.length})` : m.name}
+            {String(m.student_id) === studentId ? `${m.name} ${i + 1}/${roster.length}` : m.name}
           </option>
         ))}
       </select>
-      <button type="button" className="btn secondary sm" disabled={!next} onClick={() => go(next.student_id)} title="다음 학생 (Alt+→)">다음 ›</button>
+      <button type="button" className="btn secondary sm" disabled={!next} onClick={() => go(next.student_id)} title="다음 학생 (Alt+→)" aria-label="다음 학생"><span className="classmate-nav-word">다음 </span>›</button>
     </nav>
   );
 }

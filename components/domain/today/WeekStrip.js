@@ -4,17 +4,19 @@ import { api, useApi } from '@/lib/client-api';
 
 const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
-function weekDates(iso) {
+function addDays(iso, delta) {
   const [y, m, d] = iso.split('-').map(Number);
-  const base = new Date(y, m - 1, d);
-  const monday = new Date(y, m - 1, d - ((base.getDay() + 6) % 7));
-  return DAYS.map((_, i) => {
-    const dt = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-  });
+  const dt = new Date(y, m - 1, d + delta);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
-/** Mon–Sun strip of the selected week with class/makeup counts; click a day to open it. */
+function weekDates(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const offset = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  return DAYS.map((_, i) => addDays(iso, i - offset));
+}
+
+/** Mon–Sun strip of the selected week with class/makeup counts; the page's only date navigation. */
 export default function WeekStrip({ date, today, onPick }) {
   const dates = weekDates(date);
   const state = useApi(() => api('getCalendar', dates[0], dates[6]), [dates[0]]);
@@ -25,18 +27,24 @@ export default function WeekStrip({ date, today, onPick }) {
     else counts[ev.date].makeups += 1;
   });
   return (
-    <nav className="week-strip" aria-label="이번 주">
-      {dates.map((d, i) => {
-        const c = counts[d] || { classes: 0, makeups: 0 };
-        return (
-          <button key={d} type="button" className={'week-day' + (d === date ? ' is-selected' : '') + (d === today ? ' is-today' : '')}
-            aria-current={d === date ? 'date' : undefined} onClick={() => onPick(d)}>
-            <span className="wd-name">{DAYS[i]}</span>
-            <span className="wd-date">{Number(d.slice(8))}</span>
-            <span className="wd-count">{c.classes ? `수업 ${c.classes}` : '–'}{c.makeups ? ` · 보강 ${c.makeups}` : ''}</span>
-          </button>
-        );
-      })}
+    <nav className="week-nav" aria-label="날짜 이동">
+      <button type="button" className="btn secondary week-step" aria-label="지난주" onClick={() => onPick(addDays(date, -7))}>◀<span className="week-step-label"> 지난주</span></button>
+      <div className="week-strip">
+        {dates.map((d, i) => {
+          const c = counts[d] || { classes: 0, makeups: 0 };
+          return (
+            <button key={d} type="button" className={'week-day' + (d === date ? ' is-selected' : '') + (d === today ? ' is-today' : '')}
+              aria-current={d === date ? 'date' : undefined} onClick={() => onPick(d)}>
+              <span className="wd-name">{DAYS[i]}</span>
+              <span className="wd-date">{Number(d.slice(8))}</span>
+              <span className="wd-count">{c.classes ? `수업 ${c.classes}` : '–'}{c.makeups ? ` · 보강 ${c.makeups}` : ''}</span>
+              <span className="wd-dots" aria-hidden="true">{c.classes || c.makeups ? '•'.repeat(Math.min(c.classes, 4)) + '◦'.repeat(Math.min(c.makeups, 2)) : '–'}</span>
+            </button>
+          );
+        })}
+      </div>
+      <button type="button" className="btn secondary week-step" aria-label="다음 주" onClick={() => onPick(addDays(date, 7))}><span className="week-step-label">다음 주 </span>▶</button>
+      <input type="date" className="week-pick" value={date} aria-label="날짜 선택" onChange={(e) => e.target.value && onPick(e.target.value)} />
     </nav>
   );
 }

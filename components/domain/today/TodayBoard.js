@@ -51,9 +51,9 @@ export default function TodayBoard({ date, onOpenClass }) {
   return (
     <Async state={state}>
       {(b) => (
-        <div className="stack">
+        <div className="stack today-board">
           <section>
-            <div className="card-head"><h2 style={{ margin: 0 }}>수업</h2><button type="button" className="btn secondary sm" onClick={() => setAddingMakeup(true)}>보강 추가</button></div>
+            <div className="card-head"><h2 style={{ margin: 0 }}>수업{b.classes.length ? ` ${b.classes.length}개` : ''}{b.makeups.length ? ` · 보강 ${b.makeups.length}개` : ''}</h2><button type="button" className="btn secondary sm" onClick={() => setAddingMakeup(true)}>보강 추가</button></div>
             {b.classes.length || b.makeups.length ? (
               <div className="class-cards">
                 {b.classes.map((c) => (
@@ -97,7 +97,7 @@ export default function TodayBoard({ date, onOpenClass }) {
             ) : null}
           </section>
 
-          <div className="cols-2">
+          <div className="cols-2 board-cards">
             <section className="card">
               <div className="card-head"><h2>할 일</h2></div>
               {b.tasks.length || b.overdue_tasks.length ? (
@@ -139,9 +139,7 @@ export default function TodayBoard({ date, onOpenClass }) {
                 </div>
               ) : <EmptyState>7일 안에 있는 학교 시험이 없습니다.</EmptyState>}
             </section>
-          </div>
 
-          <div className="cols-2">
             <section className="card">
               <div className="card-head"><h2>주의 학생 {b.flagged.length ? `${b.flagged.length}명` : ''}</h2><Link className="link-btn" href="/students">학생 목록</Link></div>
               {b.unassigned_count ? (

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
-const { runAgentTurn, applyProposal } = require('../lib/agent.js');
+const { runAgentTurn, applyProposal, agentRateLimit, AGENT_RATE_LIMITED } = require('../lib/agent.js');
 const { chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
 
 const CONFIG = { key: 'test-key', baseUrl: 'https://ai.test/v1', model: 'test-model' };
@@ -35,6 +35,31 @@ function scriptedFetch(script) {
     if (!next) throw new Error('unexpected extra AI call');
     if (next.status) return { ok: false, status: next.status, json: async () => ({ error: { message: 'boom' } }) };
     return { ok: true, status: 200, json: async () => ({ model: 'test-model', choices: [{ message: next }] }) };
+  };
+  return { fetch, requests };
+}
+
+/**
+ * Fake streaming chat endpoint: each request gets the next scripted list of SSE deltas,
+ * sent in small byte chunks that cut through lines and multi-byte characters.
+ */
+function streamedFetch(script, chunkBytes = 7) {
+  const requests = [];
+  const fetch = async (url, init) => {
+    requests.push(JSON.parse(init.body));
+    const deltas = script[requests.length - 1];
+    if (!deltas) throw new Error('unexpected extra AI call');
+    const sse = deltas.map((delta) => `data: ${JSON.stringify({ model: 'test-model', choices: [{ delta }] })}\n\n`).join('') + 'data: [DONE]\n\n';
+    const bytes = new TextEncoder().encode(sse);
+    let at = 0;
+    const body = new ReadableStream({
+      pull(out) {
+        if (at >= bytes.length) return out.close();
+        out.enqueue(bytes.slice(at, at + chunkBytes));
+        at += chunkBytes;
+      }
+    });
+    return { ok: true, status: 200, headers: { get: () => 'text/event-stream' }, body };
   };
   return { fetch, requests };
 }
@@ -159,6 +184,36 @@ describe('temperature by model', () => {
     assert.equal(tools.requests[0].temperature, 0.2);
   });
 
+  it('streams text pieces to onText and joins tool call pieces', async () => {
+    const { fetch, requests } = streamedFetch([[
+      { role: 'assistant', content: '학생을 ' },
+      { content: '찾아볼게요.' },
+      { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'search_students', arguments: '{"qu' } }] },
+      { tool_calls: [{ index: 1, id: 'c2', type: 'function', function: { name: 'get_today_board', arguments: '' } }] },
+      { tool_calls: [{ index: 0, function: { arguments: 'ery":"민' } }] },
+      { tool_calls: [{ index: 0, function: { arguments: '수"}' } }] },
+      { tool_calls: [{ index: 1, function: { arguments: '{}' } }] }
+    ]]);
+    const pieces = [];
+    const res = await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch, onText: (t) => pieces.push(t) });
+    assert.equal(requests[0].stream, true);
+    assert.deepEqual(pieces, ['학생을 ', '찾아볼게요.']);
+    assert.equal(res.text, '학생을 찾아볼게요.');
+    assert.equal(res.model, 'test-model');
+    assert.deepEqual(res.toolCalls, [
+      { id: 'c1', name: 'search_students', args: { query: '민수' } },
+      { id: 'c2', name: 'get_today_board', args: {} }
+    ]);
+    // The raw message goes back to the model in the next request, in the usual shape.
+    assert.deepEqual(res.message.tool_calls.map((c) => [c.id, c.function.arguments]), [['c1', '{"query":"민수"}'], ['c2', '{}']]);
+  });
+
+  it('sends no stream flag without onText', async () => {
+    const { fetch, requests } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await chatWithTools([{ role: 'user', content: 'hi' }], toolDefinitions(), { config: CONFIG, fetch });
+    assert.equal('stream' in requests[0], false);
+  });
+
   it('keeps unreadable arguments visible', () => {
     assert.deepEqual(parseToolArguments('{bad'), { __unreadable: '{bad' });
     assert.deepEqual(parseToolArguments(''), {});
@@ -254,6 +309,184 @@ describe('runAgentTurn', () => {
     await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch }), /잠시 후/);
     assert.equal(api.listAgentConversations().length, 0);
   });
+
+  it('keeps the turn when the data changes during the AI wait', async () => {
+    const { store, hong, kim, lessonOf } = setup();
+    // Like withService: every step reads the store again.
+    const run = async (fn) => fn(LMS.createService(store));
+    const hongLesson = lessonOf(hong.student_id);
+    const kimLesson = lessonOf(kim.student_id);
+    const script = scriptedFetch([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          toolCall('w1', 'update_attendance', { lesson_id: hongLesson.lesson_id, attendance: '결석' }),
+          toolCall('w2', 'update_attendance', { lesson_id: kimLesson.lesson_id, attendance: '결석' })
+        ]
+      },
+      { role: 'assistant', content: '두 학생 결석 처리를 승인해 주세요.' }
+    ]);
+    const fetch = async (url, init) => {
+      // Kim's lesson is deleted on another screen while the model writes its reply.
+      if (script.requests.length === 1) store.writeTable('Lessons', store.readTable('Lessons').filter((l) => l.lesson_id !== kimLesson.lesson_id));
+      return script.fetch(url, init);
+    };
+    const out = await runAgentTurn({ message: '홍길동, 김철수 오늘 결석' }, run, { config: CONFIG, fetch });
+    assert.equal(out.message.proposal.status, 'pending');
+    assert.equal(out.message.proposal.calls.length, 2);
+    const conv = LMS.createService(store).getAgentConversation(out.conversation_id);
+    assert.deepEqual(conv.messages.map((m) => m.role), ['user', 'assistant']);
+
+    // Approval checks again and refuses the stale change; nothing is applied.
+    await assert.rejects(applyProposal(out.message.proposal.proposal_id, run), /찾을 수 없습니다/);
+    const after = LMS.createService(store);
+    assert.equal(after.getStudentLessons(hong.student_id, '2026-09-14', '2026-09-14')[0].attendance, '출석');
+    assert.equal(after.getAgentConversation(out.conversation_id).messages[1].proposal.status, 'failed');
+  });
+
+  it('flags a removed conversation with a code and counts nothing', async () => {
+    const { api, store, run } = setup();
+    const { fetch, requests } = scriptedFetch([]);
+    await assert.rejects(runAgentTurn({ conversationId: 'AGC-9999', message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 5 }), (e) => {
+      assert.equal(e.code, 'CONVERSATION_NOT_FOUND');
+      assert.match(e.message, /대화를 찾을 수 없습니다/);
+      return true;
+    });
+    assert.throws(() => api.getAgentConversation('AGC-9999'), (e) => e.code === 'CONVERSATION_NOT_FOUND');
+    assert.equal(requests.length, 0);
+    assert.equal(store.readTable('AgentUsage').length, 0);
+  });
+
+  it('reports steps and streamed text in order, dropping text that came before tool calls', async () => {
+    const { run } = setup();
+    const { fetch } = streamedFetch([
+      [
+        { role: 'assistant', content: '찾아볼게요.' },
+        { tool_calls: [{ index: 0, id: 'c1', type: 'function', function: { name: 'search_students', arguments: '{"query":"홍길동"}' } }] },
+        { tool_calls: [{ index: 1, id: 'c2', type: 'function', function: { name: 'get_scores', arguments: '{"student_id":"STU-9999"}' } }] }
+      ],
+      [{ role: 'assistant', content: '홍길동 학생을 ' }, { content: '찾았습니다.' }]
+    ]);
+    const events = [];
+    const out = await runAgentTurn({ message: '홍길동 찾아줘' }, run, { config: CONFIG, fetch, onEvent: (e) => events.push(e) });
+    assert.deepEqual(events, [
+      { type: 'text', delta: '찾아볼게요.' },
+      { type: 'text_reset' },
+      { type: 'step', id: 'c1', tool: 'search_students', label: '학생 검색 중', state: 'running' },
+      { type: 'step', id: 'c1', tool: 'search_students', label: '학생 검색 중', state: 'done', ok: true },
+      { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'running' },
+      { type: 'step', id: 'c2', tool: 'get_scores', label: '성적 확인 중', state: 'done', ok: false },
+      { type: 'text', delta: '홍길동 학생을 ' },
+      { type: 'text', delta: '찾았습니다.' }
+    ]);
+    assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
+    assert.deepEqual(out.steps.map((s) => s.ok), [true, false]);
+  });
+
+  it('stops on abort, gives the slot back and saves nothing', async () => {
+    const { store, hong, lessonOf, run } = setup();
+    const now = Date.parse('2026-09-14T01:00:00Z');
+    const saved = () => ['AgentUsage', 'AgentConversations', 'AgentMessages', 'AgentProposals'].map((t) => store.readTable(t).length);
+
+    // Stopped after a change was collected, while the model writes its reply.
+    const controller = new AbortController();
+    const script = scriptedFetch([
+      { role: 'assistant', content: null, tool_calls: [toolCall('w1', 'update_attendance', { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' })] },
+      { role: 'assistant', content: '승인해 주세요.' }
+    ]);
+    const fetch = async (url, init) => {
+      if (script.requests.length === 1) controller.abort();
+      return script.fetch(url, init);
+    };
+    await assert.rejects(runAgentTurn({ message: '홍길동 결석' }, run, { config: CONFIG, fetch, rateLimit: 5, now, signal: controller.signal }),
+      (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(saved(), [0, 0, 0, 0]);
+
+    // Stopped while the AI request is in flight: the request itself is cancelled.
+    const inflight = new AbortController();
+    const hanging = (url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      inflight.abort();
+    });
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch: hanging, rateLimit: 5, now, signal: inflight.signal }),
+      (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(saved(), [0, 0, 0, 0]);
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
+});
+
+describe('agent rate limit', () => {
+  const HOUR = 60 * 60 * 1000;
+  const T0 = Date.parse('2026-09-14T01:00:00Z');
+
+  it('allows the limit per hour, then refuses before calling the AI', async () => {
+    const { api, store, run } = setup();
+    const replies = scriptedFetch([{ role: 'assistant', content: '하나' }, { role: 'assistant', content: '둘' }]);
+    await runAgentTurn({ message: '1' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 });
+    await runAgentTurn({ message: '2' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 + 10 * 60000 });
+    await assert.rejects(runAgentTurn({ message: '3' }, run, { config: CONFIG, fetch: replies.fetch, rateLimit: 2, now: T0 + 20 * 60000 }), (e) => {
+      assert.equal(e.code, AGENT_RATE_LIMITED);
+      assert.match(e.message, /한 시간에 2번까지.*약 40분 뒤/);
+      return true;
+    });
+    assert.equal(replies.requests.length, 2);
+    assert.equal(api.listAgentConversations().length, 2);
+    assert.equal(store.readTable('AgentUsage').length, 2);
+
+    // An hour after the first turn, one slot is free again; old rows are dropped.
+    const later = scriptedFetch([{ role: 'assistant', content: '셋' }]);
+    await runAgentTurn({ message: '3' }, run, { config: CONFIG, fetch: later.fetch, rateLimit: 2, now: T0 + HOUR + 1 });
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0 + 10 * 60000, T0 + HOUR + 1]);
+  });
+
+  it('gives the slot back when the AI call fails', async () => {
+    const { api, store, run } = setup();
+    const { fetch } = scriptedFetch([{ status: 429 }]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 2, now: T0 }), /잠시 후/);
+    assert.equal(store.readTable('AgentUsage').length, 0);
+    assert.equal(api.listAgentConversations().length, 0);
+  });
+
+  it('gives the slot back when the turn cannot be saved', async () => {
+    const { store } = setup();
+    const run = async (fn) => fn(LMS.createService(store));
+    const first = scriptedFetch([{ role: 'assistant', content: '어느 학생인가요?' }]);
+    const a = await runAgentTurn({ message: '민수 찾아줘' }, run, { config: CONFIG, fetch: first.fetch, rateLimit: 5, now: T0 });
+    assert.equal(store.readTable('AgentUsage').length, 1);
+    const second = scriptedFetch([{ role: 'assistant', content: '알겠습니다.' }]);
+    const fetch = async (url, init) => {
+      // The conversation is removed while the model answers.
+      store.writeTable('AgentConversations', []);
+      return second.fetch(url, init);
+    };
+    await assert.rejects(runAgentTurn({ conversationId: a.conversation_id, message: '중2 학생이요' }, run, { config: CONFIG, fetch, rateLimit: 5, now: T0 + 60000 }),
+      (e) => e.code === 'CONVERSATION_NOT_FOUND');
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0]);
+  });
+
+  it('keeps the slot of a saved turn', async () => {
+    const { store, run } = setup();
+    const { fetch } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 2, now: T0 });
+    assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0]);
+  });
+
+  it('counts nothing when the limit is 0', async () => {
+    const { store, run } = setup();
+    const { fetch } = scriptedFetch([{ role: 'assistant', content: '안녕하세요' }]);
+    await runAgentTurn({ message: '안녕' }, run, { config: CONFIG, fetch, rateLimit: 0 });
+    assert.equal(store.readTable('AgentUsage').length, 0);
+  });
+
+  it('reads AGENT_RATE_LIMIT_PER_HOUR with a default of 60', () => {
+    assert.equal(agentRateLimit(undefined), 60);
+    assert.equal(agentRateLimit(''), 60);
+    assert.equal(agentRateLimit('20'), 20);
+    assert.equal(agentRateLimit('0'), 0);
+    assert.equal(agentRateLimit('-1'), 60);
+    assert.equal(agentRateLimit('abc'), 60);
+  });
 });
 
 describe('agent proposals', () => {
@@ -308,6 +541,35 @@ describe('agent proposals', () => {
     assert.equal(conv.messages[1].proposal.status, 'failed');
     assert.match(conv.messages[1].proposal.result.error, /찾을 수 없습니다/);
     void run;
+  });
+
+  it('applies only the selected changes and records the rest as skipped', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const p = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'create_counseling', args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-14', content: '결석 사유 확인' } }
+    ]);
+    const statusOf = () => api.getAgentConversation(p.conversation_id).messages[1].proposal.status;
+
+    // An empty choice is refused and the proposal stays pending.
+    await assert.rejects(applyProposal(p.proposal_id, run, []), /하나 이상/);
+    await assert.rejects(applyProposal(p.proposal_id, run, [7]), (e) => e.code === 'AGENT_NOTHING_SELECTED');
+    assert.throws(() => api.applyAgentProposal(p.proposal_id, []), (e) => e.code === 'AGENT_NOTHING_SELECTED');
+    assert.equal(statusOf(), 'pending');
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+
+    const applied = await applyProposal(p.proposal_id, run, [0, 2]);
+    assert.equal(applied.status, 'applied');
+    assert.equal(applied.verification_status, 'verified');
+    assert.equal(applied.result.length, 3);
+    assert.equal(applied.result[0].ok, true);
+    assert.deepEqual(applied.result[1], { tool: 'update_attendance', text: p.calls[1].text, skipped: true });
+    assert.equal(applied.result[2].ok, true);
+    assert.equal(lessonOf(hong.student_id).attendance, '결석');
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+    assert.equal(api.getCounselingNotes(hong.student_id).length, 1);
+    assert.equal(statusOf(), 'applied');
   });
 
   it('rejects once and refuses to apply a rejected proposal', () => {
@@ -383,18 +645,44 @@ describe('Anthropic API provider', () => {
   const { anthropicModelId, anthropicToolDefinitions, anthropicErrorMessage } = require('../lib/agent-anthropic.js');
   const { getAgentProvider, isAgentConfigured } = require('../lib/ai-client.js');
 
-  /** Fake client: each messages.create call gets the next scripted response. */
+  /**
+   * Fake client: each messages.create or messages.stream call gets the next scripted response.
+   * A streamed response sends its `pieces` (default: each text block) as text deltas; a
+   * function entry gets (params, opts) and returns the response or throws.
+   */
   function fakeClient(script) {
     const requests = [];
+    const next = (params, opts, streamed) => {
+      requests.push({ params: JSON.parse(JSON.stringify(params)), opts, streamed });
+      const entry = script[requests.length - 1];
+      if (!entry) throw new Error('unexpected extra AI call');
+      return entry;
+    };
     return {
       requests,
       messages: {
         create: async (params, opts) => {
-          requests.push({ params: JSON.parse(JSON.stringify(params)), opts });
-          const next = script[requests.length - 1];
-          if (!next) throw new Error('unexpected extra AI call');
-          if (next instanceof Error) throw next;
-          return { model: 'claude-haiku-5-5', ...next };
+          let entry = next(params, opts, false);
+          if (typeof entry === 'function') entry = await entry(params, opts);
+          if (entry instanceof Error) throw entry;
+          return { model: 'claude-haiku-5-5', ...entry };
+        },
+        stream: (params, opts) => {
+          const entry = next(params, opts, true);
+          const final = (async () => {
+            const res = typeof entry === 'function' ? await entry(params, opts) : entry;
+            if (res instanceof Error) throw res;
+            return { model: 'claude-haiku-5-5', ...res };
+          })();
+          final.catch(() => {});
+          return {
+            async *[Symbol.asyncIterator]() {
+              const res = await final;
+              const pieces = res.pieces || res.content.filter((b) => b.type === 'text').map((b) => b.text);
+              for (const text of pieces) yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } };
+            },
+            finalMessage: () => final.then(({ pieces, ...res }) => res)
+          };
         }
       }
     };
@@ -501,5 +789,70 @@ describe('Anthropic API provider', () => {
     withEnv({ ANTHROPIC_API_KEY: '  ', AI_API_KEY: undefined, OPENAI_API_KEY: undefined }, () => {
       assert.equal(isAgentConfigured(), false);
     });
+  });
+
+  it('streams text deltas and tool steps with onEvent, and only then', async () => {
+    const { run } = setup();
+    const client = fakeClient([
+      { stop_reason: 'tool_use', content: [{ type: 'text', text: '찾아볼게요.' }, toolUse('t1', 'search_students', { query: '홍길동' })] },
+      { stop_reason: 'end_turn', content: [{ type: 'text', text: '홍길동 학생을 찾았습니다.' }], pieces: ['홍길동 학생을 ', '찾았습니다.'] }
+    ]);
+    const events = [];
+    const out = await runAgentTurn({ message: '홍길동 찾아줘' }, run, { provider: 'anthropic', client, onEvent: (e) => events.push(e) });
+    assert.deepEqual(events, [
+      { type: 'text', delta: '찾아볼게요.' },
+      { type: 'text_reset' },
+      { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'running' },
+      { type: 'step', id: 't1', tool: 'search_students', label: '학생 검색 중', state: 'done', ok: true },
+      { type: 'text', delta: '홍길동 학생을 ' },
+      { type: 'text', delta: '찾았습니다.' }
+    ]);
+    assert.equal(out.message.content, '홍길동 학생을 찾았습니다.');
+    assert.deepEqual(client.requests.map((r) => r.streamed), [true, true]);
+    assert.ok(client.requests[0].opts.signal instanceof AbortSignal);
+    assert.equal(client.requests[0].opts.maxRetries, 0);
+    // The tool_use turn goes back to the model from the streamed final message.
+    assert.equal(client.requests[1].params.messages.at(-2).content[1].id, 't1');
+
+    const plain = fakeClient([{ stop_reason: 'end_turn', content: [{ type: 'text', text: '네' }] }]);
+    await runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client: plain });
+    assert.equal(plain.requests[0].streamed, false);
+  });
+
+  it('streams a stop notice after the text', async () => {
+    const { run } = setup();
+    const client = fakeClient([{ stop_reason: 'max_tokens', content: [{ type: 'text', text: '목록:' }] }]);
+    const deltas = [];
+    const out = await runAgentTurn({ message: '...' }, run, { provider: 'anthropic', client, onEvent: (e) => e.type === 'text' && deltas.push(e.delta) });
+    assert.equal(deltas.join(''), out.message.content);
+  });
+
+  it('stops on abort while streaming, gives the slot back and saves nothing', async () => {
+    const { store, run } = setup();
+    const Anthropic = await sdk();
+    const controller = new AbortController();
+    const client = fakeClient([(params, opts) => new Promise((resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new Anthropic.APIUserAbortError()));
+      controller.abort();
+    })]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, {
+      provider: 'anthropic', client, onEvent: () => {}, signal: controller.signal, rateLimit: 5, now: Date.parse('2026-09-14T01:00:00Z')
+    }), (e) => e.code === 'REQUEST_ABORTED');
+    assert.deepEqual(['AgentUsage', 'AgentConversations', 'AgentMessages'].map((t) => store.readTable(t).length), [0, 0, 0]);
+
+    const already = new AbortController();
+    already.abort();
+    const idle = fakeClient([]);
+    await assert.rejects(runAgentTurn({ message: '안녕' }, run, { provider: 'anthropic', client: idle, signal: already.signal }), (e) => e.code === 'REQUEST_ABORTED');
+    assert.equal(idle.requests.length, 0);
+  });
+
+  it('reports a timeout when the whole reply runs past the step deadline', async () => {
+    const { createAnthropicProvider } = require('../lib/agent-anthropic.js');
+    const client = fakeClient([(params, opts) => new Promise((resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new Error('Request was aborted.')));
+    })]);
+    const provider = createAnthropicProvider({ system: 's', history: [], message: '안녕' }, { client });
+    await assert.rejects(provider.send(20, { onText: () => {} }), /너무 오래/);
   });
 });

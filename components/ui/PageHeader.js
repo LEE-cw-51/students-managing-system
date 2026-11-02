@@ -4,7 +4,7 @@ import Link from 'next/link';
 export default function PageHeader({ title, crumbs, sub, actions }) {
   return (
     <div className="page-header">
-      <div>
+      <div className="page-header-title">
         {crumbs && crumbs.length ? (
           <nav className="crumbs" aria-label="위치">
             {crumbs.map((c, i) => (
