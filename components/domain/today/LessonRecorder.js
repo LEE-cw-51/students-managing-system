@@ -76,7 +76,8 @@ function initialForm(d) {
       test_max_score: ses.test_max_score === null || ses.test_max_score === undefined ? '' : String(ses.test_max_score),
       test_difficulty: ses.test_difficulty || '',
       test_scope: ses.test_scope || '',
-      class_notice: ses.class_notice || d.class_notice || ''
+      class_notice: ses.class_notice || d.class_notice || '',
+      memo: ses.memo || ''
     },
     // Nothing graded for this student yet → start every item at A. Other students' grades stay put.
     checks: priorReady ? Object.fromEntries(d.students.map((s) => {
@@ -272,7 +273,8 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   const commonSummary = [
     ses.progress.trim() ? `진도: ${ses.progress.trim().replace(/\s+/g, ' ')}` : '진도 미입력',
     ses.test_on ? `테스트 봄${String(ses.test_max_score).trim() ? `(만점 ${ses.test_max_score})` : ''}` : '테스트 없음',
-    ses.class_notice.trim() ? '공지 있음' : ''
+    ses.class_notice.trim() ? '공지 있음' : '',
+    ses.memo.trim() ? '메모 있음' : ''
   ].filter(Boolean).join(' · ');
   const homeworkTitles = homework.map((h) => h.title.trim()).filter(Boolean);
   const homeworkSummary = homeworkTitles.length ? `${homeworkTitles.length}개: ${homeworkTitles.join(', ')}` : planHomework ? '없음 · 강의 계획 숙제 있음' : '없음';
@@ -355,7 +357,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
         lesson_date: data.date,
         class_id: cls.class_id,
         session: {
-          progress: s.progress, content: s.content, class_notice: s.class_notice,
+          progress: s.progress, content: s.content, class_notice: s.class_notice, memo: s.memo,
           test_title: s.test_on ? s.test_title : '', test_max_score: s.test_on ? s.test_max_score : '', test_difficulty: s.test_on ? s.test_difficulty : '',
           test_scope: s.test_on ? s.test_scope : ''
         },
@@ -489,6 +491,10 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
           <div className="field span-all">
             <label htmlFor="rec-notice">반 공지 (일일 보고서 공지사항)</label>
             <textarea id="rec-notice" rows={2} value={form.session.class_notice} onChange={(e) => setSession('class_notice', e.target.value)} />
+          </div>
+          <div className="field span-all">
+            <label htmlFor="rec-memo">메모 (보고서에 들어가지 않음)</label>
+            <textarea id="rec-memo" rows={2} value={form.session.memo} onChange={(e) => setSession('memo', e.target.value)} />
           </div>
         </div> : null}
       </section>

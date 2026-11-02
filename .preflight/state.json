@@ -49,14 +49,23 @@
       "created_at": "2026-11-01T19:25:51+00:00",
       "lint": "pass",
       "sha256": "7c766bc66fc6dc3aadce43a8f8bfe9da55348e451f4c421bdc0b2fd202455b7c"
+    },
+    {
+      "v": 6,
+      "file": "wireframes/v6.html",
+      "from": 5,
+      "note": "class detail screen",
+      "created_at": "2026-11-02T01:59:23+00:00",
+      "lint": "pass",
+      "sha256": "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426"
     }
   ],
   "lock": {
-    "version": 5,
-    "source": "wireframes/v5.html",
-    "sha256_source": "7c766bc66fc6dc3aadce43a8f8bfe9da55348e451f4c421bdc0b2fd202455b7c",
-    "sha256_lock": "599e9eb6d763fff1885c15bd5d8b1bdd11c7c93bffc1694a45c903dedd89f87f",
-    "approved_at": "2026-11-01T19:27:57+00:00",
+    "version": 6,
+    "source": "wireframes/v6.html",
+    "sha256_source": "8edaef41a384533b9dbce3b79b2b2cce5bb8e2354376fcea7dbcb3ea52ed1426",
+    "sha256_lock": "0612ea54241103c25c0d6ef0451c40219fc6a521cf56a2b2f21acffa42e72d9c",
+    "approved_at": "2026-11-02T02:08:54+00:00",
     "quote": "좋아요, 위 답대로 확정하고 구현",
     "evidence": "unverified"
   },
@@ -268,6 +277,69 @@
       "ts": "2026-11-01T19:27:57+00:00",
       "event": "approve",
       "v": 5,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T01:59:23+00:00",
+      "event": "reopen",
+      "was": 5,
+      "reason": "반 상세 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T01:59:23+00:00",
+      "event": "new",
+      "v": 6,
+      "from": 5,
+      "note": "class detail screen"
+    },
+    {
+      "ts": "2026-11-02T02:00:43+00:00",
+      "event": "check",
+      "v": 6,
+      "lint_errors": 3,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-02T02:01:03+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:01:28+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T02:01:47+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:02:21+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:06:57+00:00",
+      "event": "check",
+      "v": 6,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T02:08:54+00:00",
+      "event": "approve",
+      "v": 6,
       "evidence": "unverified"
     }
   ]

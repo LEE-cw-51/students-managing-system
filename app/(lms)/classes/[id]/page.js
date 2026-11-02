@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { Suspense, useState } from 'react';
-import PageHeader from '@/components/ui/PageHeader';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import { Async } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import ClassForm from '@/components/domain/class/ClassForm';
-import { OverviewTab, ProgressTab, HomeworkTab, TestsTab, StudentsTab, StatsTab } from '@/components/domain/class/ClassTabs';
+import { OverviewTab, HomeworkTab, TestsTab, StudentsTab, StatsTab } from '@/components/domain/class/ClassTabs';
 import PlansTab from '@/components/domain/class/PlansTab';
 import { api, useApi } from '@/lib/client-api';
 import { useBoot } from '@/components/shell/AppShell';
@@ -49,23 +48,36 @@ function ClassSwitcher({ currentId, tab }) {
 
 const TABS = [
   { key: 'overview', label: '개요' },
-  { key: 'progress', label: '진도 기록' },
-  { key: 'homework', label: '숙제 기록' },
-  { key: 'tests', label: '테스트 기록' },
-  { key: 'plans', label: '강의 계획' },
+  { key: 'lessons', label: '수업 계획·기록' },
+  { key: 'homework', label: '숙제' },
+  { key: 'tests', label: '테스트' },
   { key: 'students', label: '학생' },
   { key: 'stats', label: '통계' }
 ];
 
+const LEGACY_TABS = { progress: 'lessons', plans: 'lessons' };
+
 function Workspace() {
   const confirm = useConfirm();
   const { id } = useParams();
-  const tab = useTab(TABS);
   const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const legacy = LEGACY_TABS[params.get('tab')];
+  const current = useTab(TABS);
+  const tab = legacy || current;
   const boot = useBoot();
   const toast = useToast();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState('');
+  const [planVersion, setPlanVersion] = useState(0);
   const overview = useApi(() => api('getClassOverview', id), [id]);
+
+  useEffect(() => {
+    if (!legacy) return;
+    const next = new URLSearchParams(params.toString());
+    next.set('tab', legacy);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [legacy, params, pathname, router]);
 
   const remove = async () => {
     if (!(await confirm({ message: '이 반과 배정·강의 계획을 모두 삭제할까요? 되돌릴 수 없습니다.', confirmLabel: '삭제', danger: true }))) return;
@@ -76,36 +88,39 @@ function Workspace() {
     <Async state={overview}>
       {(data) => {
         const cls = data.class;
-        const sub = [cls.schedule_label, cls.grade, cls.teacher && `담당 ${cls.teacher}`, cls.textbook].filter(Boolean).join(' · ');
+        const meta = [cls.schedule_label || '시간표 없음', cls.grade, `학생 ${data.roster.length}명`].filter(Boolean).join(' · ');
         const period = data.exam && data.exam.period;
-        const crumbs = cls.class_type === '시험대비' && cls.exam_period_id
-          ? [{ href: '/exams?tab=periods', label: '시험대비 기간' }, { href: `/exams/periods/${cls.exam_period_id}`, label: (period && period.title) || '기간 상세' }]
-          : [{ href: '/classes', label: '반' }];
+        const back = cls.class_type === '시험대비' && cls.exam_period_id
+          ? { href: `/exams/periods/${cls.exam_period_id}`, label: `‹ ${(period && period.title) || '시험대비 기간'}` }
+          : { href: '/classes', label: '‹ 반' };
         return (
           <>
-            <PageHeader
-              crumbs={crumbs}
-              title={<>{cls.class_name}{cls.status !== '운영' ? <span className="tag muted" style={{ marginLeft: 8, verticalAlign: 'middle' }}>{cls.status}</span> : null}{cls.class_type === '시험대비' ? <span className="tag amber" style={{ marginLeft: 8, verticalAlign: 'middle' }}>시험대비</span> : null}</>}
-              sub={sub || '시간표가 없습니다. 정보 수정에서 요일과 시간을 입력하세요.'}
-              actions={(
-                <>
-                  <ClassSwitcher currentId={cls.class_id} tab={tab} />
-                  <Link className="btn" href={`/today?class=${cls.class_id}`}>수업 기록하기</Link>
-                  <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
-                  {!data.has_lessons ? <button type="button" className="btn ghost" style={{ color: 'var(--red)' }} onClick={remove}>삭제</button> : null}
-                </>
-              )}
-            />
-            <Tabs tabs={TABS} current={tab} />
+            <div className="page-header cd-header">
+              <div className="page-header-title">
+                <Link className="rec-back" href={back.href}>{back.label}</Link>
+                <h1 className="display">{cls.class_name}</h1>
+                {cls.status !== '운영' ? <span className="tag muted">{cls.status}</span> : null}
+                {cls.class_type === '시험대비' ? <span className="tag amber">시험대비</span> : null}
+                <span className="sub">{meta}</span>
+              </div>
+              <div className="page-actions">
+                <ClassSwitcher currentId={cls.class_id} tab={tab} />
+                <Link className="btn" href={`/today?class=${cls.class_id}`}>수업 기록</Link>
+                <button type="button" className="btn secondary" onClick={() => setEditing('info')}>정보 수정</button>
+              </div>
+            </div>
+            <Tabs tabs={TABS} current={tab} scrollHint />
             {tab === 'overview' ? <OverviewTab data={data} /> : null}
-            {tab === 'progress' ? <ProgressTab classId={id} onChanged={overview.reload} /> : null}
+            {tab === 'lessons' ? <PlansTab classId={id} version={planVersion} onEditCurriculum={() => setEditing('curriculum')} /> : null}
             {tab === 'homework' ? <HomeworkTab classId={id} /> : null}
             {tab === 'tests' ? <TestsTab classId={id} /> : null}
-            {tab === 'plans' ? <PlansTab classId={id} /> : null}
             {tab === 'students' ? <StudentsTab classId={id} onChanged={overview.reload} /> : null}
             {tab === 'stats' ? <StatsTab classId={id} today={data.today} /> : null}
             {editing ? (
-              <ClassForm initial={cls} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); overview.reload(); }} />
+              <ClassForm initial={cls} section={editing === 'curriculum' ? 'curriculum' : ''}
+                onDelete={editing === 'info' && !data.has_lessons ? remove : null}
+                onClose={() => setEditing('')}
+                onSaved={() => { setEditing(''); setPlanVersion((v) => v + 1); overview.reload(); }} />
             ) : null}
           </>
         );

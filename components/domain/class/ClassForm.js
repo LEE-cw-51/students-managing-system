@@ -21,8 +21,11 @@ function textbookSpan(row) {
   return row.to ? `${row.textbook} (${from} ~ ${shortDate(row.to)})` : `${row.textbook} (${from} ~ 사용 중)`;
 }
 
-/** Create or edit a class. onSaved(row) after a successful save. */
-export default function ClassForm({ initial, onClose, onSaved }) {
+/**
+ * Create or edit a class. onSaved(row) after a successful save.
+ * `section="curriculum"` shows only the unit list; `onDelete` adds the delete button.
+ */
+export default function ClassForm({ initial, onClose, onSaved, section, onDelete }) {
   const boot = useBoot();
   const toast = useToast();
   const [form, setForm] = useState(() => ({
@@ -76,6 +79,31 @@ export default function ClassForm({ initial, onClose, onSaved }) {
     }
   };
 
+  const curriculumField = (
+    <Field label="교재 · 단원 목록 (강의 계획용)" wide hint="단원마다 예상 수업 횟수를 넣으세요. 이름을 바꾸거나 순서를 옮겨도 기존 계획과 연결이 유지됩니다.">
+      {() => <CurriculumEditor value={form.curriculum} onChange={set('curriculum')} textbook={form.textbook} />}
+    </Field>
+  );
+  const actions = (
+    <div className="form-actions">
+      {onDelete ? <button type="button" className="btn ghost danger-text" style={{ marginRight: 'auto' }} onClick={onDelete}>반 삭제</button> : null}
+      <ModalCancel />
+      <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
+    </div>
+  );
+
+  if (section === 'curriculum') {
+    return (
+      <Modal title={`${form.class_name} 단원 목록`} onClose={onClose} dirty={dirty}>
+        <form onSubmit={submit} className="stack">
+          <div className="form-grid">{curriculumField}</div>
+          {error ? <div className="error-box" role="alert">{error}</div> : null}
+          {actions}
+        </form>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={isEdit ? '반 정보 수정' : '반 등록'} onClose={onClose} dirty={dirty}>
       <form onSubmit={submit} className="stack">
@@ -110,9 +138,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
           <Field label="수업 요일 · 시간" wide hint="요일을 누른 뒤 시간을 숫자로 입력하세요. 1800 → 18:00">
             {() => <WeekdaySchedule value={form.schedule} onChange={set('schedule')} />}
           </Field>
-          <Field label="교재 · 단원 목록 (강의 계획용)" wide hint="단원마다 예상 수업 횟수를 넣으세요. 이름을 바꾸거나 순서를 옮겨도 기존 계획과 연결이 유지됩니다.">
-            {() => <CurriculumEditor value={form.curriculum} onChange={set('curriculum')} textbook={form.textbook} />}
-          </Field>
+          {curriculumField}
           <Field label="메모" wide>{(id) => <textarea id={id} value={form.memo} onChange={set('memo')} rows={2} />}</Field>
           {isEdit ? (
             <Field label="상태">{(id) => (
@@ -123,10 +149,7 @@ export default function ClassForm({ initial, onClose, onSaved }) {
           ) : null}
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
-        <div className="form-actions">
-          <ModalCancel />
-          <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
-        </div>
+        {actions}
       </form>
     </Modal>
   );
