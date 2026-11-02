@@ -85,14 +85,23 @@
       "created_at": "2026-11-02T02:56:47+00:00",
       "lint": "pass",
       "sha256": "cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c"
+    },
+    {
+      "v": 10,
+      "file": "wireframes/v10.html",
+      "from": 9,
+      "note": "settings screen",
+      "created_at": "2026-11-02T03:11:24+00:00",
+      "lint": "pass",
+      "sha256": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140"
     }
   ],
   "lock": {
-    "version": 9,
-    "source": "wireframes/v9.html",
-    "sha256_source": "cd1c6c4ac712b70845ffb4694cfcdab496e56f297d18f44bdc2a58b981980b4c",
-    "sha256_lock": "d7cc3bbd15c84640f8d8b88111f9397ada4263e6fb69b69e9959fc1c2e276ff0",
-    "approved_at": "2026-11-02T02:59:37+00:00",
+    "version": 10,
+    "source": "wireframes/v10.html",
+    "sha256_source": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140",
+    "sha256_lock": "9fc58c8b90df731306c2cbe2127441a44fbd2e6642e9ba57b66e6b5eedc0b8cd",
+    "approved_at": "2026-11-02T03:14:12+00:00",
     "quote": "좋아요, 위 답대로 확정하고 구현",
     "evidence": "unverified"
   },
@@ -556,6 +565,55 @@
       "ts": "2026-11-02T02:59:37+00:00",
       "event": "approve",
       "v": 9,
+      "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-02T03:11:24+00:00",
+      "event": "reopen",
+      "was": 9,
+      "reason": "설정 화면 구성"
+    },
+    {
+      "ts": "2026-11-02T03:11:24+00:00",
+      "event": "new",
+      "v": 10,
+      "from": 9,
+      "note": "settings screen"
+    },
+    {
+      "ts": "2026-11-02T03:12:16+00:00",
+      "event": "check",
+      "v": 10,
+      "lint_errors": 9,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-02T03:12:28+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T03:12:48+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-02T03:13:02+00:00",
+      "event": "check",
+      "v": 10,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-02T03:14:12+00:00",
+      "event": "approve",
+      "v": 10,
       "evidence": "unverified"
     }
   ]
