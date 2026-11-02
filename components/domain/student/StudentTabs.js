@@ -8,7 +8,7 @@ import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import { formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
@@ -337,7 +337,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
           <dl className="dl">
             <dt>학교</dt><dd>{s.school || <span className="tag warn">미입력 · 시험 일정과 연결되지 않음</span>}</dd>
             <dt>학생 연락처</dt><dd>{s.student_phone || '-'}</dd>
-            <dt>학부모 연락처</dt><dd>{s.parent_phone ? <a href={`tel:${s.parent_phone}`}>{s.parent_phone}</a> : '-'}</dd>
+            <dt>학부모 연락처</dt><dd>{!s.parent_phone ? '-' : telHref(s.parent_phone) ? <a href={telHref(s.parent_phone)}>{s.parent_phone}</a> : s.parent_phone}</dd>
             {s.memo ? <><dt>메모</dt><dd className="prewrap">{s.memo}</dd></> : null}
           </dl>
         </section>

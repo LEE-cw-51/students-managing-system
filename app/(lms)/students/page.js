@@ -14,7 +14,7 @@ import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { relativeDay, shortDate } from '@/lib/format';
+import { relativeDay, shortDate, telHref } from '@/lib/format';
 import { dDayLabel } from '@/lib/term';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useUrlState } from '@/components/ui/useUrlState';
@@ -188,7 +188,7 @@ function StudentList({ onCreate }) {
                     <span>최근 수업 {r.last_lesson_date ? `${shortDate(r.last_lesson_date)} · ${relativeDay(r.last_lesson_date, boot.today)}` : '-'}</span>
                     <span>시험 {r.next_exam ? <>{shortDate(r.next_exam.date)} <ExamTag exam={r.next_exam} /></> : '-'}</span>
                   </div>
-                  {r.parent_phone ? <a className="btn secondary sm st-call" href={`tel:${r.parent_phone}`}>학부모 {r.parent_phone}</a> : null}
+                  {telHref(r.parent_phone) ? <a className="btn secondary sm st-call" href={telHref(r.parent_phone)}>학부모 {r.parent_phone}</a> : null}
                 </li>
               ))}
             </ul>

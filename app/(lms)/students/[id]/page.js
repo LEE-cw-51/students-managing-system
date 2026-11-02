@@ -13,6 +13,7 @@ import {
 import CounselingTab from '@/components/domain/student/CounselingTab';
 import ClassmateNav from '@/components/domain/student/ClassmateNav';
 import { api, useApi } from '@/lib/client-api';
+import { telHref } from '@/lib/format';
 
 const TABS = [
   { key: 'overview', label: '개요' },
@@ -61,7 +62,7 @@ function Workspace() {
                 {data.badges.length ? <Badges badges={data.badges} /> : null}
               </div>
               <div className="page-actions">
-                {s.parent_phone ? <a className="btn secondary" href={`tel:${s.parent_phone}`}>학부모 전화</a> : null}
+                {telHref(s.parent_phone) ? <a className="btn secondary" href={telHref(s.parent_phone)}>학부모 전화</a> : null}
                 <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
               </div>
             </div>
