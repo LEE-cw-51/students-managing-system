@@ -279,4 +279,16 @@ describe('today views', () => {
     assert.equal(b.exams_soon.length, 1);
     assert.equal(b.week.length, 7);
   });
+
+  it('soon exams follow the math exam D-day, not the first exam day', () => {
+    const s = seeded();
+    const exam = { school_year: '2026', semester: '2', exam_type: '기말', school: '한빛중학교', grade: '중2' };
+    s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-30', exam_end_date: '2026-11-06', math_exam_date: '2026-11-05' });
+    assert.equal(s.api.getTodayBoard(TODAY).exams_soon.length, 0, 'starts in 4 days but math is D-10');
+    s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-30', exam_end_date: '2026-11-06', math_exam_date: '2026-11-02' });
+    assert.deepEqual(s.api.getTodayBoard(TODAY).exams_soon.map((x) => x.d_day), [7]);
+    s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-22', exam_end_date: '2026-11-06', math_exam_date: '2026-11-05' });
+    const [inProgress] = s.api.getTodayBoard(TODAY).exams_soon;
+    assert.deepEqual([inProgress.in_progress, inProgress.d_day], [true, 10], 'in progress stays listed');
+  });
 });

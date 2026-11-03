@@ -615,7 +615,7 @@ LMS.createViews = function (ctx) {
       label: examLabel(row),
       exam_end_date: end,
       in_progress: !!row.exam_date && LMS.inRange(today, row.exam_date, end),
-      d_day: row.exam_date ? LMS.daysBetween(today, row.exam_date) : null,
+      d_day: row.exam_date ? LMS.daysBetween(today, LMS.schoolExamDDayDate(row)) : null,
       student_count: matched.length,
       students: matched.map(function (s) {
         return { student_id: s.student_id, name: s.name, classes: currentClassNames_(s.student_id, today) };
@@ -682,7 +682,7 @@ LMS.createViews = function (ctx) {
     });
     var students = studentRows;
     return table('SchoolExams').filter(function (r) {
-      return keys[LMS.toStr(r.school_key)] && r.exam_date && r.exam_date <= until && LMS.schoolExamEnd(r) >= today;
+      return keys[LMS.toStr(r.school_key)] && LMS.schoolExamDueBy(r, today, until);
     }).map(function (r) { return decorateExam(r, today, students); }).sort(function (a, b) {
       return LMS.toStr(a.exam_date).localeCompare(LMS.toStr(b.exam_date));
     });
@@ -813,7 +813,9 @@ LMS.createViews = function (ctx) {
         next_exam: exam ? {
           date: exam.exam_date,
           end_date: LMS.schoolExamEnd(exam),
-          d_day: LMS.daysBetween(today, exam.exam_date),
+          math_date: LMS.toStr(exam.math_exam_date),
+          d_day: LMS.daysBetween(today, LMS.schoolExamDDayDate(exam)),
+          in_progress: LMS.inRange(today, exam.exam_date, LMS.schoolExamEnd(exam)),
           label: examLabel(exam)
         } : null
       };
