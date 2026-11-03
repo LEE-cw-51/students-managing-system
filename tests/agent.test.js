@@ -450,6 +450,22 @@ describe('agent rate limit', () => {
     assert.deepEqual(store.readTable('AgentUsage').map((u) => u.used_at), [T0 + 10 * 60000, T0 + HOUR + 1]);
   });
 
+  it('concurrent turns never pass the limit', async () => {
+    const { api, store } = setup();
+    // withService serializes whole steps (advisory lock); turns still interleave between steps.
+    const run = async (fn) => {
+      await new Promise((r) => setImmediate(r));
+      return fn(LMS.createService(store));
+    };
+    const { fetch } = scriptedFetch([1, 2, 3].map((n) => ({ role: 'assistant', content: String(n) })));
+    const results = await Promise.allSettled([1, 2, 3].map((n) =>
+      runAgentTurn({ message: String(n) }, run, { config: CONFIG, fetch, rateLimit: 2, now: T0 + n })));
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 2);
+    assert.equal(results.filter((r) => r.status === 'rejected' && r.reason.code === AGENT_RATE_LIMITED).length, 1);
+    assert.equal(store.readTable('AgentUsage').length, 2);
+    assert.equal(api.listAgentConversations().length, 2);
+  });
+
   it('gives the slot back when the AI call fails', async () => {
     const { api, store, run } = setup();
     const { fetch } = scriptedFetch([{ status: 429 }]);
