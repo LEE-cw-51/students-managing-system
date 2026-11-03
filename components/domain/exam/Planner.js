@@ -271,7 +271,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
         </div>
         <details className="ex-help">
           <summary>반 이름이 같으면?</summary>
-          <p>학생은 학교 수학 시험일(등록된 경우)까지 시험대비 반에 있다가 다음 날 원래 반으로 돌아갑니다. 반 이름이 같으면 한 반으로 편성되고, 이 기간에 이미 있는 시험대비 반과 이름이 같으면 그 반에 학생이 추가됩니다.</p>
+          <p>학생은 학교 시험 종료일까지 시험대비 반에 있다가 다음 날 원래 반으로 돌아갑니다. 반 이름이 같으면 한 반으로 편성되고, 이 기간에 이미 있는 시험대비 반과 이름이 같으면 그 반에 학생이 추가됩니다.</p>
         </details>
         <div className="pl-class-grid">
           {cards.map((c, i) => {

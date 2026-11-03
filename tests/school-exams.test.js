@@ -120,6 +120,62 @@ describe('school exams', () => {
     assert.equal(dates['가'], '2026-11-04');
   });
 
+  it('rejects a math exam date outside the exam range', () => {
+    const { api } = setup();
+    const range = { ...base, school: '한빛중', exam_date: '2026-11-03', exam_end_date: '2026-11-06' };
+    assert.throws(() => api.saveSchoolExam({ ...range, math_exam_date: '2026-11-02' }), /수학 시험일은 시험 기간 안이어야 합니다/);
+    assert.throws(() => api.saveSchoolExam({ ...range, math_exam_date: '2026-11-07' }), /수학 시험일은 시험 기간 안이어야 합니다/);
+    assert.throws(() => api.saveSchoolExam({ ...range, math_exam_date: '11/5' }), /수학 시험일 형식/);
+  });
+
+  it('a math exam date alone fills the start and end', () => {
+    const { api } = setup();
+    const row = api.saveSchoolExam({ ...base, school: '한빛중', math_exam_date: '2026-11-05' });
+    assert.deepEqual([row.exam_date, row.exam_end_date, row.math_exam_date], ['2026-11-05', '2026-11-05', '2026-11-05']);
+  });
+
+  it('counts D-day toward the math exam date when set', () => {
+    const { api, cls } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-11-03', exam_end_date: '2026-11-06', math_exam_date: '2026-11-05' });
+    const [row] = api.getSchoolExams({ school_year: '2026' });
+    assert.equal(row.d_day, 12);
+    assert.equal(row.math_exam_date, '2026-11-05');
+    assert.equal(api.getClassOverview(cls.class_id).exams[0].d_day, 12);
+    const student = api.getStudentList({}).find((s) => s.name === '가');
+    assert.deepEqual([student.next_exam.math_date, student.next_exam.d_day], ['2026-11-05', 12]);
+  });
+
+  it('upcoming windows include an exam by its math D-day or while in progress', () => {
+    const { api, cls } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-12-20', exam_end_date: '2026-12-26', math_exam_date: '2026-12-24' });
+    assert.equal(api.getClassOverview(cls.class_id).exams.length, 0, 'starts at D-57 but math is D-61');
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-12-20', exam_end_date: '2026-12-26', math_exam_date: '2026-12-23' });
+    assert.deepEqual(api.getClassOverview(cls.class_id).exams.map((x) => x.d_day), [60]);
+    const exam = { exam_date: '2026-10-20', exam_end_date: '2026-12-31', math_exam_date: '2026-12-30' };
+    assert.equal(LMS.schoolExamDueBy(exam, TODAY, '2026-10-31'), true, 'in progress');
+    assert.equal(LMS.schoolExamDueBy({ ...exam, exam_end_date: '2026-10-23', math_exam_date: '' }, TODAY, '2026-10-31'), false, 'over');
+  });
+
+  it('marks the student list exam in progress before the math exam day', () => {
+    const { api } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-10-22', exam_end_date: '2026-10-27', math_exam_date: '2026-10-26' });
+    const student = api.getStudentList({}).find((s) => s.name === '가');
+    assert.deepEqual([student.next_exam.in_progress, student.next_exam.d_day], [true, 2]);
+  });
+
+  it('without a math exam date D-day uses the start and the return date stays the last day', () => {
+    const { api } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-11-03', exam_end_date: '2026-11-06' });
+    api.saveSchoolExam({ ...base, grade: '중3', school: '한빛중', exam_date: '2026-11-03', exam_end_date: '2026-11-06', math_exam_date: '2026-11-04' });
+    const rows = api.getSchoolExams({ school_year: '2026' });
+    assert.equal(rows.find((x) => x.grade === '중2').d_day, 10);
+    const student = api.getStudentList({}).find((s) => s.name === '가');
+    assert.deepEqual([student.next_exam.math_date, student.next_exam.d_day], ['', 10]);
+    const period = api.saveExamPeriod({ title: '기말', start_date: '2026-11-02', end_date: '2026-11-30', exam_year: '2026', exam_semester: '2', exam_type: '기말' });
+    const dates = Object.fromEntries(api.proposeExamGroups(period.exam_period_id).students.map((s) => [s.name, s.exam_date]));
+    assert.deepEqual([dates['가'], dates['다']], ['2026-11-06', '2026-11-06'], 'return date is the last exam day, with or without a math date');
+  });
+
   it('deletes', () => {
     const { api } = setup();
     const row = api.saveSchoolExam({ ...base, school: '한빛중' });

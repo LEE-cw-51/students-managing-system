@@ -12,7 +12,7 @@ import { useBoot } from '@/components/shell/AppShell';
 import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
-import { examDDayLabel } from '@/lib/term';
+import { examDDayLabel, mathExamLabel } from '@/lib/term';
 
 function textbookLine(cls) {
   const history = Array.isArray(cls.textbook_history) ? cls.textbook_history : [];
@@ -113,7 +113,7 @@ function UpcomingExams({ exams }) {
           <li key={x.school_exam_id}>
             <strong>{x.school} {x.grade}</strong>
             <span className="muted">{x.label}</span>
-            <span>{dateRange(x.exam_date, x.exam_end_date)} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(x.d_day, x.in_progress)}</span></span>
+            <span>{[dateRange(x.exam_date, x.exam_end_date), mathExamLabel(x.math_exam_date, x.exam_date, x.exam_end_date)].filter(Boolean).join(' · ')} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(x.d_day, x.in_progress)}</span></span>
             <span className="sd-line-text">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</span>
             <details className="cd-exam-students">
               <summary>{x.students.length}명</summary>

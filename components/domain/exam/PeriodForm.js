@@ -42,7 +42,7 @@ export default function PeriodForm({ initial, onClose, onSaved, onDelete }) {
     <Modal title={isEdit ? '시험대비 기간 수정' : '새 시험대비 기간'} onClose={onClose} dirty={dirty}>
       <form className="stack" onSubmit={submit}>
         <div className="form-grid">
-          <Field label="연결할 학교 시험" hint="학교별 수학 시험일을 임시 반 종료일로 씁니다." wide>{() => (
+          <Field label="연결할 학교 시험" hint="학교별 시험 종료일을 임시 반 종료일로 씁니다." wide>{() => (
             <div className="cluster">
               <input value={form.exam_year} onChange={set('exam_year')} inputMode="numeric" aria-label="학년도" style={{ width: 90 }} />
               <select value={form.exam_semester} onChange={set('exam_semester')} aria-label="학기" style={{ width: 'auto' }}>

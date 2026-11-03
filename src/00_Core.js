@@ -65,7 +65,7 @@ LMS.TABLES = {
   SchoolExams: [
     'school_exam_id', 'school_year', 'semester', 'exam_type', 'title', 'school', 'school_key',
     'grade', 'exam_date', 'textbook', 'scope', 'memo', 'created_at', 'updated_at',
-    'exam_end_date'
+    'exam_end_date', 'math_exam_date'
   ],
   MonthlyReports: [
     'monthly_report_id', 'student_id', 'year', 'month', 'report_text',
@@ -1628,6 +1628,15 @@ LMS.validateSchoolExamInput = function (data) {
   if (end && !LMS.isIsoDate(end)) throw new Error('시험 종료일 형식이 올바르지 않습니다.');
   if (end && !date) throw new Error('시험 시작일을 입력해 주세요.');
   if (end && end < date) throw new Error('종료일이 시작일보다 빠릅니다.');
+  var math = LMS.toStr(data.math_exam_date);
+  if (math && !LMS.isIsoDate(math)) throw new Error('수학 시험일 형식이 올바르지 않습니다.');
+  if (math && !date && !end) {
+    date = math;
+    end = math;
+  }
+  if (math && (math < date || math > (end || date))) {
+    throw new Error('수학 시험일은 시험 기간 안이어야 합니다.');
+  }
   return {
     school_exam_id: LMS.toStr(data.school_exam_id),
     school_year: year,
@@ -1639,6 +1648,7 @@ LMS.validateSchoolExamInput = function (data) {
     grade: grade,
     exam_date: date,
     exam_end_date: end || date,
+    math_exam_date: math,
     textbook: LMS.toStr(data.textbook),
     scope: LMS.toStr(data.scope),
     memo: LMS.toStr(data.memo)
@@ -1650,6 +1660,17 @@ LMS.schoolExamEnd = function (row) {
   var start = LMS.toStr(row && row.exam_date);
   var end = LMS.toStr(row && row.exam_end_date);
   return end && end >= start ? end : start;
+};
+
+/** Date the D-day counts toward: the math exam day when known, otherwise the first exam day. */
+LMS.schoolExamDDayDate = function (row) {
+  return LMS.toStr(row && row.math_exam_date) || LMS.toStr(row && row.exam_date);
+};
+
+/** Not over by `today` and either in progress or its D-day date falls on or before `until`. */
+LMS.schoolExamDueBy = function (row, today, until) {
+  if (!row || !row.exam_date || LMS.schoolExamEnd(row) < today) return false;
+  return row.exam_date <= today || LMS.schoolExamDDayDate(row) <= until;
 };
 
 /** Identity of a school exam: same year/semester/type/school+grade (and title for 기타). */

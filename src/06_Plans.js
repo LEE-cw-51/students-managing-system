@@ -678,7 +678,7 @@ LMS.createPlanner = function (ctx) {
     var homeworkCells = ctx.homeworkCells({ classId: classId, from: since, to: now });
     var examsByKey = {};
     table('SchoolExams').forEach(function (e) {
-      if (e.exam_date && e.exam_date <= LMS.addDays(now, 60) && LMS.schoolExamEnd(e) >= now) {
+      if (LMS.schoolExamDueBy(e, now, LMS.addDays(now, 60))) {
         var k = LMS.toStr(e.school_key);
         if (!examsByKey[k] || examsByKey[k].exam_date > e.exam_date) examsByKey[k] = e;
       }
@@ -708,7 +708,7 @@ LMS.createPlanner = function (ctx) {
         }),
         signals: LMS.detectLearningSignals(own).map(function (sig) { return sig.label; }),
         counseling_last_4_weeks: counsel,
-        next_school_exam: exam ? { date: exam.exam_date, end_date: LMS.schoolExamEnd(exam), scope: LMS.clipText(exam.scope, 200) } : null
+        next_school_exam: exam ? { date: exam.exam_date, end_date: LMS.schoolExamEnd(exam), math_date: LMS.toStr(exam.math_exam_date), scope: LMS.clipText(exam.scope, 200) } : null
       };
     });
     var sessions = table('ClassSessions').filter(function (r) {
@@ -746,7 +746,7 @@ LMS.createPlanner = function (ctx) {
         },
         upcoming_school_exams: Object.keys(exams).map(function (id) {
           var e = exams[id];
-          return { school: LMS.toStr(e.school), grade: LMS.toStr(e.grade), date: e.exam_date, end_date: LMS.schoolExamEnd(e), scope: LMS.clipText(e.scope, 200) };
+          return { school: LMS.toStr(e.school), grade: LMS.toStr(e.grade), date: e.exam_date, end_date: LMS.schoolExamEnd(e), math_date: LMS.toStr(e.math_exam_date), scope: LMS.clipText(e.scope, 200) };
         }).sort(function (a, b) { return a.date.localeCompare(b.date); }),
         students: students,
         basic_split: computed.proposal.days.map(function (d) { return { date: d.date, unit_ids: d.unit_ids, title: d.title }; })
