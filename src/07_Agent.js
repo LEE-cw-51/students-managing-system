@@ -280,6 +280,20 @@ LMS.createAgent = function (ctx) {
   }
 
   /**
+   * Server-only: mark one OAuth code / refresh token id as used until `expMs` (epoch ms).
+   * True when newly recorded, false when it was already used. Expired rows are dropped.
+   */
+  function consumeOAuthJti(jti, expMs, nowMs) {
+    var id = LMS.toStr(jti);
+    if (!id) return false;
+    var rows = table('OAuthJti').filter(function (r) { return Number(r.exp_ms) > nowMs; });
+    var used = rows.some(function (r) { return LMS.toStr(r.jti) === id; });
+    if (!used) rows.push({ jti: id, exp_ms: Number(expMs) });
+    saveTable('OAuthJti', rows);
+    return !used;
+  }
+
+  /**
    * Every request loads every table, so old chat must not pile up. Drops conversations not
    * updated for AGENT_CONVERSATION_KEEP_DAYS and their messages. A conversation that still
    * has a pending proposal is kept; proposals themselves stay as the record of changes.
@@ -442,6 +456,7 @@ LMS.createAgent = function (ctx) {
     previewAgentAction: previewAgentAction,
     reserveAgentTurn: reserveAgentTurn,
     releaseAgentTurn: releaseAgentTurn,
+    consumeOAuthJti: consumeOAuthJti,
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,

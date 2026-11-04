@@ -107,6 +107,7 @@ LMS.TABLES = {
     'verification_status', 'created_at', 'executed_at'
   ],
   AgentUsage: ['used_at'],
+  OAuthJti: ['jti', 'exp_ms'],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -163,7 +164,8 @@ LMS.DEFAULT_SETTINGS = {
   assignment_D: '69~60%',
   assignment_E: '59~51%',
   assignment_F: '50% 이하',
-  allowed_emails: ''
+  allowed_emails: '',
+  mcp_write_mode: 'read_only'
 };
 
 LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT', 'AGC', 'AGM', 'AGP'];

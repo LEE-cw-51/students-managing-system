@@ -1,13 +1,16 @@
 import Script from 'next/script';
+import { safeNext } from '../../lib/safe-next.js';
 
 export const dynamic = 'force-dynamic';
 
 export default async function LoginPage({ searchParams }) {
   const params = await searchParams;
   const errored = params?.error === '1';
+  const next = safeNext(params?.next);
   return (
     <div className="login-wrap">
       <form className="card login-card" method="POST" action="/api/login">
+        {next ? <input type="hidden" name="next" value={next} /> : null}
         <div className="brand login-brand">
           <div className="brand-mark" aria-hidden="true">학</div>
           <div>
