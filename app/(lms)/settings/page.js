@@ -16,7 +16,13 @@ const GRADE_KEYS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const SECTIONS = [
   { id: 'academy', title: '학원 정보', keys: ['academy_name', 'teacher_name', 'contact'] },
   { id: 'report', title: '보고서 문구', keys: ['report_greeting', 'report_closing'] },
-  { id: 'assignment', title: '과제 이행 등급 기준', keys: GRADE_KEYS.map((g) => `assignment_${g}`) }
+  { id: 'assignment', title: '과제 이행 등급 기준', keys: GRADE_KEYS.map((g) => `assignment_${g}`) },
+  { id: 'mcp', title: 'Claude 커넥터', keys: ['mcp_write_mode'] }
+];
+const MCP_MODES = [
+  { value: 'read_only', label: '조회만', hint: 'Claude는 학생 정보를 읽기만 합니다. 출결·상담·할 일은 바꿀 수 없습니다.' },
+  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 요청한 변경은 AI 비서 패널의 승인 대기에 올라가고, 승인해야 저장됩니다.' },
+  { value: 'direct', label: '바로 저장', hint: 'Claude가 출결·상담·할 일을 바로 저장합니다. 변경 기록은 AI 비서 대화에 남습니다.' }
 ];
 const KEYS = SECTIONS.flatMap((s) => s.keys);
 const PLACEHOLDERS = { ...LMS.DEFAULT_SETTINGS, academy_name: '학원' };
@@ -145,6 +151,64 @@ function PromotionModal({ onClose, onDone }) {
   );
 }
 
+function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setUrl(`${window.location.origin}/api/mcp`), []);
+  const mode = MCP_MODES.find((m) => m.value === form.mcp_write_mode) || MCP_MODES[0];
+  const copy = () => navigator.clipboard.writeText(url).then(() => toast('커넥터 URL을 복사했습니다.'), () => toast('복사하지 못했습니다.', 'error'));
+  const disconnect = async () => {
+    const ok = await confirm({
+      title: 'Claude 연결 끊기',
+      message: '지금까지 Claude에 발급된 접근 권한이 모두 무효가 됩니다. 다시 쓰려면 claude.ai에서 커넥터를 다시 연결해야 합니다.',
+      confirmLabel: '연결 끊기',
+      danger: true
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const current = Number(tokenVersion);
+      const next = Number.isInteger(current) && current >= 0 ? current + 1 : 1;
+      await api('saveSettings', { mcp_token_version: String(next) });
+      toast('Claude 연결을 끊었습니다.');
+      onDisconnected();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="card">
+      <SectionHead title="Claude 커넥터" changed={changed} />
+      <p className="st-hint">claude.ai의 설정 → 커넥터 → 커스텀 커넥터 추가에 아래 URL을 넣고, 로그인해서 허용하면 연결됩니다.</p>
+      <div className="stack-sm">
+        <Field label="쓰기 권한" hint={mode.hint}>
+          {(id) => (
+            <select id={id} value={mode.value} onChange={set('mcp_write_mode')}>
+              {MCP_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          )}
+        </Field>
+        <Field label="커넥터 URL">
+          {(id) => (
+            <div className="cluster">
+              <input id={id} value={url} readOnly onFocus={(e) => e.target.select()} style={{ flex: '1 1 260px' }} />
+              <button type="button" className="btn secondary" disabled={!url} onClick={copy}>복사</button>
+            </div>
+          )}
+        </Field>
+        <div className="st-promote">
+          <span className="st-hint" style={{ margin: 0, flex: '1 1 260px' }}>연결 끊기는 지금까지 발급된 Claude 접근 권한을 모두 무효로 만듭니다. 설정 저장과 별개로 바로 적용됩니다.</span>
+          <button type="button" className="btn secondary" disabled={busy} onClick={disconnect}>{busy ? '처리 중…' : '연결 끊기…'}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const boot = useBoot();
   const toast = useToast();
@@ -242,6 +306,9 @@ export default function SettingsPage() {
             {GRADE_KEYS.map((g) => input(`assignment_${g}`, `${g} 기준`))}
           </div>
         </section>
+
+        <McpConnectorCard form={form} set={set} changed={isChanged('mcp')}
+          tokenVersion={saved.mcp_token_version} onDisconnected={() => boot.refresh()} />
 
         <section className="card st-promote">
           <div className="st-promote-text">

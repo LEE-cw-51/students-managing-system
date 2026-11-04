@@ -6,6 +6,10 @@ export function proxy(request) {
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/login') ||
+    pathname.startsWith('/.well-known/') ||
+    pathname.startsWith('/api/oauth/') ||
+    pathname === '/api/mcp' ||
+    pathname.startsWith('/api/mcp/') ||
     pathname.startsWith('/_next') ||
     pathname === '/favicon.ico'
   ) {
@@ -16,8 +20,9 @@ export function proxy(request) {
       return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
     }
     const url = request.nextUrl.clone();
+    const next = pathname + request.nextUrl.search;
     url.pathname = '/login';
-    url.search = '';
+    url.search = next === '/' ? '' : `?next=${encodeURIComponent(next)}`;
     return NextResponse.redirect(url);
   }
   return NextResponse.next();
