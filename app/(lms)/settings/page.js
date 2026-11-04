@@ -20,10 +20,10 @@ const SECTIONS = [
   { id: 'mcp', title: 'Claude 커넥터', keys: ['mcp_write_mode'] }
 ];
 const MCP_MODES = [
-  { value: 'read_only', label: '조회만', hint: 'Claude는 학생 정보를 읽기만 합니다. 출결·상담·할 일은 바꿀 수 없습니다.' },
-  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 요청한 변경은 AI 비서 패널의 승인 대기에 올라가고, 승인해야 저장됩니다.' },
-  { value: 'direct', label: '바로 저장', hint: 'Claude가 출결·상담·할 일을 바로 저장합니다. 변경 기록은 AI 비서 대화에 남습니다.' }
+  { value: 'read_only', label: '조회만', hint: 'Claude는 학생·반·수업·숙제·시험 등 모든 데이터를 읽기만 하고, 아무것도 바꿀 수 없습니다.' },
+  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 학생·반·수업·숙제·시험 등 모든 데이터의 추가·수정·삭제를 요청할 수 있습니다. Claude가 요청한 변경은 모두 AI 비서 패널의 승인 대기에 올라가고, 승인해야만 저장됩니다. 설정은 바꿀 수 없습니다.' }
 ];
+const mcpModeOf = (v) => MCP_MODES.find((m) => m.value === (v === 'direct' ? 'proposal' : v)) || MCP_MODES[0];
 const KEYS = SECTIONS.flatMap((s) => s.keys);
 const PLACEHOLDERS = { ...LMS.DEFAULT_SETTINGS, academy_name: '학원' };
 const PREVIEW_NAME = '○○○';
@@ -157,7 +157,7 @@ function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) 
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => setUrl(`${window.location.origin}/api/mcp`), []);
-  const mode = MCP_MODES.find((m) => m.value === form.mcp_write_mode) || MCP_MODES[0];
+  const mode = mcpModeOf(form.mcp_write_mode);
   const copy = () => navigator.clipboard.writeText(url).then(() => toast('커넥터 URL을 복사했습니다.'), () => toast('복사하지 못했습니다.', 'error'));
   const disconnect = async () => {
     const ok = await confirm({

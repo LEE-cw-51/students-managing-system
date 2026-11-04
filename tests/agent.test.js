@@ -4,7 +4,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
-const { AGENT_TOOLS, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
+const { AGENT_TOOLS, assistantTools, mcpTools, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
 const { runAgentTurn, applyProposal, agentRateLimit, AGENT_RATE_LIMITED } = require('../lib/agent.js');
 const { chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
 
@@ -92,7 +92,7 @@ describe('agent tools', () => {
       list_classes: {},
       get_class_members: { class_id: demo.class.class_id }
     };
-    AGENT_TOOLS.filter((t) => t.kind === 'read').forEach((t) => {
+    assistantTools().filter((t) => t.kind === 'read').forEach((t) => {
       assert.ok(args[t.name], 'test args for ' + t.name);
       const out = t.call(api, args[t.name]);
       assert.ok(out !== undefined, t.name);
@@ -110,7 +110,7 @@ describe('agent tools', () => {
     AGENT_TOOLS.filter((t) => t.kind === 'write').forEach((t) => {
       assert.equal(typeof t.call, 'undefined', t.name);
       assert.ok(LMS.AGENT_WRITE_ACTIONS[t.name], t.name);
-      assert.match(t.description, /승인 필요/);
+      if (t.surfaces.includes('assistant')) assert.match(t.description, /승인 필요/);
     });
     Object.keys(LMS.AGENT_WRITE_ACTIONS).forEach((name) => {
       assert.ok(AGENT_TOOLS.some((t) => t.name === name && t.kind === 'write'), name);
@@ -119,7 +119,10 @@ describe('agent tools', () => {
 
   it('builds OpenAI-style definitions and cuts long results', () => {
     const defs = toolDefinitions();
-    assert.equal(defs.length, AGENT_TOOLS.length);
+    assert.equal(defs.length, assistantTools().length);
+    assert.deepEqual(defs.map((d) => d.function.name), assistantTools().map((t) => t.name));
+    assert.ok(assistantTools().every((t) => t.surfaces.includes('assistant')));
+    assert.ok(mcpTools().every((t) => t.surfaces.includes('mcp')));
     defs.forEach((d) => {
       assert.equal(d.type, 'function');
       assert.equal(d.function.parameters.type, 'object');
@@ -792,7 +795,7 @@ describe('Anthropic API provider', () => {
     assert.equal(anthropicModelId('claude-sonnet-5-5'), 'claude-sonnet-5-5');
     assert.equal(anthropicModelId('anthropic/claude-haiku-5.5'), 'claude-haiku-5-5');
     assert.throws(() => anthropicModelId('google/gemini-3.7-flash'), /Claude 모델 ID/);
-    assert.equal(anthropicToolDefinitions().length, AGENT_TOOLS.length);
+    assert.equal(anthropicToolDefinitions().length, assistantTools().length);
   });
 
   it('uses AGENT_MODEL on the Anthropic API', async () => {
