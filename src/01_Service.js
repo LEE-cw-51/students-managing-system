@@ -2407,10 +2407,11 @@ LMS.createService = function (store) {
       var cls = LMS.findById(classes, 'class_id', row.class_id);
       items.push({
         id: row.task_id,
-        source: 'manual',
+        source: LMS.toStr(row.source) || 'manual',
         kind: row.kind,
         title: row.title,
         status: row.status,
+        due_date: row.due_date,
         student_id: row.student_id || '',
         student_name: student ? student.name : '',
         class_id: row.class_id || '',
@@ -2437,6 +2438,7 @@ LMS.createService = function (store) {
     if (isUpdate) {
       var prev = LMS.findById(rows, 'task_id', input.task_id);
       if (!prev) throw new Error('할 일을 찾을 수 없습니다.');
+      if (LMS.toStr(prev.source) === 'counseling') throw new Error('상담일지에서 수정해 주세요.');
       prev.due_date = input.due_date;
       prev.kind = input.kind;
       prev.title = input.title;
@@ -2476,6 +2478,33 @@ LMS.createService = function (store) {
     prev.updated_at = now();
     saveTable('Tasks', rows);
     return prev;
+  }
+
+  /** Only tasks made by hand can be removed; counseling follow-ups move with their note. */
+  function deleteTask(taskId) {
+    var rows = table('Tasks');
+    var prev = LMS.findById(rows, 'task_id', taskId);
+    if (!prev) throw new Error('할 일을 찾을 수 없습니다.');
+    if (LMS.toStr(prev.source) === 'counseling') throw new Error('상담일지에서 수정해 주세요.');
+    saveTable('Tasks', rows.filter(function (row) {
+      return LMS.toStr(row.task_id) !== LMS.toStr(prev.task_id);
+    }));
+    return { task_id: prev.task_id, deleted: true };
+  }
+
+  /** Open (예정) tasks per due date in [start, end]: { 'YYYY-MM-DD': n }. */
+  function getTaskCounts(start, end) {
+    start = LMS.toStr(start);
+    end = LMS.toStr(end);
+    if (!LMS.isIsoDate(start) || !LMS.isIsoDate(end)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    var counts = {};
+    table('Tasks').forEach(function (row) {
+      if (LMS.toStr(row.status) !== '예정') return;
+      var due = LMS.toStr(row.due_date);
+      if (!LMS.inRange(due, start, end)) return;
+      counts[due] = (counts[due] || 0) + 1;
+    });
+    return counts;
   }
 
   function listCounselingNotes(filter) {
@@ -3295,6 +3324,8 @@ LMS.createService = function (store) {
     getDayAgenda: getDayAgenda,
     saveTask: saveTask,
     updateTaskStatus: updateTaskStatus,
+    deleteTask: deleteTask,
+    getTaskCounts: getTaskCounts,
     getClassPlan: getClassPlan,
     getClassPlans: getClassPlans,
     saveClassPlan: saveClassPlan,

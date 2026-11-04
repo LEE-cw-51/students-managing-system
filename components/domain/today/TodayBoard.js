@@ -6,24 +6,27 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import Badges from '@/components/domain/Badges';
 import MakeupForm from './MakeupForm';
+import TaskForm, { TASK_LABEL } from './TaskForm';
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, shortDate } from '@/lib/format';
 import { examDDayLabel, mathExamLabel } from '@/lib/term';
 
-const TASK_LABEL = {
-  counsel_parent: '학부모 상담', counsel_student: '학생 상담', admin: '행정', other: '기타', homework_check: '과제 확인'
-};
-
-export default function TodayBoard({ date, onOpenClass }) {
+export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
   const toast = useToast();
   const [addingMakeup, setAddingMakeup] = useState(false);
+  // null = closed; { task: null } = new task; { task } = edit that task.
+  const [taskForm, setTaskForm] = useState(null);
   const state = useApi(() => api('getTodayBoard', date), [date]);
 
+  const tasksChanged = () => {
+    state.reload();
+    if (onTasksChanged) onTasksChanged();
+  };
   const setTask = async (task, status) => {
     try {
       await api('updateTaskStatus', task.task_id || task.id, status);
       toast(status === '완료' ? '완료했습니다.' : '취소했습니다.');
-      state.reload();
+      tasksChanged();
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -99,28 +102,32 @@ export default function TodayBoard({ date, onOpenClass }) {
 
           <div className="cols-2 board-cards">
             <section className="card">
-              <div className="card-head"><h2>할 일</h2></div>
+              <div className="card-head"><h2>할 일</h2><button type="button" className="btn secondary sm" onClick={() => setTaskForm({ task: null })}>할 일 추가</button></div>
               {b.tasks.length || b.overdue_tasks.length ? (
                 <ul className="task-list">
                   {[...b.overdue_tasks, ...b.tasks].map((t) => (
                     <li key={t.id || t.task_id} className={t.status === '완료' ? 'is-done' : ''}>
                       {t.due_date && t.due_date < b.date ? <span className="tag danger">{shortDate(t.due_date)} 지남</span> : null}
                       <span className="tag muted">{TASK_LABEL[t.kind] || t.kind}</span>
+                      {t.source === 'counseling' ? <span className="tag" title="상담일지에서 수정합니다">상담일지</span> : null}
                       <span className="task-title">
                         {t.student_id ? <Link href={`/students/${t.student_id}`}>{t.student_name || t.title}</Link> : null}
                         {t.student_id ? ' · ' : ''}{t.title}
                         {t.memo ? <span className="muted"> — {t.memo}</span> : null}
                       </span>
-                      {t.source !== 'auto' && t.status === '예정' ? (
-                        <span className="cluster">
-                          <button type="button" className="btn ok sm" onClick={() => setTask(t, '완료')}>완료</button>
-                          <button type="button" className="btn ghost sm" onClick={() => setTask(t, '취소')}>취소</button>
-                        </span>
-                      ) : <span className="tag ok">{t.status}</span>}
+                      <span className="cluster">
+                        {t.source !== 'auto' && t.status === '예정' ? (
+                          <>
+                            <button type="button" className="btn ok sm" onClick={() => setTask(t, '완료')}>완료</button>
+                            <button type="button" className="btn ghost sm" onClick={() => setTask(t, '취소')}>취소</button>
+                          </>
+                        ) : <span className="tag ok">{t.status}</span>}
+                        {t.source === 'manual' ? <button type="button" className="btn secondary sm" onClick={() => setTaskForm({ task: t })}>수정</button> : null}
+                      </span>
                     </li>
                   ))}
                 </ul>
-              ) : <EmptyState>이 날 예정된 할 일이 없습니다. 상담일지의 후속 조치가 여기에 표시됩니다.</EmptyState>}
+              ) : <EmptyState>이 날 예정된 할 일이 없습니다. 위의 ‘할 일 추가’로 직접 적거나, 상담일지의 후속 조치가 여기에 표시됩니다.</EmptyState>}
             </section>
 
             <section className="card">
@@ -179,6 +186,7 @@ export default function TodayBoard({ date, onOpenClass }) {
             </section>
           </div>
           {addingMakeup ? <MakeupForm date={date} onClose={() => setAddingMakeup(false)} onSaved={() => { setAddingMakeup(false); state.reload(); }} /> : null}
+          {taskForm ? <TaskForm date={date} task={taskForm.task} onClose={() => setTaskForm(null)} onSaved={() => { setTaskForm(null); tasksChanged(); }} /> : null}
         </div>
       )}
     </Async>

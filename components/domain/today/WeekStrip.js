@@ -16,10 +16,15 @@ function weekDates(iso) {
   return DAYS.map((_, i) => addDays(iso, i - offset));
 }
 
-/** Mon–Sun strip of the selected week with class/makeup counts; the page's only date navigation. */
-export default function WeekStrip({ date, today, onPick }) {
+/**
+ * Mon–Sun strip of the selected week with class/makeup/open-task counts; the page's only date navigation.
+ * Bump `version` after tasks change so the task counts reload without refetching the calendar.
+ */
+export default function WeekStrip({ date, today, onPick, version = 0 }) {
   const dates = weekDates(date);
   const state = useApi(() => api('getCalendar', dates[0], dates[6]), [dates[0]]);
+  const taskState = useApi(() => api('getTaskCounts', dates[0], dates[6]), [dates[0], version]);
+  const taskCounts = taskState.data || {};
   const counts = {};
   ((state.data && state.data.events) || []).forEach((ev) => {
     counts[ev.date] = counts[ev.date] || { classes: 0, makeups: 0 };
@@ -32,12 +37,14 @@ export default function WeekStrip({ date, today, onPick }) {
       <div className="week-strip">
         {dates.map((d, i) => {
           const c = counts[d] || { classes: 0, makeups: 0 };
+          const tasks = Number(taskCounts[d]) || 0;
+          const summary = [c.classes ? `수업 ${c.classes}` : '', c.makeups ? `보강 ${c.makeups}` : '', tasks ? `할 일 ${tasks}` : ''].filter(Boolean).join(' · ');
           return (
             <button key={d} type="button" className={'week-day' + (d === date ? ' is-selected' : '') + (d === today ? ' is-today' : '')}
               aria-current={d === date ? 'date' : undefined} onClick={() => onPick(d)}>
               <span className="wd-name">{DAYS[i]}</span>
               <span className="wd-date">{Number(d.slice(8))}</span>
-              <span className="wd-count">{c.classes ? `수업 ${c.classes}` : '–'}{c.makeups ? ` · 보강 ${c.makeups}` : ''}</span>
+              <span className="wd-count">{summary || '–'}</span>
               <span className="wd-dots" aria-hidden="true">{c.classes || c.makeups ? '•'.repeat(Math.min(c.classes, 4)) + '◦'.repeat(Math.min(c.makeups, 2)) : '–'}</span>
             </button>
           );

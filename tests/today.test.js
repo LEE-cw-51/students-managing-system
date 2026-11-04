@@ -292,3 +292,91 @@ describe('today views', () => {
     assert.deepEqual([inProgress.in_progress, inProgress.d_day], [true, 10], 'in progress stays listed');
   });
 });
+
+describe('tasks by date', () => {
+  const counselTask = (s, followUp) => {
+    const sid = s.demo.students[0].student_id;
+    const note = s.api.saveCounselingNote({ student_id: sid, kind: '학부모', counsel_date: '2026-10-20', content: 'x', follow_up_date: followUp });
+    return s.store.readTable('Tasks').find((t) => t.task_id === note.follow_up_task_id);
+  };
+
+  it('a task added by hand shows on its date as manual, with its due date', () => {
+    const s = seeded();
+    const sid = s.demo.students[0].student_id;
+    const task = s.api.saveTask({ due_date: '2026-10-28', kind: 'admin', title: '교재 주문', memo: '2권', student_id: sid, class_id: s.classId });
+    const item = s.api.getTodayBoard('2026-10-28').tasks.find((t) => t.task_id === task.task_id);
+    assert.equal(item.source, 'manual');
+    assert.equal(item.due_date, '2026-10-28');
+    assert.equal(item.title, '교재 주문');
+    assert.equal(item.student_id, sid);
+    assert.ok(!s.api.getTodayBoard(TODAY).tasks.some((t) => t.task_id === task.task_id), 'not on another date');
+  });
+
+  it('a manual 과제 확인 task is not hidden with the automatic homework checks', () => {
+    const s = seeded();
+    const task = s.api.saveTask({ due_date: '2026-10-28', kind: 'homework_check', title: '숙제 확인' });
+    assert.ok(s.api.getTodayBoard('2026-10-28').tasks.some((t) => t.task_id === task.task_id));
+  });
+
+  it('a counseling follow-up keeps its source on the board', () => {
+    const s = seeded();
+    const task = counselTask(s, TODAY);
+    const item = s.api.getTodayBoard(TODAY).tasks.find((t) => t.task_id === task.task_id);
+    assert.equal(item.source, 'counseling');
+  });
+
+  it('an open task from a past date shows as overdue today', () => {
+    const s = seeded();
+    const task = s.api.saveTask({ due_date: '2026-10-22', kind: 'other', title: '지난 할 일' });
+    const done = s.api.saveTask({ due_date: '2026-10-22', kind: 'other', title: '끝난 할 일', status: '완료' });
+    const overdue = s.api.getTodayBoard(TODAY).overdue_tasks;
+    const item = overdue.find((t) => t.task_id === task.task_id);
+    assert.equal(item.source, 'manual');
+    assert.equal(item.due_date, '2026-10-22');
+    assert.ok(!overdue.some((t) => t.task_id === done.task_id));
+    assert.deepEqual(s.api.getTodayBoard('2026-10-27').overdue_tasks, [], 'only on today');
+  });
+
+  it('an overdue task keeps its class link on the board', () => {
+    const s = seeded();
+    const task = s.api.saveTask({ due_date: '2026-10-22', kind: 'other', title: '반 할 일', class_id: s.classId });
+    const item = s.api.getTodayBoard(TODAY).overdue_tasks.find((t) => t.task_id === task.task_id);
+    const cls = s.store.readTable('Classes').find((c) => c.class_id === s.classId);
+    assert.equal(item.class_id, s.classId);
+    assert.equal(item.class_name, cls.class_name);
+  });
+
+  it('deleteTask removes a manual task but refuses a counseling one', () => {
+    const s = seeded();
+    const task = s.api.saveTask({ due_date: TODAY, kind: 'other', title: '지울 할 일' });
+    assert.deepEqual(s.api.deleteTask(task.task_id), { task_id: task.task_id, deleted: true });
+    assert.ok(!s.store.readTable('Tasks').some((t) => t.task_id === task.task_id));
+    assert.throws(() => s.api.deleteTask(task.task_id), { message: '할 일을 찾을 수 없습니다.' });
+
+    const counsel = counselTask(s, TODAY);
+    const before = JSON.stringify(s.store.readTable('Tasks'));
+    assert.throws(() => s.api.deleteTask(counsel.task_id), { message: '상담일지에서 수정해 주세요.' });
+    assert.throws(() => s.api.saveTask({ task_id: counsel.task_id, due_date: TODAY, kind: 'other', title: '바꿈' }), { message: '상담일지에서 수정해 주세요.' });
+    assert.equal(JSON.stringify(s.store.readTable('Tasks')), before);
+  });
+
+  it('getTaskCounts counts only open tasks per date in the range', () => {
+    const s = seeded();
+    const base = s.api.getTaskCounts('2026-10-26', '2026-11-01');
+    const add = (due, status) => s.api.saveTask({ due_date: due, kind: 'other', title: 't', status });
+    add('2026-10-27');
+    add('2026-10-27');
+    add('2026-10-28', '완료');
+    add('2026-10-29', '취소');
+    add('2026-11-02');
+    counselTask(s, '2026-10-30');
+    const counts = s.api.getTaskCounts('2026-10-26', '2026-11-01');
+    const delta = (d) => (counts[d] || 0) - (base[d] || 0);
+    assert.equal(delta('2026-10-27'), 2);
+    assert.equal(delta('2026-10-28'), 0);
+    assert.equal(delta('2026-10-29'), 0);
+    assert.equal(delta('2026-10-30'), 1, 'counseling follow-ups count too');
+    assert.equal(counts['2026-11-02'], undefined, 'outside the range');
+    assert.throws(() => s.api.getTaskCounts('x', '2026-11-01'), { message: '날짜 형식이 올바르지 않습니다.' });
+  });
+});
