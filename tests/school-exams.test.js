@@ -176,6 +176,24 @@ describe('school exams', () => {
     assert.deepEqual([dates['가'], dates['다']], ['2026-11-06', '2026-11-06'], 'return date is the last exam day, with or without a math date');
   });
 
+  it('upcoming exams sort by the math D-day, not the first exam day', () => {
+    const { api, cls } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-10-28', exam_end_date: '2026-11-07', math_exam_date: '2026-11-06' });
+    api.saveSchoolExam({ ...base, exam_type: '기타', title: '모의고사', school: '한빛중', exam_date: '2026-11-01', exam_end_date: '2026-11-05', math_exam_date: '2026-11-04' });
+    api.saveSchoolExam({ ...base, exam_type: '중간', school: '한빛중', exam_date: '2026-10-30', exam_end_date: '2026-11-06' });
+    const exams = api.getClassOverview(cls.class_id).exams;
+    assert.deepEqual(exams.map((x) => [x.exam_date, x.d_day]), [['2026-10-30', 6], ['2026-11-01', 11], ['2026-10-28', 13]]);
+  });
+
+  it('student list next exam is the nearest by math D-day', () => {
+    const { api } = setup();
+    api.saveSchoolExam({ ...base, school: '한빛중', exam_date: '2026-10-28', exam_end_date: '2026-11-07', math_exam_date: '2026-11-06' });
+    api.saveSchoolExam({ ...base, exam_type: '기타', title: '모의고사', school: '한빛중', exam_date: '2026-11-01', exam_end_date: '2026-11-05', math_exam_date: '2026-11-04' });
+    api.saveSchoolExam({ ...base, exam_type: '중간', school: '한빛중', exam_date: '2026-10-01', math_exam_date: '2026-10-01' });
+    const student = api.getStudentList({}).find((s) => s.name === '가');
+    assert.deepEqual([student.next_exam.date, student.next_exam.math_date, student.next_exam.d_day], ['2026-11-01', '2026-11-04', 11]);
+  });
+
   it('deletes', () => {
     const { api } = setup();
     const row = api.saveSchoolExam({ ...base, school: '한빛중' });
