@@ -17,6 +17,8 @@ LMS.AGENT_HISTORY_LIMIT = 20;
 LMS.AGENT_CONVERSATION_KEEP_DAYS = 90;
 // The rate limit counts chat turns in this sliding window (AgentUsage rows, epoch ms).
 LMS.AGENT_RATE_WINDOW_MS = 60 * 60 * 1000;
+// AgentUsage.kind of Claude connector tool calls (chat turns leave kind empty).
+LMS.AGENT_USAGE_MCP = 'mcp';
 // Error codes the API passes to the browser (lib/api-error.js maps them to HTTP statuses).
 LMS.AGENT_CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND';
 
@@ -131,6 +133,35 @@ LMS.AGENT_WRITE_ACTIONS = {
       return { ok: after === args.status, after: after };
     }
   }
+};
+
+// Shared with the per-area action files (src/agent-actions/).
+LMS.agentStudentName = agentStudentName_;
+LMS.agentClassName = agentClassName_;
+
+/** Most students / rows / classes / titles one write call may carry (about a large class). */
+LMS.AGENT_BATCH_MAX = 50;
+/** Homework checks are students × items, so one class's full check-off needs more room. */
+LMS.AGENT_CHECKS_MAX = 300;
+
+/** Throws when a bulk input holds more than max entries; unit is the counter word (명, 건, 개). */
+LMS.assertAgentBatch = function (list, unit, max) {
+  max = max || LMS.AGENT_BATCH_MAX;
+  if (Array.isArray(list) && list.length > max) {
+    throw new Error('한 번에 ' + max + unit + '까지 넣을 수 있습니다. 나눠서 요청해 주세요.');
+  }
+};
+
+/** Adds actions (same shape as above) to AGENT_WRITE_ACTIONS; a name may be added only once. */
+LMS.registerAgentWriteActions = function (actions) {
+  Object.keys(actions).forEach(function (name) {
+    if (Object.prototype.hasOwnProperty.call(LMS.AGENT_WRITE_ACTIONS, name)) throw new Error('Duplicate agent write action: ' + name);
+    var a = actions[name];
+    if (!a || typeof a.preview !== 'function' || typeof a.run !== 'function' || typeof a.verify !== 'function') {
+      throw new Error('Agent write action needs preview, run and verify: ' + name);
+    }
+    LMS.AGENT_WRITE_ACTIONS[name] = a;
+  });
 };
 
 LMS.createAgent = function (ctx) {
@@ -253,25 +284,29 @@ LMS.createAgent = function (ctx) {
    * lives in the database, so every serverless instance shares it. When the limit is used up
    * nothing is counted and { ok: false, retry_after_ms } comes back. On success `used_at`
    * identifies the slot for releaseAgentTurn.
+   * kind: separate counter in the same table ('' chat turns, LMS.AGENT_USAGE_MCP connector calls).
    */
-  function reserveAgentTurn(nowMs, limit) {
+  function reserveAgentTurn(nowMs, limit, kind) {
+    var k = LMS.toStr(kind);
     var cutoff = nowMs - LMS.AGENT_RATE_WINDOW_MS;
     var recent = table('AgentUsage').filter(function (u) { return Number(u.used_at) > cutoff; });
-    if (recent.length >= limit) {
-      var oldest = Math.min.apply(null, recent.map(function (u) { return Number(u.used_at); }));
+    var mine = recent.filter(function (u) { return LMS.toStr(u.kind) === k; });
+    if (mine.length >= limit) {
+      var oldest = Math.min.apply(null, mine.map(function (u) { return Number(u.used_at); }));
       return { ok: false, retry_after_ms: Math.max(0, oldest + LMS.AGENT_RATE_WINDOW_MS - nowMs) };
     }
-    recent.push({ used_at: nowMs });
+    recent.push(k ? { used_at: nowMs, kind: k } : { used_at: nowMs });
     saveTable('AgentUsage', recent);
     return { ok: true, retry_after_ms: 0, used_at: nowMs };
   }
 
   /** Server-only: give back one slot taken by reserveAgentTurn when the turn was not saved. */
-  function releaseAgentTurn(usedAt) {
+  function releaseAgentTurn(usedAt, kind) {
+    var k = LMS.toStr(kind);
     var dropped = false;
     // Slots with the same time are interchangeable; drop just one.
     var rows = table('AgentUsage').filter(function (u) {
-      if (dropped || Number(u.used_at) !== Number(usedAt)) return true;
+      if (dropped || Number(u.used_at) !== Number(usedAt) || LMS.toStr(u.kind) !== k) return true;
       dropped = true;
       return false;
     });

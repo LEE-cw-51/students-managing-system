@@ -9,6 +9,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
   require('./05_Views.js');
   require('./06_Plans.js');
   require('./07_Agent.js');
+  require('./08_AgentActions.js');
 }
 
 LMS.createService = function (store) {
@@ -2142,9 +2143,21 @@ LMS.createService = function (store) {
 
   function saveSettings(map) {
     var current = settings();
+    var storedMode = current.mcp_write_mode;
     Object.keys(map || {}).forEach(function (k) {
       current[k] = map[k];
     });
+    if (map && Object.prototype.hasOwnProperty.call(map, 'mcp_write_mode')) {
+      var mode = LMS.toStr(map.mcp_write_mode).trim();
+      // Legacy 'direct' maps to 'proposal': Claude's changes always wait for approval.
+      if (mode === 'direct') mode = 'proposal';
+      // Blank, or an unknown value already stored (resent by the settings page), falls back to read-only.
+      if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(storedMode).trim())) mode = LMS.MCP_WRITE_MODES[0];
+      if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only) 또는 승인 대기 제안(proposal)만 고를 수 있습니다.');
+      current.mcp_write_mode = mode;
+    } else if (current.mcp_write_mode === 'direct') {
+      current.mcp_write_mode = 'proposal';
+    }
     saveTable('Settings', LMS.settingsToRows(current));
     return current;
   }
