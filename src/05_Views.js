@@ -671,7 +671,7 @@ LMS.createViews = function (ctx) {
     return { groups: list, schools: Object.keys(schools).sort(function (a, b) { return a.localeCompare(b, 'ko'); }), missing_school: missing };
   }
 
-  /** Upcoming (today..+days) exams for the given students' schools, soonest first. */
+  /** Upcoming (today..+days) exams for the given students' schools, soonest D-day first. */
   function upcomingExamsFor(studentRows, days) {
     var today = store.today();
     var until = LMS.addDays(today, days || 45);
@@ -683,9 +683,7 @@ LMS.createViews = function (ctx) {
     var students = studentRows;
     return table('SchoolExams').filter(function (r) {
       return keys[LMS.toStr(r.school_key)] && LMS.schoolExamDueBy(r, today, until);
-    }).map(function (r) { return decorateExam(r, today, students); }).sort(function (a, b) {
-      return LMS.toStr(a.exam_date).localeCompare(LMS.toStr(b.exam_date));
-    });
+    }).map(function (r) { return decorateExam(r, today, students); }).sort(LMS.compareSchoolExamsByDDay);
   }
 
   // ----- Students -----
@@ -797,7 +795,7 @@ LMS.createViews = function (ctx) {
       var last = lessons.map(function (l) { return LMS.toStr(l.lesson_date); }).filter(function (d) { return d <= today; }).sort().pop() || '';
       var key = LMS.schoolGroupKey(s.school, s.grade);
       var exam = key ? exams.filter(function (x) { return LMS.toStr(x.school_key) === key; })
-        .sort(function (a, b) { return LMS.toStr(a.exam_date).localeCompare(LMS.toStr(b.exam_date)); })[0] : null;
+        .sort(LMS.compareSchoolExamsByDDay)[0] : null;
       return {
         student_id: s.student_id,
         name: s.name,

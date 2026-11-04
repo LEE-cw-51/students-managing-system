@@ -1667,6 +1667,14 @@ LMS.schoolExamDDayDate = function (row) {
   return LMS.toStr(row && row.math_exam_date) || LMS.toStr(row && row.exam_date);
 };
 
+/** Soonest D-day date first; ties by first exam day, then school and id so the order is stable. */
+LMS.compareSchoolExamsByDDay = function (a, b) {
+  return LMS.schoolExamDDayDate(a).localeCompare(LMS.schoolExamDDayDate(b)) ||
+    LMS.toStr(a && a.exam_date).localeCompare(LMS.toStr(b && b.exam_date)) ||
+    LMS.toStr(a && a.school).localeCompare(LMS.toStr(b && b.school), 'ko') ||
+    LMS.toStr(a && a.school_exam_id).localeCompare(LMS.toStr(b && b.school_exam_id));
+};
+
 /** Not over by `today` and either in progress or its D-day date falls on or before `until`. */
 LMS.schoolExamDueBy = function (row, today, until) {
   if (!row || !row.exam_date || LMS.schoolExamEnd(row) < today) return false;

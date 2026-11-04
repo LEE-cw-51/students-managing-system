@@ -680,7 +680,7 @@ LMS.createPlanner = function (ctx) {
     table('SchoolExams').forEach(function (e) {
       if (LMS.schoolExamDueBy(e, now, LMS.addDays(now, 60))) {
         var k = LMS.toStr(e.school_key);
-        if (!examsByKey[k] || examsByKey[k].exam_date > e.exam_date) examsByKey[k] = e;
+        if (!examsByKey[k] || LMS.compareSchoolExamsByDDay(e, examsByKey[k]) < 0) examsByKey[k] = e;
       }
     });
     var classPresent = 0;
