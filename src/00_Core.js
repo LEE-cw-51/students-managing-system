@@ -104,7 +104,7 @@ LMS.TABLES = {
   AgentMessages: ['message_id', 'conversation_id', 'role', 'content', 'proposal_id', 'created_at', 'client_turn_id'],
   AgentProposals: [
     'proposal_id', 'conversation_id', 'summary', 'calls', 'status', 'result',
-    'verification_status', 'created_at', 'executed_at'
+    'verification_status', 'created_at', 'executed_at', 'source'
   ],
   AgentUsage: ['used_at', 'kind'],
   OAuthJti: ['jti', 'exp_ms'],

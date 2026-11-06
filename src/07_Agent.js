@@ -19,6 +19,12 @@ LMS.AGENT_CONVERSATION_KEEP_DAYS = 90;
 LMS.AGENT_RATE_WINDOW_MS = 60 * 60 * 1000;
 // AgentUsage.kind of Claude connector tool calls (chat turns leave kind empty).
 LMS.AGENT_USAGE_MCP = 'mcp';
+// AgentProposals.source: who put the proposal up (Claude connector or the in-app assistant chat).
+LMS.AGENT_SOURCE_MCP = 'mcp';
+LMS.AGENT_SOURCE_ASSISTANT = 'assistant';
+// Connector turns start with this; rows saved before `source` existed are told apart by it.
+LMS.MCP_MESSAGE_PREFIX = '[Claude 커넥터]';
+LMS.AGENT_SOURCE_MISMATCH = '웹 AI 비서에서 올린 제안은 앱에서만 승인하거나 거절할 수 있습니다.';
 // Error codes the API passes to the browser (lib/api-error.js maps them to HTTP statuses).
 LMS.AGENT_CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND';
 
@@ -357,6 +363,7 @@ LMS.createAgent = function (ctx) {
    * A call that carries its preview (made by previewAgentAction during the turn) is stored as
    * is: the data may have changed during the AI wait, and the turn must not be lost for it.
    * Approval checks every change again against the data at that time.
+   * data.source: LMS.AGENT_SOURCE_MCP for connector turns; anything else is the assistant chat.
    */
   function saveAgentTurn(data) {
     data = data || {};
@@ -386,6 +393,7 @@ LMS.createAgent = function (ctx) {
         conversation_id: conv.conversation_id,
         summary: LMS.toStr(data.summary) || calls.map(function (c) { return c.text; }).join('\n'),
         calls: calls,
+        source: data.source === LMS.AGENT_SOURCE_MCP ? LMS.AGENT_SOURCE_MCP : LMS.AGENT_SOURCE_ASSISTANT,
         status: 'pending',
         result: null,
         verification_status: '',
@@ -487,11 +495,23 @@ LMS.createAgent = function (ctx) {
     return d || LMS.toStr(a.proposal_id).localeCompare(LMS.toStr(b.proposal_id));
   }
 
-  /** Pending proposals, oldest first, with each call's label and text (no raw args). */
-  function listPendingProposals() {
+  /** Where a proposal came from; rows without `source` count as connector-made by their title. */
+  function proposalSource_(p, convs) {
+    var s = LMS.toStr(p.source);
+    if (s) return s;
+    var conv = LMS.findById(convs, 'conversation_id', p.conversation_id);
+    return conv && LMS.toStr(conv.title).indexOf(LMS.MCP_MESSAGE_PREFIX) === 0 ? LMS.AGENT_SOURCE_MCP : LMS.AGENT_SOURCE_ASSISTANT;
+  }
+
+  /**
+   * Pending proposals, oldest first, with each call's label and text (no raw args).
+   * source: only proposals from there (absent: all).
+   */
+  function listPendingProposals(source) {
     var convs = table('AgentConversations');
+    var only = LMS.toStr(source);
     return table('AgentProposals').filter(function (p) {
-      return p.status === 'pending';
+      return p.status === 'pending' && (!only || proposalSource_(p, convs) === only);
     }).sort(byCreatedAt).map(function (p) {
       var conv = LMS.findById(convs, 'conversation_id', p.conversation_id);
       return {
@@ -508,15 +528,16 @@ LMS.createAgent = function (ctx) {
 
   /**
    * Server-only: the given proposal ids that exist, oldest first, with their status
-   * ([{ proposal_id, status, created_at }]). Missing ids are left out.
+   * and source ([{ proposal_id, status, created_at, source }]). Missing ids are left out.
    */
   function getAgentProposalOrder(ids) {
     var want = {};
     (Array.isArray(ids) ? ids : []).forEach(function (id) { want[LMS.toStr(id)] = true; });
+    var convs = table('AgentConversations');
     return table('AgentProposals').filter(function (p) {
       return want[LMS.toStr(p.proposal_id)];
     }).sort(byCreatedAt).map(function (p) {
-      return { proposal_id: p.proposal_id, status: p.status, created_at: p.created_at };
+      return { proposal_id: p.proposal_id, status: p.status, created_at: p.created_at, source: proposalSource_(p, convs) };
     });
   }
 
@@ -524,14 +545,20 @@ LMS.createAgent = function (ctx) {
    * Server-only: reject several proposals in one save. Never throws for one item:
    * each comes back as { proposal_id, status, verification_status, error }.
    * Already rejected stays as is; applied, failed or missing ids get an error.
+   * source: only proposals from there may be rejected; others get an error, untouched (absent: any).
    */
-  function rejectAgentProposals(ids) {
+  function rejectAgentProposals(ids, source) {
     var rows = table('AgentProposals');
+    var convs = table('AgentConversations');
+    var only = LMS.toStr(source);
     var ts = ctx.now();
     var changed = false;
     var results = (Array.isArray(ids) ? ids : []).map(function (id) {
       var row = LMS.findById(rows, 'proposal_id', LMS.toStr(id));
       if (!row) return { proposal_id: LMS.toStr(id), status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' };
+      if (only && proposalSource_(row, convs) !== only) {
+        return { proposal_id: row.proposal_id, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH };
+      }
       if (row.status === 'pending') {
         row.status = 'rejected';
         row.executed_at = ts;

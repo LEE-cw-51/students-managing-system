@@ -21,7 +21,7 @@ const { AGENT_TOOLS, assistantTools, getAgentTool, mcpTools, toolDefinitions } =
 const { MCP_READ_TOOLS, MCP_WRITE_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/mcp-tools/index.js');
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
 const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
-const { applyProposal } = require('../lib/agent.js');
+const { applyProposal, applyProposals, rejectProposals } = require('../lib/agent.js');
 const { withService } = require('../lib/store.js');
 const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, validateAuthorizeParams } = require('../lib/oauth.js');
 const { sign } = require('../lib/signing.js');
@@ -366,6 +366,69 @@ describe('mcp approval tools (claude_approve)', () => {
     assert.deepEqual(missing.results, [{ proposal_id: 'AGP-9999', status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' }]);
     const empty = await handleToolCall('approve_proposals', { proposal_ids: [] }, { run, mode: 'claude_approve' });
     assert.equal(empty.isError, true);
+  });
+
+  // A proposal from the in-app assistant chat (no source passed).
+  const assistantTask = (store, title) => LMS.createService(store).saveAgentTurn({
+    message: `${title} 할 일 만들어 줘`, reply: '확인해 주세요.',
+    calls: [{ tool: 'create_task', args: { due_date: '2026-09-20', kind: 'admin', title } }]
+  }).message.proposal.proposal_id;
+  const statusOf = (store, id) => store.readTable('AgentProposals').find((p) => p.proposal_id === id).status;
+  const call = async (run, name, ids) => parse(await handleToolCall(name, ids ? { proposal_ids: ids } : {}, { run, mode: 'claude_approve' }));
+
+  it('records where a proposal came from', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+    const rows = store.readTable('AgentProposals');
+    assert.equal(rows.find((p) => p.proposal_id === mcpId).source, 'mcp');
+    assert.equal(rows.find((p) => p.proposal_id === webId).source, 'assistant');
+  });
+
+  it('lists only connector proposals; assistant ones get an item error and stay pending', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+
+    const list = await call(run, 'list_pending_proposals');
+    assert.deepEqual(list.proposals.map((p) => p.proposal_id), [mcpId]);
+
+    const approved = await call(run, 'approve_proposals', [webId, mcpId]);
+    assert.deepEqual(approved.results.find((r) => r.proposal_id === webId),
+      { proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH });
+    assert.equal(approved.results.find((r) => r.proposal_id === mcpId).status, 'applied');
+    assert.equal(statusOf(store, webId), 'pending');
+    assert.equal(tasksTitled(store, '비서 일'), 0);
+
+    const rejected = await call(run, 'reject_proposals', [webId]);
+    assert.deepEqual(rejected.results, [{ proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH }]);
+    assert.equal(statusOf(store, webId), 'pending');
+  });
+
+  it('treats rows without source as connector-made only when the title has the connector prefix', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '예전 커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '예전 비서 일');
+    store.writeTable('AgentProposals', store.readTable('AgentProposals').map((p) => {
+      const { source, ...rest } = p;
+      return rest;
+    }));
+    assert.deepEqual((await call(run, 'list_pending_proposals')).proposals.map((p) => p.proposal_id), [mcpId]);
+    assert.equal((await call(run, 'reject_proposals', [webId])).results[0].error, LMS.AGENT_SOURCE_MISMATCH);
+    assert.equal((await call(run, 'reject_proposals', [mcpId])).results[0].status, 'rejected');
+    assert.equal(statusOf(store, webId), 'pending');
+  });
+
+  it('web approval paths still handle proposals from both sources', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+    const webId2 = assistantTask(store, '비서 거절');
+    assert.deepEqual(LMS.createService(store).listPendingProposals().map((p) => p.proposal_id), [mcpId, webId, webId2]);
+    const applied = await applyProposals([mcpId, webId], run);
+    assert.deepEqual(applied.results.map((r) => [r.proposal_id, r.status, r.error]), [[mcpId, 'applied', ''], [webId, 'applied', '']]);
+    const rejected = await rejectProposals([webId2], run);
+    assert.equal(rejected.results[0].status, 'rejected');
   });
 });
 
