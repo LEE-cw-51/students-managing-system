@@ -370,6 +370,83 @@ function ProposalCard({ proposal, onChange }) {
   );
 }
 
+// ----- Pending proposals inbox -----
+
+const POLL_MS = 8000;
+const shortTime = (v) => String(v || '').replace('T', ' ').slice(0, 16);
+
+/** Pending proposals from every conversation (chat and Claude connector), approved or rejected in bulk. */
+function Inbox({ items, selected, busy, onToggle, onToggleAll, onRun, onOpen, onDismiss }) {
+  const selectable = items.filter((it) => it.pending).map((it) => it.proposal_id);
+  const count = selected.length;
+  const all = selectable.length > 0 && selectable.every((id) => selected.includes(id));
+  return (
+    <div className="agent-inbox">
+      <div className="agent-inbox-bar">
+        <label className="agent-proposal-item">
+          <input
+            type="checkbox"
+            checked={all}
+            ref={(el) => { if (el) el.indeterminate = count > 0 && !all; }}
+            onChange={() => onToggleAll(all ? [] : selectable)}
+            disabled={Boolean(busy) || !selectable.length}
+          />
+          <span>전체 선택</span>
+        </label>
+        <div className="agent-proposal-actions">
+          <button type="button" className="btn ok sm" disabled={Boolean(busy) || !count} onClick={() => onRun('apply')}>
+            {busy === 'apply' ? '반영 중…' : `선택한 ${count}건 반영`}
+          </button>
+          <button type="button" className="btn secondary sm" disabled={Boolean(busy) || !count} onClick={() => onRun('reject')}>
+            {busy === 'reject' ? '거절 중…' : `선택한 ${count}건 거절`}
+          </button>
+        </div>
+      </div>
+      <div className="agent-inbox-list">
+        {items === null ? <p className="agent-muted">불러오는 중…</p> : null}
+        {items && !items.length ? <p className="agent-muted">승인 대기 중인 변경이 없습니다.</p> : null}
+        {(items || []).map((it) => (
+          <div key={it.proposal_id} className="agent-proposal" data-status={it.pending ? 'pending' : 'failed'}>
+            <div className="agent-proposal-head">
+              <label className="agent-proposal-item">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(it.proposal_id)}
+                  onChange={() => onToggle(it.proposal_id)}
+                  disabled={Boolean(busy) || !it.pending}
+                />
+                <strong className="agent-inbox-title">{it.title || '변경 제안'}</strong>
+              </label>
+              <small className="agent-inbox-time">{shortTime(it.created_at)}</small>
+            </div>
+            <ul>
+              {(it.calls || []).map((c, i) => (
+                <li key={i}>
+                  <span className="agent-proposal-label">{c.label}</span>
+                  <span>{c.text}</span>
+                </li>
+              ))}
+            </ul>
+            {it.error ? (
+              <p className="agent-proposal-error" role="alert">
+                {it.kind === 'reject' ? '거절하지 못했습니다' : '반영하지 못했습니다(변경 없음)'}: {it.error}
+              </p>
+            ) : null}
+            <div className="agent-inbox-tools">
+              {it.conversation_id ? (
+                <button type="button" className="agent-copy" onClick={() => onOpen(it.conversation_id)} disabled={Boolean(busy)}>대화 보기</button>
+              ) : null}
+              {!it.pending ? (
+                <button type="button" className="agent-copy" onClick={() => onDismiss(it.proposal_id)}>목록에서 지우기</button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ----- Panel -----
 
 /** Drag handle on the panel's left edge (push mode only); onResize(width, 'move' | 'end'). */
@@ -440,8 +517,39 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
   const abortRef = useRef(null);
   const stickRef = useRef(true);
   const restored = useRef(false);
+  const [pending, setPending] = useState(null);
+  const [failed, setFailed] = useState({});
+  const [inboxSel, setInboxSel] = useState([]);
+  const [inboxBusy, setInboxBusy] = useState('');
+  const batchRef = useRef(false);
 
   const names = useMemo(() => new Map((students || []).map((s) => [String(s.id), s.name])), [students]);
+
+  const refreshPending = useCallback(async () => {
+    if (batchRef.current) return;
+    try {
+      const list = await api('listPendingProposals');
+      if (batchRef.current) return;
+      const ids = new Set(list.map((p) => p.proposal_id));
+      setPending(list);
+      setInboxSel((sel) => sel.filter((id) => ids.has(id)));
+    } catch { /* keep the last list; the next poll tries again */ }
+  }, []);
+
+  useEffect(() => {
+    if (!open || !aiEnabled) return undefined;
+    refreshPending();
+    const t = setInterval(() => { if (!document.hidden) refreshPending(); }, POLL_MS);
+    return () => clearInterval(t);
+  }, [open, aiEnabled, refreshPending]);
+
+  const inboxItems = useMemo(() => {
+    if (pending === null) return null;
+    const live = new Set(pending.map((p) => p.proposal_id));
+    const rows = pending.map((p) => ({ ...p, ...(failed[p.proposal_id] || {}), pending: true }));
+    const gone = Object.values(failed).filter((f) => !live.has(f.proposal_id)).map((f) => ({ ...f, pending: false }));
+    return [...rows, ...gone].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  }, [pending, failed]);
 
   const loadConversation = useCallback(async (id) => {
     setError('');
@@ -647,6 +755,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
       setSaving(false);
       setLive(null);
       setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
+      refreshPending();
     }
   };
 
@@ -656,6 +765,77 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
 
   const updateProposal = (next) => {
     setMessages((list) => list.map((m) => (m.proposal && m.proposal.proposal_id === next.proposal_id ? { ...m, proposal: next } : m)));
+  };
+
+  const onCardChange = (next) => {
+    updateProposal(next);
+    refreshPending();
+  };
+
+  const showInbox = () => {
+    setView('inbox');
+    refreshPending();
+  };
+
+  const toggleInbox = (id) => setInboxSel((sel) => (sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]));
+
+  const dismissFailed = (id) => setFailed((map) => {
+    const rest = { ...map };
+    delete rest[id];
+    return rest;
+  });
+
+  const runBatch = async (kind) => {
+    const live = new Set((pending || []).map((p) => p.proposal_id));
+    const ids = inboxSel.filter((id) => live.has(id));
+    if (!ids.length || inboxBusy) return;
+    batchRef.current = true;
+    setInboxBusy(kind);
+    try {
+      const { results } = await postJson(`/api/agent/${kind}`, { proposal_ids: ids });
+      const byId = new Map((pending || []).map((p) => [p.proposal_id, p]));
+      const ok = results.filter((r) => !r.error);
+      const bad = results.filter((r) => r.error);
+      const okIds = new Set(ok.map((r) => r.proposal_id));
+      setPending((list) => (list || []).filter((p) => !okIds.has(p.proposal_id)));
+      setInboxSel([]);
+      setFailed((map) => {
+        const next = { ...map };
+        for (const id of okIds) delete next[id];
+        for (const r of bad) next[r.proposal_id] = { ...(byId.get(r.proposal_id) || { proposal_id: r.proposal_id }), error: r.error, kind };
+        return next;
+      });
+
+      const shown = new Set(messages.map((m) => m.proposal && m.proposal.proposal_id).filter(Boolean));
+      const touched = results.filter((r) => shown.has(r.proposal_id) && r.status);
+      if (touched.length) {
+        const status = new Map(touched.map((r) => [r.proposal_id, r]));
+        setMessages((list) => list.map((m) => {
+          const r = m.proposal && status.get(m.proposal.proposal_id);
+          if (!r) return m;
+          const result = r.status === 'failed' && r.error ? { error: r.error } : m.proposal.result;
+          return { ...m, proposal: { ...m.proposal, status: r.status, verification_status: r.verification_status ?? m.proposal.verification_status, result } };
+        }));
+        if (!busy && conversationId) {
+          api('getAgentConversation', conversationId).then((data) => setMessages(data.messages)).catch(() => {});
+        }
+      }
+
+      const applied = ok.filter((r) => r.status === 'applied');
+      if (kind === 'apply' && applied.length) notifyDataChanged();
+      const mismatch = applied.some((r) => r.verification_status && r.verification_status !== 'verified');
+      const done = kind === 'apply' ? `${ok.length}건 반영했습니다.` : `${ok.length}건 거절했습니다.`;
+      const fail = bad.length ? ` ${bad.length}건은 ${kind === 'apply' ? '반영' : '거절'}하지 못했습니다.` : '';
+      const check = mismatch ? ' 확인 결과가 다른 항목이 있습니다.' : '';
+      const summary = ((ok.length ? done : '') + fail + check).trim();
+      if (summary) toast(summary, bad.length || mismatch ? 'error' : 'ok');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      batchRef.current = false;
+      setInboxBusy('');
+      refreshPending();
+    }
   };
 
   const onKeyDown = (e) => {
@@ -680,6 +860,18 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
             <span>조회는 바로, 변경은 승인 후 반영</span>
           </div>
           <div className="agent-head-actions">
+            {aiEnabled ? (
+              <button
+                type="button"
+                className="btn ghost sm agent-inbox-toggle"
+                aria-pressed={view === 'inbox'}
+                aria-label={pending && pending.length ? `승인 대기 ${pending.length}건` : '승인 대기'}
+                onClick={view === 'inbox' ? () => setView('chat') : showInbox}
+              >
+                승인 대기
+                {pending && pending.length ? <span className="agent-badge" aria-hidden="true">{pending.length > 99 ? '99+' : pending.length}</span> : null}
+              </button>
+            ) : null}
             <button type="button" className="btn ghost sm" onClick={view === 'list' ? () => setView('chat') : showList}>
               {view === 'list' ? '대화로' : '지난 대화'}
             </button>
@@ -693,6 +885,17 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
             <p><strong>AI 키가 설정되지 않았습니다.</strong></p>
             <p>서버 환경 변수 <code>ANTHROPIC_API_KEY</code>를 넣으면 Claude Haiku 5.5로 사용할 수 있습니다. 없으면 <code>AI_API_KEY</code>(OpenRouter)와 도구 호출을 지원하는 <code>AGENT_MODEL</code>을 씁니다.</p>
           </div>
+        ) : view === 'inbox' ? (
+          <Inbox
+            items={inboxItems}
+            selected={inboxSel}
+            busy={inboxBusy}
+            onToggle={toggleInbox}
+            onToggleAll={setInboxSel}
+            onRun={runBatch}
+            onOpen={loadConversation}
+            onDismiss={dismissFailed}
+          />
         ) : view === 'list' ? (
           <div className="agent-convs">
             {conversations === null ? <p className="agent-muted">불러오는 중…</p> : null}
@@ -722,7 +925,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
               {messages.map((m) => (
                 <div key={m.message_id} className={'agent-msg ' + (m.role === 'user' ? 'user' : 'assistant')}>
                   {m.role === 'user' ? <p>{m.content}</p> : <RichText text={m.content} />}
-                  {m.proposal ? <ProposalCard proposal={m.proposal} onChange={updateProposal} /> : null}
+                  {m.proposal ? <ProposalCard proposal={m.proposal} onChange={onCardChange} /> : null}
                   {m.role !== 'user' && m.content ? <div className="agent-msg-tools"><CopyButton text={m.content} /></div> : null}
                 </div>
               ))}

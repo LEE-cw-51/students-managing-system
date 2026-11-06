@@ -482,6 +482,72 @@ LMS.createAgent = function (ctx) {
     return slimProposal(row);
   }
 
+  function byCreatedAt(a, b) {
+    var d = LMS.toStr(a.created_at).localeCompare(LMS.toStr(b.created_at));
+    return d || LMS.toStr(a.proposal_id).localeCompare(LMS.toStr(b.proposal_id));
+  }
+
+  /** Pending proposals, oldest first, with each call's label and text (no raw args). */
+  function listPendingProposals() {
+    var convs = table('AgentConversations');
+    return table('AgentProposals').filter(function (p) {
+      return p.status === 'pending';
+    }).sort(byCreatedAt).map(function (p) {
+      var conv = LMS.findById(convs, 'conversation_id', p.conversation_id);
+      return {
+        proposal_id: p.proposal_id,
+        conversation_id: p.conversation_id,
+        title: conv ? LMS.toStr(conv.title) : '',
+        created_at: p.created_at,
+        calls: (Array.isArray(p.calls) ? p.calls : []).map(function (c) {
+          return { label: LMS.toStr(c.label), text: LMS.toStr(c.text) };
+        })
+      };
+    });
+  }
+
+  /**
+   * Server-only: the given proposal ids that exist, oldest first, with their status
+   * ([{ proposal_id, status, created_at }]). Missing ids are left out.
+   */
+  function getAgentProposalOrder(ids) {
+    var want = {};
+    (Array.isArray(ids) ? ids : []).forEach(function (id) { want[LMS.toStr(id)] = true; });
+    return table('AgentProposals').filter(function (p) {
+      return want[LMS.toStr(p.proposal_id)];
+    }).sort(byCreatedAt).map(function (p) {
+      return { proposal_id: p.proposal_id, status: p.status, created_at: p.created_at };
+    });
+  }
+
+  /**
+   * Server-only: reject several proposals in one save. Never throws for one item:
+   * each comes back as { proposal_id, status, verification_status, error }.
+   * Already rejected stays as is; applied, failed or missing ids get an error.
+   */
+  function rejectAgentProposals(ids) {
+    var rows = table('AgentProposals');
+    var ts = ctx.now();
+    var changed = false;
+    var results = (Array.isArray(ids) ? ids : []).map(function (id) {
+      var row = LMS.findById(rows, 'proposal_id', LMS.toStr(id));
+      if (!row) return { proposal_id: LMS.toStr(id), status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' };
+      if (row.status === 'pending') {
+        row.status = 'rejected';
+        row.executed_at = ts;
+        changed = true;
+      }
+      return {
+        proposal_id: row.proposal_id,
+        status: row.status,
+        verification_status: row.verification_status || '',
+        error: row.status === 'rejected' ? '' : '이미 처리된 제안입니다.'
+      };
+    });
+    if (changed) saveTable('AgentProposals', rows);
+    return results;
+  }
+
   return {
     listAgentConversations: listAgentConversations,
     getAgentConversation: getAgentConversation,
@@ -495,7 +561,10 @@ LMS.createAgent = function (ctx) {
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,
-    rejectAgentProposal: rejectAgentProposal
+    rejectAgentProposal: rejectAgentProposal,
+    listPendingProposals: listPendingProposals,
+    getAgentProposalOrder: getAgentProposalOrder,
+    rejectAgentProposals: rejectAgentProposals
   };
 };
 

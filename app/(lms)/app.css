@@ -1365,6 +1365,24 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
 .agent-conv small { font-size: 11px; color: var(--muted); }
 .agent-muted { color: var(--muted); font-size: 14px; padding: 8px; margin: 0; }
 
+.agent-head .agent-badge {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px;
+  border-radius: 999px; background: var(--amber); color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+}
+.agent-inbox-toggle[aria-pressed="true"] { background: var(--navy-soft); }
+.agent-inbox { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.agent-inbox-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.agent-inbox-bar > .agent-proposal-item { flex: none; }
+.agent-inbox-bar .agent-proposal-actions { margin-top: 0; }
+.agent-inbox-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 16px; display: grid; align-content: start; }
+.agent-inbox-title { font-size: 14px; overflow-wrap: anywhere; }
+.agent-inbox-time { flex: none; font-size: 11px; color: var(--muted); }
+.agent-inbox-tools { display: flex; justify-content: flex-end; gap: 4px; margin: 6px -6px -4px 0; }
+.agent-inbox-tools:empty { display: none; }
+
 /* Wide screens: the panel sits beside the page and pushes it left; its width is --agent-w on .app. */
 .agent-resizer { display: none; }
 @keyframes agent-in { from { transform: translateX(24px); opacity: 0; } }
