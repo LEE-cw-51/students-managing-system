@@ -5,7 +5,9 @@ const assert = require('node:assert/strict');
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, mcpTools, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
-const { runAgentTurn, applyProposal, agentRateLimit, AGENT_RATE_LIMITED } = require('../lib/agent.js');
+const {
+  runAgentTurn, applyProposal, applyProposals, rejectProposals, agentRateLimit, AGENT_RATE_LIMITED, AGENT_BATCH_PROPOSALS_MAX
+} = require('../lib/agent.js');
 const { chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
 
 const CONFIG = { key: 'test-key', baseUrl: 'https://ai.test/v1', model: 'test-model' };
@@ -607,6 +609,112 @@ describe('agent proposals', () => {
     assert.equal(api.rejectAgentProposal(p.proposal_id).status, 'rejected');
     assert.throws(() => api.applyAgentProposal(p.proposal_id), /이미 처리된/);
     assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
+});
+
+describe('agent proposal batches', () => {
+  function proposalWith(api, calls) {
+    return api.saveAgentTurn({ message: '요청', reply: '승인해 주세요', calls }).message.proposal;
+  }
+  const statusOf = (api, p) => api.getAgentConversation(p.conversation_id).messages[1].proposal.status;
+
+  it('lists only pending proposals, oldest first', () => {
+    const { api, store, hong, kim, lessonOf } = setup();
+    const a = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
+    const b = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } }]);
+    const c = proposalWith(api, [{ tool: 'create_counseling', args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-14', content: '상담' } }]);
+    const d = proposalWith(api, [{ tool: 'create_counseling', args: { student_id: kim.student_id, kind: '학생', counsel_date: '2026-09-14', content: '상담' } }]);
+    // Creation times run against the id order: c, a, d, b.
+    const times = { [c.proposal_id]: '2026-09-14T01:00:00', [a.proposal_id]: '2026-09-14T02:00:00', [d.proposal_id]: '2026-09-14T03:00:00', [b.proposal_id]: '2026-09-14T04:00:00' };
+    store.writeTable('AgentProposals', store.readTable('AgentProposals').map((p) => ({ ...p, created_at: times[p.proposal_id] })));
+    const fresh = LMS.createService(store);
+    fresh.rejectAgentProposal(d.proposal_id);
+
+    const list = fresh.listPendingProposals();
+    assert.deepEqual(list.map((p) => p.proposal_id), [c.proposal_id, a.proposal_id, b.proposal_id]);
+    assert.equal(list[0].title, '요청');
+    assert.equal(list[0].calls.length, 1);
+    assert.match(list[0].calls[0].text, /상담/);
+    assert.equal(list[0].calls[0].args, undefined);
+  });
+
+  it('applies each proposal on its own: a broken one fails, the others keep their changes', async () => {
+    const { api, store, hong, kim, lessonOf } = setup();
+    const kimId = lessonOf(kim.student_id).lesson_id;
+    const first = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
+    const broken = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: kimId, attendance: '결석' } }]);
+    const last = proposalWith(api, [{ tool: 'create_counseling', args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-14', content: '결석 사유 확인' } }]);
+    // The middle proposal's lesson disappears before approval.
+    store.writeTable('Lessons', store.readTable('Lessons').filter((l) => l.lesson_id !== kimId));
+    const fresh = LMS.createService(store);
+    const run = async (fn) => fn(fresh);
+
+    const { results } = await applyProposals([last.proposal_id, broken.proposal_id, first.proposal_id], run);
+    assert.deepEqual(results.map((r) => [r.proposal_id, r.status]), [
+      [first.proposal_id, 'applied'], [broken.proposal_id, 'failed'], [last.proposal_id, 'applied']
+    ]);
+    assert.equal(results[0].verification_status, 'verified');
+    assert.equal(results[0].error, '');
+    assert.match(results[1].error, /찾을 수 없습니다/);
+    assert.equal(fresh.getStudentLessons(hong.student_id, '2026-09-14', '2026-09-14')[0].attendance, '결석');
+    assert.equal(fresh.getCounselingNotes(hong.student_id).length, 1);
+    assert.equal(statusOf(fresh, broken), 'failed');
+    assert.equal(fresh.listPendingProposals().length, 0);
+  });
+
+  it('reports the stored status of a proposal rejected after the order lookup', async () => {
+    const { api, hong, lessonOf } = setup();
+    const p = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
+    let step = 0;
+    const racing = async (fn) => {
+      const out = await fn(api);
+      if (step++ === 0) api.rejectAgentProposal(p.proposal_id);
+      return out;
+    };
+    const { results } = await applyProposals([p.proposal_id], racing);
+    assert.equal(results[0].status, 'rejected');
+    assert.match(results[0].error, /이미 처리된/);
+    assert.equal(statusOf(api, p), 'rejected');
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
+
+  it('refuses an empty or oversized list without touching any proposal', async () => {
+    const { api, hong, lessonOf, run } = setup();
+    const p = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
+    const tooMany = Array.from({ length: AGENT_BATCH_PROPOSALS_MAX + 1 }, (_, i) => i === 0 ? p.proposal_id : 'AGP-X' + i);
+    for (const fn of [applyProposals, rejectProposals]) {
+      await assert.rejects(fn([], run), /하나 이상/);
+      await assert.rejects(fn(['', '  '], run), /하나 이상/);
+      await assert.rejects(fn(undefined, run), /하나 이상/);
+      await assert.rejects(fn(tooMany, run), new RegExp(`${AGENT_BATCH_PROPOSALS_MAX}건까지`));
+    }
+    assert.equal(statusOf(api, p), 'pending');
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+  });
+
+  it('rejects only the chosen proposals and leaves the rest pending', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const a = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
+    const b = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } }]);
+    const c = proposalWith(api, [{ tool: 'create_counseling', args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-14', content: '상담' } }]);
+    await applyProposal(c.proposal_id, run);
+
+    const { results } = await rejectProposals([b.proposal_id, c.proposal_id, 'AGP-NOPE', b.proposal_id], run);
+    assert.deepEqual(results.map((r) => [r.proposal_id, r.status]), [
+      [b.proposal_id, 'rejected'], [c.proposal_id, 'applied'], ['AGP-NOPE', '']
+    ]);
+    assert.equal(results[0].error, '');
+    assert.match(results[1].error, /이미 처리된/);
+    assert.match(results[2].error, /찾을 수 없습니다/);
+    assert.equal(statusOf(api, a), 'pending');
+    assert.equal(statusOf(api, b), 'rejected');
+    assert.equal(statusOf(api, c), 'applied');
+    assert.deepEqual(api.listPendingProposals().map((p) => p.proposal_id), [a.proposal_id]);
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+
+    // Rejecting again is harmless.
+    const again = await rejectProposals([b.proposal_id], run);
+    assert.deepEqual(again.results, [{ proposal_id: b.proposal_id, status: 'rejected', verification_status: '', error: '' }]);
   });
 });
 

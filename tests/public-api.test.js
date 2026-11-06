@@ -44,7 +44,7 @@ describe('browser API allowlist', () => {
       assert.ok(used.has(n), n);
     });
     assert.deepEqual([...used].sort(), [...PUBLIC_API].sort());
-    assert.equal(PUBLIC_API.size, 91);
+    assert.equal(PUBLIC_API.size, 92);
   });
 
   it('only lists real service functions', () => {
@@ -57,6 +57,7 @@ describe('browser API allowlist', () => {
   it('keeps internal and unlisted functions off the browser API', () => {
     ['saveAiPlanDraft', 'getClassPlanContext', 'createSplitDraft', 'setDailyPlanDone', 'ensureSchema',
       'saveLesson', 'closeClass', 'saveAgentTurn', 'applyAgentProposal', 'markAgentProposalFailed',
+      'getAgentProposalOrder', 'rejectAgentProposals',
       'previewAgentAction', 'reserveAgentTurn', 'releaseAgentTurn', 'consumeOAuthJti', 'getAgentHistory', 'getAgentContext', 'toString', 'constructor', 'hasOwnProperty', '__proto__', 'nope'].forEach((n) => {
       assert.equal(isPublicApi(api, n), false, n);
     });
