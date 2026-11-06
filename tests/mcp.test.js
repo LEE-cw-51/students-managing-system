@@ -18,10 +18,10 @@ process.env.NODE_ENV = 'test';
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, getAgentTool, mcpTools, toolDefinitions } = require('../lib/agent-tools.js');
-const { MCP_READ_TOOLS, MCP_WRITE_TOOLS } = require('../lib/mcp-tools/index.js');
+const { MCP_READ_TOOLS, MCP_WRITE_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/mcp-tools/index.js');
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
 const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
-const { applyProposal } = require('../lib/agent.js');
+const { applyProposal, applyProposals, rejectProposals } = require('../lib/agent.js');
 const { withService } = require('../lib/store.js');
 const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, validateAuthorizeParams } = require('../lib/oauth.js');
 const { sign } = require('../lib/signing.js');
@@ -33,6 +33,7 @@ after(() => {
 
 const READ_NAMES = AGENT_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name);
 const WRITE_NAMES = AGENT_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name);
+const APPROVAL_NAMES = ['list_pending_proposals', 'approve_proposals', 'reject_proposals'];
 
 function setup() {
   const store = createMemoryStore();
@@ -63,13 +64,16 @@ const LIST = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} };
 
 describe('mcp write modes', () => {
   it('normalises unknown values to read_only and reads the mode from Settings', async () => {
-    assert.deepEqual(MCP_WRITE_MODES, ['read_only', 'proposal']);
+    assert.deepEqual(MCP_WRITE_MODES, ['read_only', 'proposal', 'claude_approve']);
     assert.equal(normalizeWriteMode(' proposal '), 'proposal');
+    assert.equal(normalizeWriteMode('claude_approve'), 'claude_approve');
     ['', null, undefined, 'DIRECT', 'write'].forEach((v) => assert.equal(normalizeWriteMode(v), 'read_only'));
     const { api, run } = setup();
     assert.equal(await readWriteMode(run), 'read_only');
     api.saveSettings({ mcp_write_mode: 'proposal' });
     assert.equal(await readWriteMode(run), 'proposal');
+    api.saveSettings({ mcp_write_mode: 'claude_approve' });
+    assert.equal(await readWriteMode(run), 'claude_approve');
   });
 
   it('maps the removed direct mode to proposal, keeping write tools but queued', async () => {
@@ -87,7 +91,7 @@ describe('mcp write modes', () => {
     const { store, api } = setup();
     api.saveSettings({ mcp_write_mode: 'proposal' });
     ['write', 'DIRECT', 'full'].forEach((v) => {
-      assert.throws(() => LMS.createService(store).saveSettings({ mcp_write_mode: v, academy_name: '바뀜' }), /조회만\(read_only\) 또는 승인 대기 제안\(proposal\)/);
+      assert.throws(() => LMS.createService(store).saveSettings({ mcp_write_mode: v, academy_name: '바뀜' }), /조회만\(read_only\), 승인 대기 제안\(proposal\), Claude에서 승인\(claude_approve\)/);
     });
     // Nothing was written by the rejected saves.
     assert.equal(LMS.createService(store).getSettings().mcp_write_mode, 'proposal');
@@ -149,7 +153,7 @@ describe('mcp write modes', () => {
 describe('mcp tool surfaces', () => {
   const MCP_ONLY_READS = MCP_READ_TOOLS.map((t) => t.name);
   const MCP_ONLY_WRITES = MCP_WRITE_TOOLS.map((t) => t.name);
-  const MCP_ONLY = [...MCP_ONLY_READS, ...MCP_ONLY_WRITES];
+  const MCP_ONLY = [...MCP_ONLY_READS, ...MCP_ONLY_WRITES, ...MCP_APPROVAL_TOOLS.map((t) => t.name)];
 
   it('read_only lists every read tool, including the MCP-only ones, and no write tool', () => {
     const names = listTools('read_only').map((t) => t.name);
@@ -283,6 +287,148 @@ describe('mcp tool calls', () => {
     const attendance = proposals.find((p) => /update_attendance/.test(JSON.stringify(p.calls)));
     await applyProposal(attendance.proposal_id, run);
     assert.equal(lessonOf(hong.student_id).attendance, '결석');
+  });
+});
+
+describe('mcp approval tools (claude_approve)', () => {
+  const queueTask = async (run, title, mode = 'claude_approve') => parse(await handleToolCall(
+    'create_task', { due_date: '2026-09-20', kind: 'admin', title }, { run, mode }
+  ));
+  const tasksTitled = (store, title) => store.readTable('Tasks').filter((t) => t.title === title).length;
+
+  it('lists the three approval tools only in claude_approve, with approve and reject destructive', () => {
+    assert.deepEqual(MCP_APPROVAL_TOOLS.map((t) => t.name), APPROVAL_NAMES);
+    APPROVAL_NAMES.forEach((n) => assert.equal(getAgentTool(n).kind, 'approval', n));
+    ['read_only', 'proposal', 'direct', 'nonsense'].forEach((mode) => {
+      const names = listTools(mode).map((t) => t.name);
+      APPROVAL_NAMES.forEach((n) => assert.ok(!names.includes(n), `${mode} ${n}`));
+    });
+    const tools = listTools('claude_approve');
+    assert.deepEqual(tools.map((t) => t.name), [...READ_NAMES, ...WRITE_NAMES, ...APPROVAL_NAMES]);
+    const byName = (n) => tools.find((t) => t.name === n);
+    assert.equal(byName('list_pending_proposals').annotations.readOnlyHint, true);
+    assert.equal(byName('list_pending_proposals').annotations.destructiveHint, false);
+    ['approve_proposals', 'reject_proposals'].forEach((n) => {
+      assert.equal(byName(n).annotations.readOnlyHint, false, n);
+      assert.equal(byName(n).annotations.destructiveHint, true, n);
+      assert.match(byName(n).description, /직접 말했을 때만/, n);
+    });
+    tools.filter((t) => WRITE_NAMES.includes(t.name)).forEach((t) => assert.match(t.description, /^\[승인 필요\] .*Claude에게 승인하라고/, t.name));
+  });
+
+  it('read_only and proposal refuse the approval tools and change nothing', async () => {
+    const { store, run } = setup();
+    const { proposal_id } = await queueTask(run, '교재 주문', 'proposal');
+    for (const mode of ['read_only', 'proposal']) {
+      for (const name of APPROVAL_NAMES) {
+        const res = await handleToolCall(name, { proposal_ids: [proposal_id] }, { run, mode });
+        assert.equal(res.isError, true, `${mode} ${name}`);
+        assert.match(res.content[0].text, /없는 도구/);
+      }
+    }
+    assert.equal(store.readTable('AgentProposals')[0].status, 'pending');
+    assert.equal(tasksTitled(store, '교재 주문'), 0);
+  });
+
+  it('lists a queued proposal, then approving it saves the change', async () => {
+    const { store, run } = setup();
+    const queued = await queueTask(run, '교재 주문');
+    assert.match(queued.status, /승인하라고 말씀하시면 반영됩니다/);
+    const list = parse(await handleToolCall('list_pending_proposals', {}, { run, mode: 'claude_approve' }));
+    assert.equal(list.count, 1);
+    assert.equal(list.proposals[0].proposal_id, queued.proposal_id);
+    assert.ok(list.proposals[0].created_at);
+    assert.equal(list.proposals[0].change, queued.change);
+    assert.equal(tasksTitled(store, '교재 주문'), 0);
+
+    const res = await handleToolCall('approve_proposals', { proposal_ids: [queued.proposal_id] }, { run, mode: 'claude_approve' });
+    assert.equal(res.isError, undefined, res.content[0].text);
+    const [item] = parse(res).results;
+    assert.equal(item.proposal_id, queued.proposal_id);
+    assert.equal(item.status, 'applied');
+    assert.equal(item.verification_status, 'verified');
+    assert.equal(item.error, '');
+    assert.equal(tasksTitled(store, '교재 주문'), 1);
+    assert.equal(store.readTable('AgentProposals')[0].status, 'applied');
+    assert.equal(parse(await handleToolCall('list_pending_proposals', {}, { run, mode: 'claude_approve' })).count, 0);
+  });
+
+  it('rejects a proposal, and reports unknown ids per item', async () => {
+    const { store, run } = setup();
+    const queued = await queueTask(run, '거절할 일');
+    const res = parse(await handleToolCall('reject_proposals', { proposal_ids: [queued.proposal_id, 'AGP-9999'] }, { run, mode: 'claude_approve' }));
+    assert.equal(res.results.find((r) => r.proposal_id === queued.proposal_id).status, 'rejected');
+    assert.ok(res.results.find((r) => r.proposal_id === 'AGP-9999').error);
+    assert.equal(store.readTable('AgentProposals')[0].status, 'rejected');
+    assert.equal(tasksTitled(store, '거절할 일'), 0);
+
+    const missing = parse(await handleToolCall('approve_proposals', { proposal_ids: ['AGP-9999'] }, { run, mode: 'claude_approve' }));
+    assert.deepEqual(missing.results, [{ proposal_id: 'AGP-9999', status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' }]);
+    const empty = await handleToolCall('approve_proposals', { proposal_ids: [] }, { run, mode: 'claude_approve' });
+    assert.equal(empty.isError, true);
+  });
+
+  // A proposal from the in-app assistant chat (no source passed).
+  const assistantTask = (store, title) => LMS.createService(store).saveAgentTurn({
+    message: `${title} 할 일 만들어 줘`, reply: '확인해 주세요.',
+    calls: [{ tool: 'create_task', args: { due_date: '2026-09-20', kind: 'admin', title } }]
+  }).message.proposal.proposal_id;
+  const statusOf = (store, id) => store.readTable('AgentProposals').find((p) => p.proposal_id === id).status;
+  const call = async (run, name, ids) => parse(await handleToolCall(name, ids ? { proposal_ids: ids } : {}, { run, mode: 'claude_approve' }));
+
+  it('records where a proposal came from', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+    const rows = store.readTable('AgentProposals');
+    assert.equal(rows.find((p) => p.proposal_id === mcpId).source, 'mcp');
+    assert.equal(rows.find((p) => p.proposal_id === webId).source, 'assistant');
+  });
+
+  it('lists only connector proposals; assistant ones get an item error and stay pending', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+
+    const list = await call(run, 'list_pending_proposals');
+    assert.deepEqual(list.proposals.map((p) => p.proposal_id), [mcpId]);
+
+    const approved = await call(run, 'approve_proposals', [webId, mcpId]);
+    assert.deepEqual(approved.results.find((r) => r.proposal_id === webId),
+      { proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH });
+    assert.equal(approved.results.find((r) => r.proposal_id === mcpId).status, 'applied');
+    assert.equal(statusOf(store, webId), 'pending');
+    assert.equal(tasksTitled(store, '비서 일'), 0);
+
+    const rejected = await call(run, 'reject_proposals', [webId]);
+    assert.deepEqual(rejected.results, [{ proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH }]);
+    assert.equal(statusOf(store, webId), 'pending');
+  });
+
+  it('treats rows without source as connector-made only when the title has the connector prefix', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '예전 커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '예전 비서 일');
+    store.writeTable('AgentProposals', store.readTable('AgentProposals').map((p) => {
+      const { source, ...rest } = p;
+      return rest;
+    }));
+    assert.deepEqual((await call(run, 'list_pending_proposals')).proposals.map((p) => p.proposal_id), [mcpId]);
+    assert.equal((await call(run, 'reject_proposals', [webId])).results[0].error, LMS.AGENT_SOURCE_MISMATCH);
+    assert.equal((await call(run, 'reject_proposals', [mcpId])).results[0].status, 'rejected');
+    assert.equal(statusOf(store, webId), 'pending');
+  });
+
+  it('web approval paths still handle proposals from both sources', async () => {
+    const { store, run } = setup();
+    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
+    const webId = assistantTask(store, '비서 일');
+    const webId2 = assistantTask(store, '비서 거절');
+    assert.deepEqual(LMS.createService(store).listPendingProposals().map((p) => p.proposal_id), [mcpId, webId, webId2]);
+    const applied = await applyProposals([mcpId, webId], run);
+    assert.deepEqual(applied.results.map((r) => [r.proposal_id, r.status, r.error]), [[mcpId, 'applied', ''], [webId, 'applied', '']]);
+    const rejected = await rejectProposals([webId2], run);
+    assert.equal(rejected.results[0].status, 'rejected');
   });
 });
 

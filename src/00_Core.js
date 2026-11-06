@@ -104,7 +104,7 @@ LMS.TABLES = {
   AgentMessages: ['message_id', 'conversation_id', 'role', 'content', 'proposal_id', 'created_at', 'client_turn_id'],
   AgentProposals: [
     'proposal_id', 'conversation_id', 'summary', 'calls', 'status', 'result',
-    'verification_status', 'created_at', 'executed_at'
+    'verification_status', 'created_at', 'executed_at', 'source'
   ],
   AgentUsage: ['used_at', 'kind'],
   OAuthJti: ['jti', 'exp_ms'],
@@ -167,8 +167,11 @@ LMS.DEFAULT_SETTINGS = {
   allowed_emails: '',
   mcp_write_mode: 'read_only'
 };
-/** Claude connector write modes; the first is the default. Legacy 'direct' is stored as 'proposal'. */
-LMS.MCP_WRITE_MODES = ['read_only', 'proposal'];
+/**
+ * Claude connector write modes; the first is the default. Legacy 'direct' is stored as 'proposal'.
+ * claude_approve: like proposal, plus tools that let Claude approve or reject pending proposals.
+ */
+LMS.MCP_WRITE_MODES = ['read_only', 'proposal', 'claude_approve'];
 
 LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT', 'AGC', 'AGM', 'AGP'];
 

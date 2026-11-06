@@ -2153,7 +2153,7 @@ LMS.createService = function (store) {
       if (mode === 'direct') mode = 'proposal';
       // Blank, or an unknown value already stored (resent by the settings page), falls back to read-only.
       if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(storedMode).trim())) mode = LMS.MCP_WRITE_MODES[0];
-      if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only) 또는 승인 대기 제안(proposal)만 고를 수 있습니다.');
+      if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only), 승인 대기 제안(proposal), Claude에서 승인(claude_approve) 중에서만 고를 수 있습니다.');
       current.mcp_write_mode = mode;
     } else if (current.mcp_write_mode === 'direct') {
       current.mcp_write_mode = 'proposal';
