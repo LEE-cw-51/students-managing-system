@@ -1,5 +1,5 @@
 import { handleMcpRequest } from '../../../lib/mcp-server.js';
-import { mcpRun, unauthorizedResponse, verifyAccessToken } from '../../../lib/oauth.js';
+import { tokenRunner, unauthorizedResponse, verifyAccessToken } from '../../../lib/oauth.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -9,7 +9,7 @@ function bearer(req) {
   return m ? m[1].trim() : '';
 }
 
-/** Bearer token payload, or null when the token is missing, expired or revoked. */
+/** Bearer token payload (with its workspace and user), or null when the token is missing, expired or revoked. */
 async function authorize(req) {
   const token = bearer(req);
   if (!token) return null;
@@ -31,8 +31,7 @@ export async function POST(req) {
   if (!auth) return unauthorizedResponse(req);
   const p = auth.payload;
   return handleMcpRequest(req, {
-    // TODO(mcp-workspace): use the workspace from the token instead of the default workspace.
-    run: mcpRun,
+    run: tokenRunner(p),
     authInfo: { token: auth.token, clientId: String(p.client_id || p.cid || ''), scopes: [], expiresAt: typeof p.exp === 'number' ? p.exp : undefined }
   });
 }
