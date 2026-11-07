@@ -7,7 +7,7 @@ import { api } from '@/lib/client-api';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import GlobalSearch from './GlobalSearch';
-import AgentPanel, { AGENT_MODAL_QUERY, AGENT_WIDTH, clampAgentWidth } from './AgentPanel';
+import AgentPanel, { AGENT_MODAL_QUERY, AGENT_WIDTH, clampAgentWidth, forgetLastConversation } from './AgentPanel';
 
 const BootContext = createContext(null);
 const AGENT_OPEN_KEY = 'lms.agent.open';
@@ -121,6 +121,9 @@ export default function AppShell({ boot: initialBoot, children }) {
   }, [open]);
 
   const logout = () => {
+    // Searches and the open conversation belong to this account; the next one on this browser starts clean.
+    forgetLastConversation();
+    try { window.sessionStorage.clear(); } catch { /* storage unavailable */ }
     fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
       .finally(() => { window.location.href = '/login'; });
   };
