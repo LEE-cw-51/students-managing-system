@@ -37,6 +37,7 @@ const NAV = [
   { href: '/reports', label: '보고서', icon: '✎' },
   { href: '/settings', label: '설정', icon: '⚙' }
 ];
+const ADMIN_NAV = [{ href: '/admin/users', label: '계정 관리', icon: '⚿' }];
 
 function isActive(pathname, href) {
   return pathname === href || pathname.startsWith(href + '/');
@@ -91,8 +92,8 @@ export default function AppShell({ boot: initialBoot, children }) {
   }, []);
   const shownWidth = prefsLoaded ? clampAgentWidth(agentWidth, sidebarWidth) : agentWidth;
 
-  // Server-only flags (ai_enabled, agent_enabled) come from the layout and survive a refresh.
-  const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled, agent_enabled: prev.agent_enabled }))).catch(() => {}), []);
+  // Server-only fields (ai_enabled, agent_enabled, user) come from the layout and survive a refresh.
+  const refresh = useCallback(() => api('getShellBootstrap').then((next) => setBoot((prev) => ({ ...next, ai_enabled: prev.ai_enabled, agent_enabled: prev.agent_enabled, user: prev.user }))).catch(() => {}), []);
 
   useEffect(() => {
     setOpen(false);
@@ -148,7 +149,7 @@ export default function AppShell({ boot: initialBoot, children }) {
               <strong className="display nav-label">{brand}</strong>
             </div>
             <nav className="app-nav" aria-label="주요 메뉴">
-              {NAV.map((item) => (
+              {(boot.user && boot.user.role === 'admin' ? NAV.concat(ADMIN_NAV) : NAV).map((item) => (
                 <Link key={item.href} href={item.href} title={navCollapsed ? item.label : undefined} aria-current={isActive(pathname, item.href) ? 'page' : undefined}>
                   <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                   <span className="nav-label">{item.label}</span>
