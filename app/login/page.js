@@ -3,9 +3,15 @@ import { safeNext } from '../../lib/safe-next.js';
 
 export const dynamic = 'force-dynamic';
 
+const ERRORS = {
+  1: '이메일 또는 비밀번호가 올바르지 않습니다.',
+  2: '로그인 시도가 너무 많습니다. 15분 뒤에 다시 시도해 주세요.',
+  3: '로그인 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.'
+};
+
 export default async function LoginPage({ searchParams }) {
   const params = await searchParams;
-  const errored = params?.error === '1';
+  const error = ERRORS[params?.error] || '';
   const next = safeNext(params?.next);
   return (
     <div className="login-wrap">
@@ -18,11 +24,15 @@ export default async function LoginPage({ searchParams }) {
             <p className="muted">수업 · 성적 · 상담 관리</p>
           </div>
         </div>
-        {errored ? <div className="login-error" role="alert">비밀번호가 올바르지 않습니다.</div> : null}
+        {error ? <div className="login-error" role="alert">{error}</div> : null}
+        <div className="field">
+          <label htmlFor="email">이메일</label>
+          <input id="email" name="email" type="email" autoComplete="username" autoFocus required />
+        </div>
         <div className="field">
           <label htmlFor="password">비밀번호</label>
           <div className="password-row">
-            <input id="password" name="password" type="password" autoFocus required />
+            <input id="password" name="password" type="password" autoComplete="current-password" required />
             <button className="btn secondary" id="toggle-password" type="button" aria-controls="password" aria-pressed="false">표시</button>
           </div>
         </div>

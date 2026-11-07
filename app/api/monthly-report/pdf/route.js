@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isAuthed } from '../../../../lib/auth.js';
-import { withService } from '../../../../lib/store.js';
+import { getSession, serviceFor } from '../../../../lib/auth.js';
 import { renderMonthlyReportPdf } from '../../../../lib/monthly-pdf.js';
 import { errorResponse } from '../../../../lib/api-error.js';
 
@@ -11,7 +10,8 @@ function safeFilename(name) {
 }
 
 export async function POST(req) {
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
 
@@ -28,7 +28,7 @@ export async function POST(req) {
   }
 
   try {
-    const ctx = await withService((api) => api.getMonthlyReportContext(studentId, year, month));
+    const ctx = await serviceFor(session)((api) => api.getMonthlyReportContext(studentId, year, month));
     const set = ctx.settings || {};
     const studentName = ctx.student && ctx.student.name ? ctx.student.name : '학생';
     const academy = set.academy_name || '학원';

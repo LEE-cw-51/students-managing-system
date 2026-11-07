@@ -1,6 +1,5 @@
-import { withService } from '../../../lib/store.js';
 import { handleMcpRequest } from '../../../lib/mcp-server.js';
-import { unauthorizedResponse, verifyAccessToken } from '../../../lib/oauth.js';
+import { mcpRun, unauthorizedResponse, verifyAccessToken } from '../../../lib/oauth.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -32,7 +31,8 @@ export async function POST(req) {
   if (!auth) return unauthorizedResponse(req);
   const p = auth.payload;
   return handleMcpRequest(req, {
-    run: withService,
+    // TODO(mcp-workspace): use the workspace from the token instead of the default workspace.
+    run: mcpRun,
     authInfo: { token: auth.token, clientId: String(p.client_id || p.cid || ''), scopes: [], expiresAt: typeof p.exp === 'number' ? p.exp : undefined }
   });
 }

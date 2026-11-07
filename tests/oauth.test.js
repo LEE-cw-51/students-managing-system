@@ -18,7 +18,7 @@ process.env.NODE_ENV = 'test';
 const oauth = require('../lib/oauth.js');
 const { sign, unsign } = require('../lib/signing.js');
 const { safeNext } = require('../lib/safe-next.js');
-const { withService, LMS } = require('../lib/store.js');
+const { withService, LMS, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { createMemoryStore } = require('./memory-store.js');
 
 const {
@@ -58,7 +58,7 @@ async function issueTokens() {
 
 async function bumpTokenVersion() {
   const next = String(Number(await currentTokenVersion()) + 1);
-  await withService((api) => api.saveSettings({ mcp_token_version: next }));
+  await withService(DEFAULT_WORKSPACE_ID, (api) => api.saveSettings({ mcp_token_version: next }));
   return next;
 }
 

@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
-import { isAuthed } from '../../../lib/auth.js';
-import { issueAuthorizationCode, redirectWithParams, validateAuthorizeParams } from '../../../lib/oauth.js';
+import { getSession } from '../../../lib/auth.js';
+import { MCP_WORKSPACE_ID, issueAuthorizationCode, redirectWithParams, validateAuthorizeParams } from '../../../lib/oauth.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,10 @@ async function decide(formData) {
   'use server';
   const params = pick(formData);
   const next = `/oauth/authorize?${new URLSearchParams(params).toString()}`;
-  if (!(await isAuthed())) redirect(`/login?next=${encodeURIComponent(next)}`);
+  const session = await getSession();
+  if (!session) redirect(`/login?next=${encodeURIComponent(next)}`);
+  // TODO(mcp-workspace): put session.uid/wid into the code instead of pinning to MCP_WORKSPACE_ID.
+  if (session.wid !== MCP_WORKSPACE_ID) redirect(next);
   const v = validateAuthorizeParams(params);
   if (v.fatal) redirect(next);
   if (v.error) {
@@ -53,8 +56,17 @@ function Shell({ children }) {
 export default async function AuthorizePage({ searchParams }) {
   const params = pick((await searchParams) || {});
   const query = new URLSearchParams(params).toString();
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     redirect(`/login?next=${encodeURIComponent(`/oauth/authorize${query ? `?${query}` : ''}`)}`);
+  }
+  // TODO(mcp-workspace): remove once tokens carry the workspace.
+  if (session.wid !== MCP_WORKSPACE_ID) {
+    return (
+      <Shell>
+        <div className="login-error" role="alert">Claude 커넥터는 아직 관리자 작업공간에서만 연결할 수 있습니다.</div>
+      </Shell>
+    );
   }
   const v = validateAuthorizeParams(params);
   if (v.fatal) {

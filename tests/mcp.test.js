@@ -22,7 +22,7 @@ const { MCP_READ_TOOLS, MCP_WRITE_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
 const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
 const { applyProposal, applyProposals, rejectProposals } = require('../lib/agent.js');
-const { withService } = require('../lib/store.js');
+const { withService, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, validateAuthorizeParams } = require('../lib/oauth.js');
 const { sign } = require('../lib/signing.js');
 
@@ -537,12 +537,12 @@ describe('/api/mcp route', () => {
     assert.equal(first.status, 200);
     assert.deepEqual((await first.json()).result.tools.map((t) => t.name), READ_NAMES);
 
-    await withService((api) => api.saveSettings({ mcp_write_mode: 'proposal' }));
+    await withService(DEFAULT_WORKSPACE_ID, (api) => api.saveSettings({ mcp_write_mode: 'proposal' }));
     const second = await (await POST(rpc(LIST, auth))).json();
     assert.deepEqual(second.result.tools.map((t) => t.name), [...READ_NAMES, ...WRITE_NAMES]);
     assert.equal((await GET(new Request('https://lms.test/api/mcp', { headers: auth }))).status, 405);
 
-    await withService((api) => api.saveSettings({ mcp_token_version: '1' }));
+    await withService(DEFAULT_WORKSPACE_ID, (api) => api.saveSettings({ mcp_token_version: '1' }));
     assertUnauthorized(await POST(rpc(LIST, auth)));
   });
 });
