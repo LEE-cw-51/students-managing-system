@@ -29,7 +29,7 @@ npm run dev
 Postgres 없이 화면만 확인하려면 개발 전용 파일 저장소를 씁니다(운영 빌드에서는 꺼집니다). 처음 실행할 때 기본 작업공간에 데모 반·학생·수업 기록이 자동으로 들어갑니다.
 
 ```bash
-LMS_STORE=file AUTH_SECRET=dev ADMIN_EMAIL=admin@local.test LMS_PASSWORD=dev npm run dev
+LMS_STORE=file AUTH_SECRET=dev ADMIN_EMAIL=admin@local.test LMS_PASSWORD=dev-admin-pass npm run dev
 # 데이터: dev-server/data.json(기본 작업공간), data-<작업공간 id>.json, 계정: dev-server/accounts.json
 ```
 
@@ -37,7 +37,7 @@ LMS_STORE=file AUTH_SECRET=dev ADMIN_EMAIL=admin@local.test LMS_PASSWORD=dev npm
 
 강사마다 이메일 + 비밀번호 계정이 있고, 데이터는 **작업공간** 단위로 나뉩니다. 처음에는 강사 한 명에 작업공간 하나입니다.
 
-- **첫 관리자**: 계정이 하나도 없을 때 `ADMIN_EMAIL` + `LMS_PASSWORD`로 로그인하면 관리자 계정이 만들어지고, 계정 도입 전 데이터가 들어 있는 **기본 작업공간**의 주인이 됩니다. 이후 비밀번호는 계정에 저장된 해시(scrypt)로 확인하므로 두 환경 변수는 지워도 됩니다. 터미널에서 만들려면 `npm run create-admin -- admin@example.com "이름"`(비밀번호는 `ADMIN_PASSWORD` 또는 입력 창).
+- **첫 관리자**: 계정이 하나도 없을 때 `ADMIN_EMAIL` + `LMS_PASSWORD`로 로그인하면 관리자 계정이 만들어지고(`LMS_PASSWORD`가 8자 미만이면 만들지 않고 로그인이 실패하며 서버 로그에 이유가 남습니다), 계정 도입 전 데이터가 들어 있는 **기본 작업공간**의 주인이 됩니다. 이후 비밀번호는 계정에 저장된 해시(scrypt)로 확인하므로 두 환경 변수는 지워도 됩니다. 터미널에서 만들려면 `npm run create-admin -- admin@example.com "이름"`(비밀번호는 `ADMIN_PASSWORD` 또는 입력 창).
 - **강사 초대**: 관리자가 초대 링크(`/invite/<토큰>`, 72시간, 한 번만 사용)를 만들어 전달하면, 강사가 그 링크에서 비밀번호를 정하고 자기 작업공간이 새로 만들어집니다. 비밀번호 재설정도 같은 방식의 링크(24시간)입니다. 토큰은 해시만 저장합니다. 헬퍼는 `lib/accounts.js`.
 - **세션**: 쿠키에 `uid`·`wid`·버전을 서명해 담고, 요청마다 DB에서 계정 비활성화·버전·작업공간 멤버 여부를 확인합니다. 비밀번호를 바꾸거나 계정을 비활성화하면 기존 세션은 바로 끊깁니다. 로그인 실패는 이메일별 15분 10회, IP별 15분 30회로 제한합니다(서버 인스턴스별).
 - **Claude 커넥터**: 강사마다 자기 계정으로 연결하고, 연결한 사람의 작업공간 데이터만 다룹니다.

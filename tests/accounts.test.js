@@ -84,6 +84,19 @@ async function rejectsWith(promise, code) {
 let owner;
 
 describe('first admin (bootstrap)', () => {
+  it('a weak LMS_PASSWORD never creates the first admin', async (t) => {
+    const warn = t.mock.method(console, 'warn', () => {});
+    process.env.LMS_PASSWORD = 'dev';
+    try {
+      assert.equal(await authenticate('owner@test.local', 'dev'), null);
+    } finally {
+      process.env.LMS_PASSWORD = 'legacy-shared-pw';
+    }
+    assert.equal((await listUsers()).length, 0);
+    assert.equal(warn.mock.callCount(), 1);
+    assert.match(warn.mock.calls[0].arguments[0], /8자/);
+  });
+
   it('only ADMIN_EMAIL + LMS_PASSWORD creates the first admin, who owns the default workspace with the old data', async () => {
     assert.equal((await listUsers()).length, 0);
     assert.equal(await authenticate('owner@test.local', 'wrong-password'), null);
@@ -382,6 +395,20 @@ describe('login', () => {
     const target = ['ip:3.3.3.3', 'email:target@test.local'];
     for (let i = 0; i < 10; i += 1) auth.noteLoginFailure(target, now);
     assert.equal(auth.loginBlocked(target, now), true);
+  });
+
+  it('a flood of over 5000 fresh keys does not lift a live block', () => {
+    const now = 2_000_000_000_000 + 1000;
+    for (let i = 0; i < 30; i += 1) auth.noteLoginFailure(['ip:4.4.4.4', 'email:blocked@test.local'], now);
+    const flood = Array.from({ length: 6000 }, (_, i) => `email:flood-${i}@test.local`);
+    flood.forEach((key, i) => auth.noteLoginFailure([key], now + 1 + i));
+    try {
+      assert.equal(auth.loginBlocked(['ip:4.4.4.4', 'email:fresh@test.local'], now + 7000), true, 'blocked IP');
+      assert.equal(auth.loginBlocked(['ip:5.5.5.5', 'email:blocked@test.local'], now + 7000), true, 'blocked email');
+      assert.equal(auth.loginBlocked(['ip:3.3.3.3', 'email:target@test.local'], now + 7000), true, 'earlier block');
+    } finally {
+      auth.clearLoginFailures(flood);
+    }
   });
 
   it('counts failures per email and per IP over 15 minutes, and a success clears the email count', () => {
