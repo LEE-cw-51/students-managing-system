@@ -1,6 +1,7 @@
 -- Teacher accounts + workspaces. Existing lms.kv rows move into the default workspace
 -- (00000000-0000-0000-0000-000000000001); the first admin claims it on first login
 -- (ADMIN_EMAIL + LMS_PASSWORD) or via scripts/create-admin.mjs.
+-- Rollout order and rollback: README "계정 마이그레이션 적용 순서".
 
 create table if not exists lms.users (
   id uuid primary key default gen_random_uuid(),
@@ -49,11 +50,13 @@ insert into lms.workspaces (id, name)
 values ('00000000-0000-0000-0000-000000000001', '기본 작업공간')
 on conflict (id) do nothing;
 
-alter table lms.kv add column if not exists workspace_id uuid;
-update lms.kv set workspace_id = '00000000-0000-0000-0000-000000000001' where workspace_id is null;
-alter table lms.kv alter column workspace_id set not null;
-alter table lms.kv drop constraint if exists kv_pkey;
-alter table lms.kv add constraint kv_pkey primary key (workspace_id, name);
+-- Expand step: code from before accounts keeps working (its rows land in the default workspace through
+-- the column default, and its `on conflict (name)` still has kv_pkey (name)), while the new code upserts
+-- on (workspace_id, name). Until supabase/rollout/20261108_accounts_contract.sql swaps the primary key,
+-- only the default workspace can store data, so invite teachers after that step.
+alter table lms.kv add column if not exists workspace_id uuid not null
+  default '00000000-0000-0000-0000-000000000001';
+create unique index if not exists kv_workspace_name_key on lms.kv (workspace_id, name);
 alter table lms.kv drop constraint if exists kv_workspace_fk;
 alter table lms.kv add constraint kv_workspace_fk
   foreign key (workspace_id) references lms.workspaces (id) on delete cascade;

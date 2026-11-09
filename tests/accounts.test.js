@@ -256,6 +256,78 @@ describe('invite links', () => {
     assert.equal(await peekInvite('made-up-token'), null);
     await rejectsWith(acceptInvite('made-up-token', { password: 'whatever-1' }), 'INVITE_INVALID');
   });
+
+  it('hash the password only after the token turns out to be open', async () => {
+    let calls = 0;
+    const hash = async (pw) => { calls += 1; return hashPassword(pw); };
+    for (const token of ['', 'made-up-token', 'x'.repeat(44), 'a/'.repeat(21) + 'a', crypto.randomBytes(32).toString('base64url')]) {
+      await rejectsWith(acceptInvite(token, { password: 'whatever-1' }, { hash }), 'INVITE_INVALID');
+    }
+    const used = await createInvite({ email: 'hash-used@test.local' });
+    await acceptInvite(used.token, { password: 'hash-used-1' });
+    await rejectsWith(acceptInvite(used.token, { password: 'hash-used-2' }, { hash }), 'INVITE_INVALID');
+    assert.equal(calls, 0, 'malformed, unknown and used tokens never reach scrypt');
+
+    const { token } = await createInvite({ email: 'hash-ok@test.local' });
+    const done = await acceptInvite(token, { password: 'hash-ok-123' }, { hash });
+    assert.equal(calls, 1);
+    assert.equal((await authenticate('hash-ok@test.local', 'hash-ok-123')).user.id, done.user.id);
+  });
+});
+
+describe('invite form (/api/invite)', () => {
+  const routeP = import('../app/api/invite/route.js');
+  let n = 0;
+  const freshIp = () => `10.1.0.${++n}`;
+
+  function submit(token, { password = 'form-pass-123', password2 = password, ip = freshIp(), headers = {} } = {}) {
+    return new Request('https://lms.test/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-forwarded-for': ip, ...headers },
+      body: new URLSearchParams({ token, password, password2 }).toString()
+    });
+  }
+
+  it('signs in with a valid link and redirects home', async () => {
+    const { POST } = await routeP;
+    const { token } = await createInvite({ email: 'form@test.local' });
+    stubs.jar.clear();
+    const res = await POST(submit(token, { headers: { Origin: 'https://lms.test', 'Sec-Fetch-Site': 'same-origin' } }));
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('Location'), '/');
+    assert.equal((await auth.getSession()).email, 'form@test.local');
+  });
+
+  it('refuses a post from another site and leaves the link open', async () => {
+    const { POST } = await routeP;
+    const { token } = await createInvite({ email: 'form-csrf@test.local' });
+    stubs.jar.clear();
+    for (const headers of [{ Origin: 'https://evil.test' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
+      const res = await POST(submit(token, { headers }));
+      assert.equal(res.headers.get('Location'), '/login?error=4', JSON.stringify(headers));
+    }
+    assert.equal(stubs.jar.size, 0);
+    assert.ok(await peekInvite(token));
+  });
+
+  it('limits an IP to 20 link submissions per 15 minutes, without counting form mistakes', async (t) => {
+    const { POST } = await routeP;
+    const ip = '10.9.9.9';
+    for (let i = 0; i < 5; i += 1) {
+      assert.match((await POST(submit('t'.repeat(43), { password2: 'other-pass-123', ip }))).headers.get('Location'), /error=mismatch$/);
+    }
+    for (let i = 0; i < 20; i += 1) {
+      assert.match((await POST(submit(crypto.randomBytes(32).toString('base64url'), { ip }))).headers.get('Location'), /error=invalid$/);
+    }
+    const { token } = await createInvite({ email: 'form-limit@test.local' });
+    assert.match((await POST(submit(token, { ip }))).headers.get('Location'), /error=limited$/);
+    assert.ok(await peekInvite(token), 'a limited attempt does not use up the link');
+
+    const other = await POST(submit(token, { ip: '10.9.9.10' }));
+    assert.equal(other.headers.get('Location'), '/', 'other IPs are not affected');
+    const after15 = await later(t, 15 * 60 * 1000 + 1000, () => POST(submit(crypto.randomBytes(32).toString('base64url'), { ip })));
+    assert.match(after15.headers.get('Location'), /error=invalid$/, 'the window slides');
+  });
 });
 
 describe('password reset links', () => {
@@ -481,5 +553,53 @@ describe('login', () => {
     assert.equal(bad.headers.get('Location'), '/login?error=1');
     const ok = await POST(form({ email: 'login@test.local', password: 'login-pass-1', next: '/students' }));
     assert.equal(ok.headers.get('Location'), '/students');
+  });
+
+  it('refuses a login posted from another site, before reading the body or counting a failure', async () => {
+    const { POST } = await routeP;
+    const ip = freshIp();
+    const form = (headers) => new Request('https://lms.test/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-forwarded-for': ip, ...headers },
+      body: new URLSearchParams({ email: 'login@test.local', password: 'login-pass-1', next: '/students' }).toString()
+    });
+    stubs.jar.clear();
+    for (const headers of [{ Origin: 'https://evil.test' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
+      const res = await POST(form(headers));
+      assert.equal(res.status, 303);
+      assert.equal(res.headers.get('Location'), '/login?error=4', JSON.stringify(headers));
+    }
+    const json = new Request('https://lms.test/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.test' },
+      body: JSON.stringify({ email: 'login@test.local', password: 'login-pass-1' })
+    });
+    assert.equal((await POST(json)).status, 403);
+    assert.equal(stubs.jar.size, 0, 'no session for a cross-site login');
+    assert.equal(auth.loginBlocked([`ip:${ip}`, 'email:login@test.local']), false);
+
+    const same = await POST(form({ Origin: 'https://lms.test', 'Sec-Fetch-Site': 'same-origin' }));
+    assert.equal(same.headers.get('Location'), '/students');
+    assert.equal((await auth.getSession()).email, 'login@test.local');
+  });
+});
+
+describe('logout', () => {
+  const routeP = import('../app/api/logout/route.js');
+
+  it('signs out a same-site post and ignores one from another site', async () => {
+    const { POST } = await routeP;
+    const teacher = await newTeacher('logout@test.local');
+    cookieFor(teacher);
+    const evil = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { Origin: 'https://evil.test' } }));
+    assert.equal(evil.headers.get('Location'), '/login?error=4');
+    assert.ok(await auth.getSession(), 'still signed in');
+    const json = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' } }));
+    assert.equal(json.status, 403);
+    assert.ok(await auth.getSession());
+
+    const ok = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { Origin: 'https://lms.test' } }));
+    assert.equal(ok.headers.get('Location'), '/login');
+    assert.equal(await auth.getSession(), null);
   });
 });

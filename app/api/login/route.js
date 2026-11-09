@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticate } from '../../../lib/accounts.js';
 import { clearLoginFailures, loginBlocked, loginKeys, noteLoginFailure, setSession } from '../../../lib/auth.js';
+import { isSameOrigin } from '../../../lib/same-origin.js';
 import { safeNext } from '../../../lib/safe-next.js';
 
 export const runtime = 'nodejs';
@@ -8,12 +9,17 @@ export const runtime = 'nodejs';
 const ERRORS = {
   1: { status: 401, message: '이메일 또는 비밀번호가 올바르지 않습니다.' },
   2: { status: 429, message: '로그인 시도가 너무 많습니다. 15분 뒤에 다시 시도해 주세요.' },
-  3: { status: 500, message: '로그인 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.' }
+  3: { status: 500, message: '로그인 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.' },
+  4: { status: 403, message: '허용되지 않은 요청입니다.' }
 };
 
 export async function POST(req) {
   const ctype = req.headers.get('content-type') || '';
   const json = ctype.includes('application/json');
+  if (!isSameOrigin(req)) {
+    if (json) return NextResponse.json({ ok: false, error: ERRORS[4].message }, { status: 403 });
+    return new NextResponse(null, { status: 303, headers: { Location: '/login?error=4' } });
+  }
   let email = '';
   let password = '';
   let next = '';

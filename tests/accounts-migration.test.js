@@ -41,17 +41,27 @@ describe('accounts migration', () => {
     assert.match(read('scripts/seed.js'), new RegExp(`WORKSPACE_ID = '${DEFAULT_ID}'`));
   });
 
-  it('creates the default workspace, then backfills, then changes the key', () => {
+  it('creates the default workspace, then adds workspace_id defaulting to it, keeping the old key (expand step)', () => {
     const insertWs = at(new RegExp(`insert into lms\\.workspaces \\(id, name\\) values \\('${DEFAULT_ID}', [^)]*\\) on conflict \\(id\\) do nothing`));
-    const addCol = at(/alter table lms\.kv add column if not exists workspace_id uuid;/);
-    const backfill = at(new RegExp(`update lms\\.kv set workspace_id = '${DEFAULT_ID}' where workspace_id is null;`));
-    const notNull = at(/alter table lms\.kv alter column workspace_id set not null;/);
-    const dropPk = at(/alter table lms\.kv drop constraint if exists kv_pkey;/);
-    const addPk = at(/alter table lms\.kv add constraint kv_pkey primary key \(workspace_id, name\);/);
+    const addCol = at(new RegExp(`alter table lms\\.kv add column if not exists workspace_id uuid not null default '${DEFAULT_ID}';`));
+    const index = at(/create unique index if not exists kv_workspace_name_key on lms\.kv \(workspace_id, name\);/);
     const fk = at(/alter table lms\.kv add constraint kv_workspace_fk foreign key \(workspace_id\) references lms\.workspaces \(id\)/);
-    assert.ok(addCol < backfill && backfill < notNull, 'backfill before NOT NULL');
-    assert.ok(notNull < addPk && dropPk < addPk, 'old key dropped before the new one');
-    assert.ok(insertWs < fk && backfill < fk, 'the default workspace exists before rows point at it');
+    assert.ok(insertWs < fk && addCol < fk, 'the default workspace exists before rows point at it');
+    assert.ok(addCol < index);
+    assert.doesNotMatch(sql, /drop constraint if exists kv_pkey/, 'the old code still needs kv_pkey (name)');
+    assert.doesNotMatch(sql, /primary key \(workspace_id, name\)/, 'the key swap lives in supabase/rollout/');
+  });
+
+  it('keeps the contract and rollback steps out of supabase/migrations', () => {
+    const rollout = fs.readdirSync(path.join(root, 'supabase/rollout')).sort();
+    assert.deepEqual(rollout, ['20261108_accounts_contract.sql', '20261108_accounts_rollback.sql', '20261108_accounts_rollback_cleanup.sql']);
+    const flat = (rel) => read(rel).replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
+    assert.match(flat('supabase/rollout/20261108_accounts_contract.sql'), /add constraint kv_pkey primary key using index kv_workspace_name_key/);
+    for (const file of ['20261108_accounts_rollback.sql', '20261108_accounts_rollback_cleanup.sql']) {
+      const body = flat(`supabase/rollout/${file}`);
+      assert.match(body, /lock table lms\.kv in access exclusive mode/, file);
+      assert.match(body, new RegExp(`workspace_id <> '${DEFAULT_ID}'`), file);
+    }
   });
 
   it('can run twice', () => {
@@ -90,5 +100,7 @@ describe('accounts migration', () => {
     const store = read('lib/store.js');
     assert.match(store, /from lms\.kv where workspace_id = \$\{workspaceId\}/);
     assert.match(store, /on conflict \(workspace_id, name\) do update/);
+    assert.match(store, /if \(workspaceId === DEFAULT_WORKSPACE_ID\) await tx`select pg_advisory_xact_lock\(872163\)`/,
+      'the default workspace also takes the pre-account lock while both versions may run');
   });
 });

@@ -7,7 +7,8 @@ const ERRORS = {
   weak: `비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.`,
   invalid: '링크가 만료되었거나 이미 사용되었습니다. 관리자에게 새 링크를 요청해 주세요.',
   taken: '이미 등록된 이메일입니다. 로그인 화면에서 로그인해 주세요.',
-  server: '처리 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.'
+  server: '처리 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.',
+  limited: '시도가 너무 많습니다. 15분 뒤에 다시 시도해 주세요.'
 };
 
 function Shell({ subtitle, children }) {

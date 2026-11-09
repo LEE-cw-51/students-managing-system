@@ -63,6 +63,20 @@ describe('admin API authorization', () => {
     assert.equal(isSameOriginJson(form), false);
     assert.equal(isSameOriginJson(post('/api/admin/invites', { headers: { 'Sec-Fetch-Site': 'same-origin' } })), true);
     assert.equal(isSameOriginJson(new Request(ORIGIN + '/api/admin/users')), true);
+    assert.equal(isSameOriginJson(post('/api/admin/invites', { headers: { Origin: 'null' } })), false, 'opaque origin');
+  });
+
+  it('isSameOrigin checks Sec-Fetch-Site and Origin without caring about the body type', async () => {
+    const { isSameOrigin } = await import('../lib/same-origin.js');
+    const form = (headers) => new Request(ORIGIN + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body: 'a=b' });
+    assert.equal(isSameOrigin(form({ Origin: ORIGIN })), true);
+    assert.equal(isSameOrigin(form({ Origin: ORIGIN, 'Sec-Fetch-Site': 'same-origin' })), true);
+    assert.equal(isSameOrigin(form({})), true, 'no browser headers (curl, tests)');
+    assert.equal(isSameOrigin(form({ Origin: 'https://evil.test' })), false);
+    assert.equal(isSameOrigin(form({ Origin: 'null' })), false);
+    assert.equal(isSameOrigin(form({ 'Sec-Fetch-Site': 'cross-site' })), false);
+    assert.equal(isSameOrigin(form({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://sub.lms.test' })), false);
+    assert.equal(isSameOrigin(form({ Origin: 'https://app.example', 'x-forwarded-host': 'app.example' })), true, 'behind a proxy');
   });
 
   it('turns account errors into 400 with their message and hides other errors', async () => {
