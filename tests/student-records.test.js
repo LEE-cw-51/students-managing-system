@@ -101,6 +101,29 @@ describe('textbook history', () => {
     assert.deepEqual(api.getClass('CLS_1').textbook_history, [{ textbook: '개념원리', from: '', to: '' }]);
     assert.equal(api.ensureSchema(), false);
   });
+
+  it('gives the class screens one timeline with labels for switched and cleared textbooks', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반', textbook: '개념원리', textbook_started_on: '2026-03-01' });
+    const next = api.updateClass(Object.assign({}, c, { textbook: '쎈', textbook_started_on: '2026-07-01' }));
+    assert.deepEqual(api.getClassOverview(c.class_id).class.textbook_timeline, [
+      { textbook: '개념원리', from: '2026-03-01', to: '2026-06-30', current: false, label: '개념원리 (2026-03-01 ~ 2026-06-30)' },
+      { textbook: '쎈', from: '2026-07-01', to: '', current: true, label: '쎈 (2026-07-01 ~ 사용 중)' }
+    ]);
+    api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-09-01' }));
+    const labels = api.getClassOverview(c.class_id).class.textbook_timeline.map((r) => [r.label, r.current]);
+    assert.deepEqual(labels, [
+      ['개념원리 (2026-03-01 ~ 2026-06-30)', false],
+      ['쎈 (2026-07-01 ~ 2026-09-01)', false]
+    ]);
+  });
+
+  it('labels a backfilled period without a start date and skips broken rows', () => {
+    assert.deepEqual(LMS.textbookTimeline([{ textbook: '개념원리', from: '', to: '' }, { textbook: '', from: '', to: '' }, null]), [
+      { textbook: '개념원리', from: '', to: '', current: true, label: '개념원리 (시작일 없음 ~ 사용 중)' }
+    ]);
+    assert.deepEqual(LMS.textbookTimeline(undefined), []);
+  });
 });
 
 describe('student score normalization', () => {

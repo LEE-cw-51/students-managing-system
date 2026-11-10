@@ -9,17 +9,10 @@ import CurriculumEditor from './CurriculumEditor';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
-import { shortDate } from '@/lib/format';
-
 const EMPTY = {
   class_name: '', grade: '', school_year: String(new Date().getFullYear()), semester: '',
   teacher: '', textbook: '', textbook_started_on: '', memo: '', status: '운영', schedule: [], curriculum: []
 };
-
-function textbookSpan(row) {
-  const from = row.from ? shortDate(row.from) : '시작일 없음';
-  return row.to ? `${row.textbook} (${from} ~ ${shortDate(row.to)})` : `${row.textbook} (${from} ~ 사용 중)`;
-}
 
 function curriculumSummary(textbook, units) {
   const named = units.filter((u) => u.title.trim());
@@ -60,7 +53,6 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
     ...EMPTY, ...(initial || {}),
     schedule: (initial && initial.schedule) || [],
     curriculum: Array.isArray(initial && initial.curriculum) ? initial.curriculum : [],
-    textbook_history: Array.isArray(initial && initial.textbook_history) ? initial.textbook_history : [],
     textbook_started_on: initial && initial.class_id ? '' : boot.today
   }));
   const [open, setOpen] = useState({ textbook: false, more: false });
@@ -73,6 +65,7 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
   };
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const isEdit = !!form.class_id;
+  const timeline = (initial && initial.textbook_timeline) || [];
   const storedTextbook = String((initial && initial.textbook) || '').trim();
   const textbookChanged = isEdit && form.textbook.trim() !== storedTextbook;
   const askTextbookStart = (!isEdit && !!form.textbook.trim()) || textbookChanged;
@@ -224,11 +217,11 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
                 </Field>
               ) : null}
             </div>
-            {isEdit && form.textbook_history.length ? (
+            {isEdit && timeline.length ? (
               <details className="cf-history">
-                <summary>교재 기록 {form.textbook_history.length}개</summary>
+                <summary>교재 기록 {timeline.length}개</summary>
                 <ul className="stack-sm">
-                  {form.textbook_history.map((h, i) => <li key={i}>{textbookSpan(h)}</li>)}
+                  {timeline.map((h, i) => <li key={i}>{h.label}</li>)}
                 </ul>
               </details>
             ) : null}

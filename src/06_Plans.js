@@ -688,16 +688,13 @@ LMS.createPlanner = function (ctx) {
         scope: LMS.clipText(e.scope, 200)
       };
     };
-    var classPresent = 0;
     var exams = {};
     var students = roster.map(function (s, i) {
       var alias = 'S' + (i + 1);
       aliases[alias] = s.student_id;
       var own = lessons.filter(function (l) { return LMS.toStr(l.student_id) === LMS.toStr(s.student_id); })
         .sort(function (a, b) { return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date)); });
-      var present = own.filter(function (l) { return LMS.toStr(l.attendance) !== '결석'; }).length;
       var mine = homeworkCells.filter(function (c) { return c.student_id === LMS.toStr(s.student_id); });
-      classPresent += present;
       var exam = examsByKey[LMS.schoolGroupKey(s.school, s.grade)];
       if (exam) exams[exam.school_exam_id] = exam;
       var counsel = table('CounselingNotes').filter(function (n) {
@@ -706,8 +703,9 @@ LMS.createPlanner = function (ctx) {
       return {
         ref: alias,
         grade: LMS.toStr(s.grade),
-        attendance_rate: own.length ? Math.round((present / own.length) * 100) : null,
+        attendance_rate: LMS.attendanceRate(own),
         homework_rate: LMS.homeworkRate(mine).rate,
+        homework_average: LMS.homeworkAverage(mine),
         recent_tests: own.filter(function (l) { return LMS.toStr(l.test_status) === '실시'; }).slice(-4).map(function (l) {
           return { date: l.lesson_date, score: LMS.toNum(l.test_score), max: LMS.toNum(l.test_max_score) };
         }),
@@ -746,8 +744,9 @@ LMS.createPlanner = function (ctx) {
           };
         }).slice(-12),
         class_stats_last_4_weeks: {
-          attendance_rate: lessons.length ? Math.round((classPresent / lessons.length) * 100) : null,
-          homework_rate: LMS.homeworkRate(homeworkCells).rate
+          attendance_rate: LMS.attendanceRate(lessons),
+          homework_rate: LMS.homeworkRate(homeworkCells).rate,
+          homework_average: LMS.homeworkAverage(homeworkCells)
         },
         upcoming_school_exams: LMS.schoolExams.upcoming(schoolExamRows, now, 60).filter(function (e) {
           return exams[e.school_exam_id];

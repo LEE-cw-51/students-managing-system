@@ -1067,7 +1067,7 @@ LMS.createService = function (store) {
       var grade = hit ? LMS.homeworkGrade(hit.status) : '';
       if (!grade) return;
       letters.push(grade);
-      if (LMS.ASSIGNMENT_POINTS[grade] >= 60) done += 1;
+      if (LMS.isHomeworkDone(grade)) done += 1;
     });
     var agg = LMS.aggregateAssignmentGrades(letters);
     return {
