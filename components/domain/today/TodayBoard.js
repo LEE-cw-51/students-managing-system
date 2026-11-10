@@ -7,19 +7,17 @@ import { useToast } from '@/components/ui/Toast';
 import Badges from '@/components/domain/Badges';
 import MakeupForm from './MakeupForm';
 import TaskForm, { TASK_LABEL } from './TaskForm';
-import { api, useApi } from '@/lib/client-api';
+import { api } from '@/lib/client-api';
 import { dateRange, shortDate } from '@/lib/format';
-export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
+
+/** `state` is the page's getTodayBoard load, shared with WeekStrip so one reload refreshes both. */
+export default function TodayBoard({ date, state, onOpenClass }) {
   const toast = useToast();
   const [addingMakeup, setAddingMakeup] = useState(false);
   // null = closed; { task: null } = new task; { task } = edit that task.
   const [taskForm, setTaskForm] = useState(null);
-  const state = useApi(() => api('getTodayBoard', date), [date]);
 
-  const tasksChanged = () => {
-    state.reload();
-    if (onTasksChanged) onTasksChanged();
-  };
+  const tasksChanged = () => state.reload();
   const setTask = async (task, status) => {
     try {
       await api('updateTaskStatus', task.task_id || task.id, status);
@@ -105,7 +103,7 @@ export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
                 <ul className="task-list">
                   {[...b.overdue_tasks, ...b.tasks].map((t) => (
                     <li key={t.id || t.task_id} className={t.status === '완료' ? 'is-done' : ''}>
-                      {t.due_date && t.due_date < b.date ? <span className="tag danger">{shortDate(t.due_date)} 지남</span> : null}
+                      {t.overdue ? <span className="tag danger">{shortDate(t.due_date)} 지남</span> : null}
                       <span className="tag muted">{TASK_LABEL[t.kind] || t.kind}</span>
                       {t.source === 'counseling' ? <span className="tag" title="상담일지에서 수정합니다">상담일지</span> : null}
                       <span className="task-title">
@@ -120,7 +118,7 @@ export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
                             <button type="button" className="btn ghost sm" onClick={() => setTask(t, '취소')}>취소</button>
                           </>
                         ) : <span className="tag ok">{t.status}</span>}
-                        {t.source === 'manual' ? <button type="button" className="btn secondary sm" onClick={() => setTaskForm({ task: t })}>수정</button> : null}
+                        {t.editable ? <button type="button" className="btn secondary sm" onClick={() => setTaskForm({ task: t })}>수정</button> : null}
                       </span>
                     </li>
                   ))}

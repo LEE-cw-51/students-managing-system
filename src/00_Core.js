@@ -1774,6 +1774,49 @@ LMS.validateTaskInput = function (data, isUpdate) {
   };
 };
 
+/** Tasks stored without a source were made by hand. */
+LMS.taskSource = function (task) {
+  return LMS.toStr(task && task.source) || 'manual';
+};
+
+/** A counseling follow-up belongs to its note: it is changed or removed there, never as a task. */
+LMS.isTaskEditable = function (task) {
+  return LMS.taskSource(task) !== 'counseling';
+};
+
+LMS.assertTaskEditable = function (task, message) {
+  if (!LMS.isTaskEditable(task)) throw new Error(message || '상담일지에서 수정해 주세요.');
+  return task;
+};
+
+/** Still open (예정) with a due date before `date`. */
+LMS.isTaskOverdue = function (task, date) {
+  return LMS.toStr(task && task.status) === '예정' && LMS.toStr(task.due_date) < LMS.toStr(date);
+};
+
+/** One stored task as the day agenda and today board list it, with what the screen may do to it on `date`. */
+LMS.taskItem = function (row, students, classes, date) {
+  var student = row.student_id ? LMS.findById(students || [], 'student_id', row.student_id) : null;
+  var cls = row.class_id ? LMS.findById(classes || [], 'class_id', row.class_id) : null;
+  return {
+    id: row.task_id,
+    task_id: row.task_id,
+    source: LMS.taskSource(row),
+    kind: row.kind,
+    title: row.title,
+    status: row.status,
+    due_date: row.due_date,
+    student_id: row.student_id || '',
+    student_name: student ? student.name : '',
+    class_id: row.class_id || '',
+    class_name: cls ? cls.class_name : '',
+    memo: row.memo || '',
+    action: 'edit_task',
+    editable: LMS.isTaskEditable(row),
+    overdue: LMS.isTaskOverdue(row, date)
+  };
+};
+
 LMS.validateClassPlanInput = function (data, isUpdate) {
   data = data || {};
   if (isUpdate && LMS.isBlank(data.plan_id)) {

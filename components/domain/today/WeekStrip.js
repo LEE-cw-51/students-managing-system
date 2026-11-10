@@ -1,51 +1,34 @@
 'use client';
 
-import { api, useApi } from '@/lib/client-api';
-
-const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
-
 function addDays(iso, delta) {
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y, m - 1, d + delta);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
-function weekDates(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const offset = (new Date(y, m - 1, d).getDay() + 6) % 7;
-  return DAYS.map((_, i) => addDays(iso, i - offset));
-}
-
 /**
  * Mon–Sun strip of the selected week with class/makeup/open-task counts; the page's only date navigation.
- * Bump `version` after tasks change so the task counts reload without refetching the calendar.
+ * `week` is getTodayBoard's `week`; until the board for a date in that week loads, the days stay empty.
  */
-export default function WeekStrip({ date, today, onPick, version = 0 }) {
-  const dates = weekDates(date);
-  const state = useApi(() => api('getCalendar', dates[0], dates[6]), [dates[0]]);
-  const taskState = useApi(() => api('getTaskCounts', dates[0], dates[6]), [dates[0], version]);
-  const taskCounts = taskState.data || {};
-  const counts = {};
-  ((state.data && state.data.events) || []).forEach((ev) => {
-    counts[ev.date] = counts[ev.date] || { classes: 0, makeups: 0 };
-    if (ev.event_type === '정규' || ev.event_type === '시험대비') counts[ev.date].classes += 1;
-    else counts[ev.date].makeups += 1;
-  });
+export default function WeekStrip({ date, today, week, onPick }) {
+  const days = week && week.some((w) => w.date === date) ? week : [];
   return (
     <nav className="week-nav" aria-label="날짜 이동">
       <button type="button" className="btn secondary week-step" aria-label="지난주" onClick={() => onPick(addDays(date, -7))}>◀<span className="week-step-label"> 지난주</span></button>
       <div className="week-strip">
-        {dates.map((d, i) => {
-          const c = counts[d] || { classes: 0, makeups: 0 };
-          const tasks = Number(taskCounts[d]) || 0;
-          const summary = [c.classes ? `수업 ${c.classes}` : '', c.makeups ? `보강 ${c.makeups}` : '', tasks ? `할 일 ${tasks}` : ''].filter(Boolean).join(' · ');
+        {days.map((w) => {
+          const d = w.date;
+          const classes = Number(w.class_count) || 0;
+          const makeups = Number(w.makeup_count) || 0;
+          const tasks = Number(w.task_count) || 0;
+          const summary = [classes ? `수업 ${classes}` : '', makeups ? `보강 ${makeups}` : '', tasks ? `할 일 ${tasks}` : ''].filter(Boolean).join(' · ');
           return (
             <button key={d} type="button" className={'week-day' + (d === date ? ' is-selected' : '') + (d === today ? ' is-today' : '')}
               aria-current={d === date ? 'date' : undefined} onClick={() => onPick(d)}>
-              <span className="wd-name">{DAYS[i]}</span>
+              <span className="wd-name">{w.weekday}</span>
               <span className="wd-date">{Number(d.slice(8))}</span>
               <span className="wd-count">{summary || '–'}</span>
-              <span className="wd-dots" aria-hidden="true">{c.classes || c.makeups ? '•'.repeat(Math.min(c.classes, 4)) + '◦'.repeat(Math.min(c.makeups, 2)) : '–'}</span>
+              <span className="wd-dots" aria-hidden="true">{classes || makeups ? '•'.repeat(Math.min(classes, 4)) + '◦'.repeat(Math.min(makeups, 2)) : '–'}</span>
             </button>
           );
         })}
