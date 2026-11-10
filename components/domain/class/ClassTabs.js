@@ -13,12 +13,11 @@ import ClassChangeDialog, { openRegularClasses } from '@/components/domain/stude
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
 function textbookLine(cls) {
-  const history = Array.isArray(cls.textbook_history) ? cls.textbook_history : [];
-  const past = history.filter((h) => h && h.to);
+  const past = (cls.textbook_timeline || []).filter((h) => !h.current);
   return (
     <>
       {cls.textbook || '-'}
-      {past.length ? <div className="muted">{past.map((h) => `${h.textbook} (${h.from || '시작일 없음'} ~ ${h.to})`).join(' · ')}</div> : null}
+      {past.length ? <div className="muted">{past.map((h) => h.label).join(' · ')}</div> : null}
     </>
   );
 }

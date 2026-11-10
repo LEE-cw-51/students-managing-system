@@ -36,6 +36,35 @@ describe('LMS.homeworkRate', () => {
   });
 });
 
+describe('숙제 완료 (LMS.isHomeworkDone)', () => {
+  it('counts D or better as done and E, F, ungraded and unknown values as not done', () => {
+    assert.deepEqual(['A', 'B', 'C', 'D', 'E', 'F'].map(LMS.isHomeworkDone), [true, true, true, true, false, false]);
+    assert.equal(LMS.isHomeworkDone('완료'), true);
+    assert.equal(LMS.isHomeworkDone('미완료'), false);
+    ['', '미확인', undefined, 'X'].forEach((v) => assert.equal(LMS.isHomeworkDone(v), false));
+  });
+
+  it('drives the done counts and missing lists on every screen', () => {
+    const api = service('2026-09-28');
+    const a = api.createClass({ class_name: 'A반', weekday: '월/수', start_time: '18:00', end_time: '20:00' });
+    const s = api.createStudent({ name: '경계', class_id: a.class_id, enrollment_date: '2026-03-01' });
+    giveHomework(api, a.class_id, '2026-09-21', ['d', 'e', 'none'], [[s, 0, 'D'], [s, 1, 'E']]);
+    const cell = logRow(api, a.class_id, '2026-09-21').cells[s.student_id];
+    assert.equal(cell.done, 1);
+    assert.equal(cell.checked, 2);
+    assert.deepEqual(cell.missing, ['e']);
+    assert.deepEqual(api.getStudentHomework(s.student_id, MONTH).missing.map((m) => m.title), ['e']);
+  });
+});
+
+describe('출석률 (LMS.attendanceRate)', () => {
+  it('is the share of records that are not 결석, or null without records', () => {
+    assert.equal(LMS.attendanceRate([{ attendance: '출석' }, { attendance: '결석' }, { attendance: '' }]), 67);
+    assert.equal(LMS.attendanceRate([]), null);
+    assert.equal(LMS.attendanceRate(undefined), null);
+  });
+});
+
 describe('숙제 완료율 across screens', () => {
   // Today is Mon 2026-09-28. A반 meets 월/수, B반 화/목; 이동 moves from A to B on 09-15.
   function leaverSetup() {
@@ -134,5 +163,26 @@ describe('AI plan input homework_rate', () => {
     assert.equal(byId[kim.student_id].homework_rate, null);
     // The class keeps lee's checks from while lee was in it (09-07), plus hong's 09-09 F. (100+50+50+50)/4.
     assert.equal(input.class_stats_last_4_weeks.homework_rate, 63);
+  });
+
+  it('counts class attendance over the same records as the overview, including students who left', () => {
+    const api = service('2026-09-14');
+    const cls = api.createClass({
+      class_name: 'A반', grade: '중2', weekday: '월/수', start_time: '18:00', end_time: '20:00',
+      curriculum: [{ title: '삼각형의 성질', sessions: 4 }]
+    });
+    const [hong, lee] = ['홍', '이'].map((name) => api.createStudent({ name, grade: '중2', class_id: cls.class_id, enrollment_date: '2026-03-01' }));
+    const other = api.createClass({ class_name: '다른반', weekday: '화/목', start_time: '18:00', end_time: '20:00' });
+    api.moveStudent({ student_id: lee.student_id, class_id: other.class_id, start_date: '2026-09-08' });
+    const lesson = (student, date, attendance) => api.saveLesson({ lesson_date: date, class_id: cls.class_id, student_id: student.student_id, attendance });
+    lesson(hong, '2026-09-07', '출석');
+    lesson(lee, '2026-09-07', '출석');
+    lesson(hong, '2026-09-09', '결석');
+
+    const input = api.getClassPlanContext(cls.class_id, '2026-09').input;
+    assert.equal(input.students.length, 1);
+    assert.equal(input.students[0].attendance_rate, 50);
+    // 2 of 3 records are not 결석, the same rule as the class overview.
+    assert.equal(input.class_stats_last_4_weeks.attendance_rate, 67);
   });
 });

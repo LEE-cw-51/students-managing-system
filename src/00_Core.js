@@ -682,10 +682,16 @@ LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
   return LMS.aggregateAssignmentGrades(grades).grade;
 };
 
+/** 숙제 완료: a graded item at D or better (60+ points). E/F, ungraded and unknown values are not done. */
+LMS.isHomeworkDone = function (grade) {
+  var points = LMS.ASSIGNMENT_POINTS[LMS.homeworkGrade(grade)];
+  return points !== undefined && points >= 60;
+};
+
 /**
  * 숙제 완료율 over homework check rows. Ungraded cells have no row and are left out;
  * callers pass only rows of students who were in the item's class on its lesson date.
- * rate is the rounded average of item points (A 100 … F 50). done counts items at D or better (60+).
+ * rate is the rounded average of item points (A 100 … F 50). done counts 숙제 완료 items.
  * Returns { done, checked, rate }; rate is null when nothing was graded.
  */
 LMS.homeworkRate = function (cells) {
@@ -695,12 +701,19 @@ LMS.homeworkRate = function (cells) {
   (cells || []).forEach(function (c) {
     var code = LMS.homeworkGrade(c && c.status);
     if (!code) return;
-    var points = LMS.ASSIGNMENT_POINTS[code];
     checked += 1;
-    sum += points;
-    if (points >= 60) done += 1;
+    sum += LMS.ASSIGNMENT_POINTS[code];
+    if (LMS.isHomeworkDone(code)) done += 1;
   });
   return { done: done, checked: checked, rate: checked ? Math.round(sum / checked) : null };
+};
+
+/** 출석률 (%): lesson records that are not 결석 over all records. null when there are none. */
+LMS.attendanceRate = function (lessons) {
+  var rows = lessons || [];
+  if (!rows.length) return null;
+  var present = rows.filter(function (l) { return LMS.toStr(l.attendance) !== '결석'; }).length;
+  return Math.round((present / rows.length) * 100);
 };
 
 LMS.addDays = function (isoDate, delta) {
@@ -1629,6 +1642,17 @@ LMS.applyTextbookChange = function (previousName, history, nextName, date) {
   });
   if (next) rows.push({ textbook: next, from: day, to: '' });
   return { textbook: next, textbook_history: rows };
+};
+
+/**
+ * 교재 이력 shaped for the class screens, oldest first: { textbook, from, to, current, label }.
+ * current is the open period; label is e.g. "개념원리 (2026-03-01 ~ 2026-05-31)" or "… ~ 사용 중)".
+ */
+LMS.textbookTimeline = function (history) {
+  return LMS.normalizeTextbookHistory(history).map(function (r) {
+    var span = (r.from || '시작일 없음') + ' ~ ' + (r.to || '사용 중');
+    return { textbook: r.textbook, from: r.from, to: r.to, current: !r.to, label: r.textbook + ' (' + span + ')' };
+  });
 };
 
 /** Identity of a school exam: same year/semester/type/school+grade (and title for 기타). */

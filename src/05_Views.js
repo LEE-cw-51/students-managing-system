@@ -21,7 +21,8 @@ LMS.createViews = function (ctx) {
     return Object.assign({}, cls, {
       schedule: schedule,
       schedule_label: LMS.scheduleLabel(schedule),
-      class_type: LMS.toStr(cls.class_type) || '정규'
+      class_type: LMS.toStr(cls.class_type) || '정규',
+      textbook_timeline: LMS.textbookTimeline(cls.textbook_history)
     });
   }
 
@@ -201,7 +202,6 @@ LMS.createViews = function (ctx) {
     var roster = ctx.assignments.recordTargets(classId, today).students;
     var monthStart = today.slice(0, 8) + '01';
     var lessons = classLessons(classId, monthStart, today);
-    var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
     var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
     var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
 
@@ -234,7 +234,7 @@ LMS.createViews = function (ctx) {
       exam: ctx.periods.classContext(cls, today),
       month: {
         lesson_count: Object.keys(lessons.reduce(function (m, l) { m[l.lesson_date] = 1; return m; }, {})).length,
-        attendance_rate: pct(lessons.length - absent, lessons.length),
+        attendance_rate: LMS.attendanceRate(lessons),
         homework_rate: homework.rate,
         test_average: scores.average,
         test_average_display: collected.comparable ? scores.average_display : '-'
@@ -330,7 +330,7 @@ LMS.createViews = function (ctx) {
           if (!grade) return;
           cell.checked += 1;
           letters.push(grade);
-          if (LMS.ASSIGNMENT_POINTS[grade] >= 60) cell.done += 1;
+          if (LMS.isHomeworkDone(grade)) cell.done += 1;
           else cell.missing.push(it.title);
         });
         cell.letter = LMS.aggregateAssignmentGrades(letters).grade;
@@ -486,7 +486,6 @@ LMS.createViews = function (ctx) {
       while (mm < 1) { mm += 12; yy -= 1; }
       var range = LMS.monthRange(yy, mm);
       var lessons = classLessons(classId, range.start, range.end);
-      var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
       var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
       var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
       var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: range.start, to: range.end }));
@@ -503,7 +502,7 @@ LMS.createViews = function (ctx) {
         month: mm,
         label: mm + '월',
         lesson_days: Object.keys(lessons.reduce(function (acc, l) { acc[l.lesson_date] = 1; return acc; }, {})).length,
-        attendance_rate: pct(lessons.length - absent, lessons.length),
+        attendance_rate: LMS.attendanceRate(lessons),
         homework_rate: homework.rate,
         assignment_a_rate: pct(assignA, assignTotal),
         test_average: scores.average,
@@ -672,7 +671,7 @@ LMS.createViews = function (ctx) {
       var key = it.lesson_date + '|' + it.class_id;
       if (!byDate[key]) byDate[key] = { date: it.lesson_date, class_id: it.class_id, done: 0, total: 0 };
       byDate[key].total += 1;
-      if (LMS.ASSIGNMENT_POINTS[grade] >= 60) byDate[key].done += 1;
+      if (LMS.isHomeworkDone(grade)) byDate[key].done += 1;
     });
     return Object.keys(byDate).map(function (k) {
       var d = byDate[k];
@@ -797,7 +796,7 @@ LMS.createViews = function (ctx) {
     return {
       lesson_count: lessons.length,
       absent_count: absent,
-      attendance_rate: pct(lessons.length - absent, lessons.length),
+      attendance_rate: LMS.attendanceRate(lessons),
       homework_rate: homework.rate,
       test_count: scores.count,
       test_average_display: scores.average_display,
@@ -978,8 +977,7 @@ LMS.createViews = function (ctx) {
     var missing = [];
     rows.forEach(function (r) {
       r.items.forEach(function (it) {
-        var points = LMS.ASSIGNMENT_POINTS[it.status];
-        if (it.status !== '미확인' && points !== undefined && points < 60) {
+        if (it.status !== '미확인' && !LMS.isHomeworkDone(it.status)) {
           missing.push({ date: r.date, class_name: r.class_name, title: it.title });
         }
       });
