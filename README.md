@@ -142,7 +142,7 @@ Anthropic API로 직접 부를 때는 temperature를 보내지 않고, 답변 �
 - **안 하는 일**: 성적 입력, 진도 수정, 문자 발송은 아직 도구가 없어 해당 화면을 안내합니다. AI가 SQL이나 테이블을 직접 건드리지 않습니다.
 - **사용량 제한**: AI 비용이 늘지 않도록 한 시간에 `AGENT_RATE_LIMIT_PER_HOUR`번(기본 60, `0`이면 제한 없음)까지만 대화를 처리합니다. 횟수는 DB(`AgentUsage`)에 남겨 서버 인스턴스가 여럿이어도 함께 셉니다. 넘으면 429와 함께 몇 분 뒤에 다시 쓸 수 있는지 알려 줍니다. 승인(`/api/agent/apply`)은 AI를 부르지 않고 제안마다 한 번만 실행되므로 세지 않습니다.
 - **기록**: 대화(`AgentConversations`, `AgentMessages`)와 제안(`AgentProposals`: 변경 전/후, 상태, 검증 결과, 실행 시각)은 따로 저장합니다. 대화는 참고용이고, 학생 데이터의 기준은 언제나 업무 테이블입니다. 90일 동안 이어지지 않은 대화는 새 대화를 저장할 때 메시지와 함께 지웁니다(승인 대기 제안이 있는 대화는 남김). 제안 기록은 지우지 않습니다.
-- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 `lib/agent-anthropic.js`(Anthropic) 또는 OpenRouter) · 승인은 `/api/agent/apply`, 거절은 `/api/agent/reject`(한 건 `proposal_id`, 여러 건 `proposal_ids`) · 도구 목록 `lib/agent-tools.js` · 제안 만들기·반영·거절 `lib/proposals.js`(대화·MCP·승인 화면 모두 이것만 부름), 제안 저장·검증 `src/07_Agent.js`.
+- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 AI 제공자 adapter `lib/agent-anthropic.js`(Anthropic) 또는 `lib/agent-openai.js`(OpenRouter)) · 승인은 `/api/agent/apply`, 거절은 `/api/agent/reject`(한 건 `proposal_id`, 여러 건 `proposal_ids`) · 도구 목록 `lib/agent-tools.js` · 제안 만들기·반영·거절 `lib/proposals.js`(대화·MCP·승인 화면 모두 이것만 부름), 제안 저장·검증 `src/07_Agent.js`.
 
 ## Claude 커넥터
 
