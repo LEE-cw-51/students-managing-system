@@ -154,7 +154,12 @@ LMS.registerAgentWriteActions({
         diff.push('시간표 ' + (LMS.scheduleLabel(prevSchedule) || '없음') + ' → ' + (LMS.scheduleLabel(input.schedule) || '없음'));
       }
       if (!diff.length) throw new Error('바뀌는 내용이 없습니다. 바꿀 항목과 새 값을 입력해 주세요.');
-      if (out.textbook !== undefined && changes.textbook_started_on) out.textbook_started_on = changes.textbook_started_on;
+      if (out.textbook !== undefined) {
+        // Same check as the save, so a missing or too-early date fails here, not on approval.
+        LMS.applyTextbookChange(cls.textbook, cls.textbook_history, out.textbook, changes.textbook_started_on);
+        out.textbook_started_on = changes.textbook_started_on;
+        diff.push((out.textbook ? '새 교재 시작일 ' : '교재 끝내는 날 ') + out.textbook_started_on);
+      }
       return {
         args: out,
         target: { class_id: cls.class_id, class_name: clsStr_(cls.class_name) },
