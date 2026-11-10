@@ -56,8 +56,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
   function requireTask(svc, taskId) {
     var task = LMS.findById(svc.table('Tasks'), 'task_id', taskId);
     if (!task) throw new Error('할 일(' + (LMS.toStr(taskId) || '없음') + ')을 찾을 수 없습니다.');
-    if (LMS.toStr(task.source) === 'counseling') throw new Error('상담일지의 후속 할 일입니다. 상담일지(update_counseling)에서 수정해 주세요.');
-    return task;
+    return LMS.assertTaskEditable(task, '상담일지의 후속 할 일입니다. 상담일지(update_counseling)에서 수정해 주세요.');
   }
 
   function requireNote(svc, noteId) {

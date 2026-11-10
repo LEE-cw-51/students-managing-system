@@ -1101,12 +1101,14 @@ LMS.createViews = function (ctx) {
       return LMS.toStr(m.status) !== '취소' && LMS.inRange(m.makeup_date, week.start, week.end);
     });
     var classes = table('Classes');
+    var taskCounts = ctx.getTaskCounts(week.start, week.end);
     var weekDays = LMS.datesInRange(week.start, week.end).map(function (d) {
       return {
         date: d,
         weekday: LMS.weekdayName(d),
         class_count: classes.filter(function (c) { return LMS.classMeetsOnDate(c, d, periods); }).length,
-        makeup_count: makeups.filter(function (m) { return m.makeup_date === d; }).length
+        makeup_count: makeups.filter(function (m) { return m.makeup_date === d; }).length,
+        task_count: taskCounts[d] || 0
       };
     });
     var hw = ctx.getWeeklyHomeworkDashboard(date);
@@ -1121,15 +1123,9 @@ LMS.createViews = function (ctx) {
       makeups: teaching.makeup_sessions,
       tasks: (agenda.items || []).filter(function (i) { return !(i.source === 'auto' && BOARD_HIDDEN_AGENDA[i.kind]); }),
       overdue_tasks: date !== today ? [] : table('Tasks').filter(function (t) {
-        return LMS.toStr(t.status) === '예정' && LMS.toStr(t.due_date) < today;
+        return LMS.isTaskOverdue(t, today);
       }).sort(function (a, b) { return LMS.toStr(a.due_date).localeCompare(LMS.toStr(b.due_date)); }).map(function (t) {
-        var st = t.student_id ? LMS.findById(table('Students'), 'student_id', t.student_id) : null;
-        var cls = t.class_id ? LMS.findById(classes, 'class_id', t.class_id) : null;
-        return {
-          id: t.task_id, task_id: t.task_id, source: LMS.toStr(t.source) || 'manual', kind: t.kind, title: t.title, status: t.status,
-          due_date: t.due_date, memo: t.memo, student_id: t.student_id, student_name: st ? st.name : '',
-          class_id: t.class_id || '', class_name: cls ? cls.class_name : ''
-        };
+        return LMS.taskItem(t, table('Students'), classes, today);
       }),
       exams_soon: date === today ? upcomingExamsFor(active, 7) : [],
       unassigned_count: date === today ? active.filter(function (s) { return ctx.assignments.isUnassigned(s, today); }).length : 0,

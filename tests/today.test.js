@@ -379,4 +379,86 @@ describe('tasks by date', () => {
     assert.equal(counts['2026-11-02'], undefined, 'outside the range');
     assert.throws(() => s.api.getTaskCounts('x', '2026-11-01'), { message: '날짜 형식이 올바르지 않습니다.' });
   });
+
+  it('the week strip counts come with the board, open tasks included', () => {
+    const s = seeded();
+    s.api.saveTask({ due_date: '2026-10-28', kind: 'other', title: 't' });
+    s.api.saveTask({ due_date: '2026-10-28', kind: 'other', title: 'done', status: '완료' });
+    counselTask(s, '2026-10-30');
+    const b = s.api.getTodayBoard('2026-10-28');
+    const counts = s.api.getTaskCounts('2026-10-26', '2026-11-01');
+    assert.deepEqual(b.week.map((d) => d.date), ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01']);
+    assert.deepEqual(b.week.map((d) => d.weekday), LMS.WEEKDAYS);
+    assert.deepEqual(b.week.map((d) => d.task_count), b.week.map((d) => counts[d.date] || 0));
+    assert.ok(b.week.find((d) => d.date === '2026-10-30').task_count >= 1);
+    const cal = s.api.getCalendar('2026-10-26', '2026-11-01').events;
+    b.week.forEach((d) => {
+      const day = cal.filter((ev) => ev.date === d.date);
+      assert.equal(d.class_count, day.filter((ev) => ev.event_type === '정규' || ev.event_type === '시험대비').length, d.date);
+      assert.equal(d.makeup_count, day.length - d.class_count, d.date);
+    });
+  });
+});
+
+describe('task rules', () => {
+  it('only counseling follow-ups are protected; a missing source means manual', () => {
+    assert.equal(LMS.taskSource({}), 'manual');
+    assert.equal(LMS.taskSource({ source: 'counseling' }), 'counseling');
+    assert.equal(LMS.isTaskEditable({ source: '' }), true);
+    assert.equal(LMS.isTaskEditable({ source: 'manual' }), true);
+    assert.equal(LMS.isTaskEditable({ source: 'counseling' }), false);
+    const row = { source: 'manual' };
+    assert.equal(LMS.assertTaskEditable(row), row);
+    assert.throws(() => LMS.assertTaskEditable({ source: 'counseling' }), { message: '상담일지에서 수정해 주세요.' });
+    assert.throws(() => LMS.assertTaskEditable({ source: 'counseling' }, '다른 안내'), { message: '다른 안내' });
+  });
+
+  it('a task is overdue only while open and due before the date', () => {
+    assert.equal(LMS.isTaskOverdue({ status: '예정', due_date: '2026-10-25' }, TODAY), true);
+    assert.equal(LMS.isTaskOverdue({ status: '예정', due_date: TODAY }, TODAY), false);
+    assert.equal(LMS.isTaskOverdue({ status: '완료', due_date: '2026-10-25' }, TODAY), false);
+    assert.equal(LMS.isTaskOverdue({ status: '취소', due_date: '2026-10-25' }, TODAY), false);
+  });
+
+  it('taskItem is the one task row shape', () => {
+    const students = [{ student_id: 'STU-1', name: '김하늘' }];
+    const classes = [{ class_id: 'CLS-1', class_name: '중2 A반' }];
+    const row = { task_id: 'TSK-1', due_date: '2026-10-25', kind: 'admin', title: '교재', memo: '', student_id: 'STU-1', class_id: 'CLS-1', status: '예정', source: '', created_at: 'x' };
+    assert.deepEqual(LMS.taskItem(row, students, classes, TODAY), {
+      id: 'TSK-1', task_id: 'TSK-1', source: 'manual', kind: 'admin', title: '교재', status: '예정', due_date: '2026-10-25',
+      student_id: 'STU-1', student_name: '김하늘', class_id: 'CLS-1', class_name: '중2 A반', memo: '',
+      action: 'edit_task', editable: true, overdue: true
+    });
+    const bare = LMS.taskItem({ task_id: 'TSK-2', due_date: TODAY, kind: 'other', title: 't', status: '예정', source: 'counseling' }, students, classes, TODAY);
+    assert.deepEqual([bare.student_id, bare.student_name, bare.class_id, bare.class_name, bare.memo], ['', '', '', '', '']);
+    assert.deepEqual([bare.editable, bare.overdue], [false, false]);
+  });
+
+  it('the board lists today and overdue tasks in the same shape with server flags', () => {
+    const s = seeded();
+    const sid = s.demo.students[0].student_id;
+    s.api.saveTask({ due_date: '2026-10-22', kind: 'other', title: '지난 할 일', student_id: sid });
+    s.api.saveTask({ due_date: TODAY, kind: 'other', title: '오늘 할 일' });
+    const counsel = s.api.saveCounselingNote({ student_id: sid, kind: '학부모', counsel_date: '2026-10-20', content: 'x', follow_up_date: TODAY });
+    const b = s.api.getTodayBoard(TODAY);
+    const overdue = b.overdue_tasks.find((t) => t.title === '지난 할 일');
+    const today = b.tasks.find((t) => t.title === '오늘 할 일');
+    const follow = b.tasks.find((t) => t.task_id === counsel.follow_up_task_id);
+    assert.deepEqual(Object.keys(overdue).sort(), Object.keys(today).sort());
+    assert.deepEqual([overdue.overdue, overdue.editable], [true, true]);
+    assert.deepEqual([today.overdue, today.editable], [false, true]);
+    assert.deepEqual([follow.source, follow.editable], ['counseling', false]);
+    const past = s.api.getTodayBoard('2026-10-22').tasks.find((t) => t.title === '지난 할 일');
+    assert.equal(past.overdue, false, 'not marked on its own date');
+  });
+
+  it('the AI task actions refuse a counseling follow-up through the same rule', () => {
+    const s = seeded();
+    const sid = s.demo.students[0].student_id;
+    const note = s.api.saveCounselingNote({ student_id: sid, kind: '학부모', counsel_date: '2026-10-20', content: 'x', follow_up_date: TODAY });
+    const hint = /상담일지\(update_counseling\)에서 수정해 주세요/;
+    assert.throws(() => s.api.previewAgentAction('update_task', { task_id: note.follow_up_task_id, title: '바꿈' }), hint);
+    assert.throws(() => s.api.previewAgentAction('delete_task', { task_id: note.follow_up_task_id }), hint);
+    assert.equal(s.api.previewAgentAction('update_task_status', { task_id: note.follow_up_task_id, status: '완료' }).after, '완료');
+  });
 });
