@@ -168,10 +168,12 @@ LMS.DEFAULT_SETTINGS = {
   mcp_write_mode: 'read_only'
 };
 /**
- * Claude connector write modes; the first is the default. Legacy 'direct' is stored as 'proposal'.
- * claude_approve: like proposal, plus tools that let Claude approve or reject pending proposals.
+ * Claude connector write modes; the first is the default. Claude never approves or rejects:
+ * that happens only in the app.
  */
-LMS.MCP_WRITE_MODES = ['read_only', 'proposal', 'claude_approve'];
+LMS.MCP_WRITE_MODES = ['read_only', 'proposal'];
+// Values stored by older versions and the mode they mean now.
+LMS.MCP_WRITE_MODE_LEGACY = { direct: 'proposal', claude_approve: 'proposal' };
 
 LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT', 'AGC', 'AGM', 'AGP'];
 
@@ -184,6 +186,13 @@ LMS.isBlank = function (v) {
 LMS.toStr = function (v) {
   if (v === null || v === undefined) return '';
   return String(v).trim();
+};
+
+/** Stored mcp_write_mode → one of MCP_WRITE_MODES (legacy values mapped, anything else read-only). */
+LMS.normalizeMcpWriteMode = function (value) {
+  var v = LMS.toStr(value);
+  if (Object.prototype.hasOwnProperty.call(LMS.MCP_WRITE_MODE_LEGACY, v)) return LMS.MCP_WRITE_MODE_LEGACY[v];
+  return LMS.MCP_WRITE_MODES.indexOf(v) === -1 ? LMS.MCP_WRITE_MODES[0] : v;
 };
 
 LMS.toNum = function (v) {

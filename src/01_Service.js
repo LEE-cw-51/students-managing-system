@@ -2147,16 +2147,17 @@ LMS.createService = function (store) {
     Object.keys(map || {}).forEach(function (k) {
       current[k] = map[k];
     });
+    var legacy = LMS.MCP_WRITE_MODE_LEGACY;
     if (map && Object.prototype.hasOwnProperty.call(map, 'mcp_write_mode')) {
-      var mode = LMS.toStr(map.mcp_write_mode).trim();
-      // Legacy 'direct' maps to 'proposal': Claude's changes always wait for approval.
-      if (mode === 'direct') mode = 'proposal';
+      var mode = LMS.toStr(map.mcp_write_mode);
+      // Legacy 'direct' and 'claude_approve' map to 'proposal': approval happens only in the app.
+      if (Object.prototype.hasOwnProperty.call(legacy, mode)) mode = legacy[mode];
       // Blank, or an unknown value already stored (resent by the settings page), falls back to read-only.
-      if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(storedMode).trim())) mode = LMS.MCP_WRITE_MODES[0];
-      if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only), 승인 대기 제안(proposal), Claude에서 승인(claude_approve) 중에서만 고를 수 있습니다.');
+      if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(storedMode))) mode = LMS.MCP_WRITE_MODES[0];
+      if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only), 승인 대기 제안(proposal) 중에서만 고를 수 있습니다.');
       current.mcp_write_mode = mode;
-    } else if (current.mcp_write_mode === 'direct') {
-      current.mcp_write_mode = 'proposal';
+    } else if (Object.prototype.hasOwnProperty.call(legacy, LMS.toStr(current.mcp_write_mode))) {
+      current.mcp_write_mode = legacy[LMS.toStr(current.mcp_write_mode)];
     }
     saveTable('Settings', LMS.settingsToRows(current));
     return current;
