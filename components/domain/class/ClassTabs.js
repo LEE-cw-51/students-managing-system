@@ -12,6 +12,7 @@ import { useBoot } from '@/components/shell/AppShell';
 import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import LMS from '../../../src/00_Core.js';
 function textbookLine(cls) {
   const past = (cls.textbook_timeline || []).filter((h) => !h.current);
   return (
@@ -43,7 +44,7 @@ export function OverviewTab({ data }) {
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="학생" value={`${roster.length}명`} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회`} />
-        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
+        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 확인한 숙제 중 A" />
         <Kpi label="테스트 평균" value={month.test_average_display} note="이번 달 · 만점 같은 테스트만" />
       </div>
       {data.exams && data.exams.length ? <UpcomingExams exams={data.exams} /> : null}
@@ -164,7 +165,7 @@ function RangePicker({ value, onChange }) {
 
 function gradeTone(letter) {
   if (!letter) return 'unchecked';
-  return letter === 'A' || letter === 'B' ? 'full' : letter === 'E' || letter === 'F' ? 'none' : 'part';
+  return LMS.isHomeworkDone(letter) ? 'full' : letter === 'E' || letter === 'F' ? 'none' : 'part';
 }
 
 function HwCell({ cell, who, open, onToggle }) {
@@ -259,7 +260,7 @@ export function HomeworkTab({ classId }) {
     <div className="stack">
       <div className="split">
         <RangePicker value={range} onChange={(v) => { setOpen(null); setRange(v); }} />
-        <span className="muted hw-legend desktop-only">A·B 완료 · C·D 일부 · E·F 안 함 · 미입력 = 아직 확인 안 함</span>
+        <span className="muted hw-legend desktop-only">A만 완료 · B–D 미완료(일부) · E·F 미완료(안 함) · 미입력 = 아직 확인 안 함</span>
       </div>
       <Async state={state}>
         {(data) => data.rows.length ? (
@@ -301,7 +302,7 @@ export function HomeworkTab({ classId }) {
             <ul className="hw-cards">
               {data.rows.map((r) => {
                 const cells = data.students.map((s) => ({ s, cell: r.cells[s.student_id] })).filter((x) => x.cell);
-                const missing = cells.filter((x) => !x.cell.checked || gradeTone(x.cell.letter) !== 'full');
+                const missing = cells.filter((x) => !x.cell.checked || x.cell.done < x.cell.total);
                 return (
                   <li key={r.date} className="hw-card">
                     <div className="hw-card-head"><strong>{shortDate(r.date)} 낸 숙제</strong><span className="muted">{r.checked ? `완료율 ${percent(r.rate)}` : '확인 전'}</span></div>
@@ -310,13 +311,13 @@ export function HomeworkTab({ classId }) {
                       <>
                         {missing.length ? (
                           <div className="hw-card-missing">
-                            <span className="hint">안 함 · 일부 · 미입력</span>
+                            <span className="hint">미완료(A 아님) · 미입력</span>
                             {missing.map(({ s, cell }) => (
                               <Link key={s.student_id} href={`/students/${s.student_id}?tab=homework`}>{s.name} <span className={'hw-cell ' + gradeTone(cell.checked ? cell.letter : '')}>{cell.checked ? cell.letter : '미입력'}</span></Link>
                             ))}
                           </div>
                         ) : null}
-                        <span>완료(A·B) {cells.length - missing.length}명</span>
+                        <span>완료(모두 A) {cells.length - missing.length}명</span>
                         {checkLink(r.date)}
                       </>
                     ) : <span className="muted">다음 수업에서 확인합니다.</span>}

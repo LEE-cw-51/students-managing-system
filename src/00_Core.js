@@ -682,30 +682,27 @@ LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
   return LMS.aggregateAssignmentGrades(grades).grade;
 };
 
-/** 숙제 완료: a graded item at D or better (60+ points). E/F, ungraded and unknown values are not done. */
+/** 숙제 완료: only grade A (legacy 완료 included). B–F, ungraded and unknown values are not done. */
 LMS.isHomeworkDone = function (grade) {
-  var points = LMS.ASSIGNMENT_POINTS[LMS.homeworkGrade(grade)];
-  return points !== undefined && points >= 60;
+  return LMS.homeworkGrade(grade) === 'A';
 };
 
 /**
  * 숙제 완료율 over homework check rows. Ungraded cells have no row and are left out;
  * callers pass only rows of students who were in the item's class on its lesson date.
- * rate is the rounded average of item points (A 100 … F 50). done counts 숙제 완료 items.
+ * rate is the rounded share (%) of graded items that are 숙제 완료 (A).
  * Returns { done, checked, rate }; rate is null when nothing was graded.
  */
 LMS.homeworkRate = function (cells) {
   var checked = 0;
   var done = 0;
-  var sum = 0;
   (cells || []).forEach(function (c) {
     var code = LMS.homeworkGrade(c && c.status);
     if (!code) return;
     checked += 1;
-    sum += LMS.ASSIGNMENT_POINTS[code];
     if (LMS.isHomeworkDone(code)) done += 1;
   });
-  return { done: done, checked: checked, rate: checked ? Math.round(sum / checked) : null };
+  return { done: done, checked: checked, rate: checked ? Math.round((done / checked) * 100) : null };
 };
 
 /** 출석률 (%): lesson records that are not 결석 over all records. null when there are none. */

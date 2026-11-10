@@ -12,6 +12,7 @@ import { dateRange, formatDate, percent, relativeDay, score, shortDate, telHref,
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
+import LMS from '../../../src/00_Core.js';
 
 /** Add a regular class to the student (추가 수강, or the first class for a 미배정 student). */
 function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
@@ -270,7 +271,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
       <div className="kpis sd-kpis">
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${next.class_name} · ${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회 · 결석 ${month.absent_count}`} />
-        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
+        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 확인한 숙제 중 A" />
         <Kpi label="테스트 평균" value={month.test_average_display} note={month.test_count ? `이번 달 ${month.test_count}회 · 100점 환산` : '이번 달 테스트 없음'} />
         <Kpi label="과제 A 비율" value={percent(month.assignment_a_rate)} note="이번 달 과제 이행" />
       </div>
@@ -527,17 +528,17 @@ export function HomeworkTab({ studentId }) {
 
   return (
     <div className="stack">
-      <div className="split"><span className="muted">수업일에 낸 숙제입니다. 항목마다 A–F를 고르면 평균으로 그날의 과제 등급이 계산됩니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">수업일에 낸 숙제입니다. 항목마다 A–F를 고르면 평균으로 그날의 과제 등급이 계산됩니다. 숙제 완료는 A일 때만입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => (
           <>
             <div className="kpis">
-              <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개`} />
-              <Kpi label="E·F" value={`${d.missing.length}개`} tone={d.missing.length ? 'terracotta' : undefined} />
+              <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개 중 A`} />
+              <Kpi label="미완료" value={`${d.missing.length}개`} note="A가 아닌 숙제" tone={d.missing.length ? 'terracotta' : undefined} />
             </div>
             {d.missing.length ? (
               <section className="card">
-                <h3>낮은 이행 (E·F)</h3>
+                <h3>미완료 숙제 (B–F)</h3>
                 <ul className="stack-sm" style={{ margin: 0, paddingLeft: 18 }}>
                   {d.missing.map((x, i) => <li key={i}>{shortDate(x.date)} · {x.class_name} — {x.title}</li>)}
                 </ul>
@@ -555,7 +556,7 @@ export function HomeworkTab({ studentId }) {
                         <td data-label="숙제">
                           <div className="cluster" style={{ alignItems: 'center' }}>
                             {row.items.map((it) => {
-                              const tone = it.status === 'A' || it.status === 'B' ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
+                              const tone = LMS.isHomeworkDone(it.status) ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
                               const busy = savingId === it.item_id;
                               return (
                                 <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
