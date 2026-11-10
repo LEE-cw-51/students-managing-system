@@ -6,8 +6,13 @@ const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, mcpTools, toolDefinitions, toolResultText, TOOL_RESULT_MAX_CHARS } = require('../lib/agent-tools.js');
 const {
-  runAgentTurn, applyProposal, applyProposals, rejectProposals, agentRateLimit, AGENT_RATE_LIMITED, AGENT_BATCH_PROPOSALS_MAX
+  runAgentTurn, agentRateLimit, AGENT_RATE_LIMITED
 } = require('../lib/agent.js');
+const { APP_SESSION, apply, reject, PROPOSAL_BATCH_MAX } = require('../lib/proposals.js');
+
+const applyProposal = (id, run, selected) => apply(APP_SESSION, { proposal_id: id, selected }, run);
+const applyProposals = (ids, run) => apply(APP_SESSION, { proposal_ids: ids }, run);
+const rejectProposals = (ids, run) => reject(APP_SESSION, { proposal_ids: ids }, run);
 const { chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
 
 const CONFIG = { key: 'test-key', baseUrl: 'https://ai.test/v1', model: 'test-model' };
@@ -608,7 +613,7 @@ describe('agent proposals', () => {
   it('rejects once and refuses to apply a rejected proposal', () => {
     const { api, hong, lessonOf } = setup();
     const p = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
-    assert.equal(api.rejectAgentProposal(p.proposal_id).status, 'rejected');
+    assert.equal(api.rejectAgentProposals([p.proposal_id])[0].proposal.status, 'rejected');
     assert.throws(() => api.applyAgentProposal(p.proposal_id), /이미 처리된/);
     assert.equal(lessonOf(hong.student_id).attendance, '출석');
   });
@@ -630,7 +635,7 @@ describe('agent proposal batches', () => {
     const times = { [c.proposal_id]: '2026-09-14T01:00:00', [a.proposal_id]: '2026-09-14T02:00:00', [d.proposal_id]: '2026-09-14T03:00:00', [b.proposal_id]: '2026-09-14T04:00:00' };
     store.writeTable('AgentProposals', store.readTable('AgentProposals').map((p) => ({ ...p, created_at: times[p.proposal_id] })));
     const fresh = LMS.createService(store);
-    fresh.rejectAgentProposal(d.proposal_id);
+    fresh.rejectAgentProposals([d.proposal_id]);
 
     const list = fresh.listPendingProposals();
     assert.deepEqual(list.map((p) => p.proposal_id), [c.proposal_id, a.proposal_id, b.proposal_id]);
@@ -670,7 +675,7 @@ describe('agent proposal batches', () => {
     let step = 0;
     const racing = async (fn) => {
       const out = await fn(api);
-      if (step++ === 0) api.rejectAgentProposal(p.proposal_id);
+      if (step++ === 0) api.rejectAgentProposals([p.proposal_id]);
       return out;
     };
     const { results } = await applyProposals([p.proposal_id], racing);
@@ -683,12 +688,12 @@ describe('agent proposal batches', () => {
   it('refuses an empty or oversized list without touching any proposal', async () => {
     const { api, hong, lessonOf, run } = setup();
     const p = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
-    const tooMany = Array.from({ length: AGENT_BATCH_PROPOSALS_MAX + 1 }, (_, i) => i === 0 ? p.proposal_id : 'AGP-X' + i);
+    const tooMany = Array.from({ length: PROPOSAL_BATCH_MAX + 1 }, (_, i) => i === 0 ? p.proposal_id : 'AGP-X' + i);
     for (const fn of [applyProposals, rejectProposals]) {
       await assert.rejects(fn([], run), /하나 이상/);
       await assert.rejects(fn(['', '  '], run), /하나 이상/);
-      await assert.rejects(fn(undefined, run), /하나 이상/);
-      await assert.rejects(fn(tooMany, run), new RegExp(`${AGENT_BATCH_PROPOSALS_MAX}건까지`));
+      await assert.rejects(fn(null, run), /하나 이상/);
+      await assert.rejects(fn(tooMany, run), new RegExp(`${PROPOSAL_BATCH_MAX}건까지`));
     }
     assert.equal(statusOf(api, p), 'pending');
     assert.equal(lessonOf(hong.student_id).attendance, '출석');

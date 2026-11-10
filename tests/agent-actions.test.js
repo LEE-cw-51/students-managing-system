@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
-const { applyProposal } = require('../lib/agent.js');
+const { APP_SESSION, apply } = require('../lib/proposals.js');
 
 // Every write action goes through the real flow: preview, save as a proposal, approve, verify.
 function setup() {
@@ -21,7 +21,7 @@ function setup() {
     const api = svc();
     const preview = api.previewAgentAction(tool, args);
     const saved = api.saveAgentTurn({ message: 'test ' + tool, reply: 'ok', calls: [{ tool, args: preview.args, preview }] });
-    const applied = await applyProposal(saved.message.proposal.proposal_id, run);
+    const applied = await apply(APP_SESSION, { proposal_id: saved.message.proposal.proposal_id }, run);
     assert.equal(applied.status, 'applied', tool);
     return { preview, applied };
   }

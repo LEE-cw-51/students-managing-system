@@ -6,6 +6,7 @@
  * service functions the screens use. After running, each change is read back and checked.
  * The changes that can be proposed are the write actions of 08_AgentActions.js.
  * Conversation rows are notes for context; the business tables stay the source of truth.
+ * Proposal state changes here are the store of lib/proposals.js; everything else goes through it.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
@@ -25,7 +26,8 @@ LMS.AGENT_SOURCE_MCP = 'mcp';
 LMS.AGENT_SOURCE_ASSISTANT = 'assistant';
 // Connector turns start with this; rows saved before `source` existed are told apart by it.
 LMS.MCP_MESSAGE_PREFIX = '[Claude 커넥터]';
-LMS.AGENT_SOURCE_MISMATCH = '웹 AI 비서에서 올린 제안은 앱에서만 승인하거나 거절할 수 있습니다.';
+// Applying or rejecting a proposal already settled some other way (applied, rejected, failed).
+LMS.AGENT_PROPOSAL_SETTLED = 'AGENT_PROPOSAL_SETTLED';
 // Error codes the API passes to the browser (lib/api-error.js maps them to HTTP statuses).
 LMS.AGENT_CONVERSATION_NOT_FOUND = 'CONVERSATION_NOT_FOUND';
 
@@ -47,6 +49,18 @@ LMS.createAgent = function (ctx) {
     var row = LMS.findById(table('AgentProposals'), 'proposal_id', proposalId);
     if (!row) throw new Error('제안을 찾을 수 없습니다.');
     return row;
+  }
+
+  /**
+   * The one "already handled" rule: true when a pending proposal may become `to`, false when
+   * it already is `to` (nothing to do). Any other settled proposal throws AGENT_PROPOSAL_SETTLED.
+   */
+  function mustSettle(row, to) {
+    if (row.status === to) return false;
+    if (row.status === 'pending') return true;
+    var e = new Error('이미 처리된 제안입니다.');
+    e.code = LMS.AGENT_PROPOSAL_SETTLED;
+    throw e;
   }
 
   function slimProposal(row) {
@@ -283,15 +297,14 @@ LMS.createAgent = function (ctx) {
   }
 
   /**
-   * Server-only (the apply route records failures): run every change of a pending proposal,
+   * Server-only (lib/proposals.js records failures): run every change of a pending proposal,
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
    * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
    */
   function applyAgentProposal(proposalId, selected) {
     var row = requireProposal(proposalId);
-    if (row.status === 'applied') return slimProposal(row);
-    if (row.status !== 'pending') throw new Error('이미 처리된 제안입니다.');
+    if (!mustSettle(row, 'applied')) return slimProposal(row);
     var calls = row.calls || [];
     var chosen = null;
     if (Array.isArray(selected)) {
@@ -328,18 +341,6 @@ LMS.createAgent = function (ctx) {
     if (!row || row.status !== 'pending') return slimProposal(row);
     row.status = 'failed';
     row.result = { error: LMS.toStr(message) };
-    row.executed_at = ctx.now();
-    saveTable('AgentProposals', rows);
-    return slimProposal(row);
-  }
-
-  function rejectAgentProposal(proposalId) {
-    var rows = table('AgentProposals');
-    var row = requireProposal(proposalId);
-    if (row.status === 'rejected') return slimProposal(row);
-    if (row.status !== 'pending') throw new Error('이미 처리된 제안입니다.');
-    row = LMS.findById(rows, 'proposal_id', proposalId);
-    row.status = 'rejected';
     row.executed_at = ctx.now();
     saveTable('AgentProposals', rows);
     return slimProposal(row);
@@ -383,48 +384,42 @@ LMS.createAgent = function (ctx) {
 
   /**
    * Server-only: the given proposal ids that exist, oldest first, with their status
-   * and source ([{ proposal_id, status, created_at, source }]). Missing ids are left out.
+   * ([{ proposal_id, status, created_at }]). Missing ids are left out.
    */
   function getAgentProposalOrder(ids) {
     var want = {};
     (Array.isArray(ids) ? ids : []).forEach(function (id) { want[LMS.toStr(id)] = true; });
-    var convs = table('AgentConversations');
     return table('AgentProposals').filter(function (p) {
       return want[LMS.toStr(p.proposal_id)];
     }).sort(byCreatedAt).map(function (p) {
-      return { proposal_id: p.proposal_id, status: p.status, created_at: p.created_at, source: proposalSource_(p, convs) };
+      return { proposal_id: p.proposal_id, status: p.status, created_at: p.created_at };
     });
   }
 
   /**
-   * Server-only: reject several proposals in one save. Never throws for one item:
-   * each comes back as { proposal_id, status, verification_status, error }.
+   * Server-only: reject several proposals in one save. Never throws for one item: each comes
+   * back as { proposal_id, proposal (slim, null when missing), error } in request order.
    * Already rejected stays as is; applied, failed or missing ids get an error.
-   * source: only proposals from there may be rejected; others get an error, untouched (absent: any).
    */
-  function rejectAgentProposals(ids, source) {
+  function rejectAgentProposals(ids) {
     var rows = table('AgentProposals');
-    var convs = table('AgentConversations');
-    var only = LMS.toStr(source);
     var ts = ctx.now();
     var changed = false;
     var results = (Array.isArray(ids) ? ids : []).map(function (id) {
       var row = LMS.findById(rows, 'proposal_id', LMS.toStr(id));
-      if (!row) return { proposal_id: LMS.toStr(id), status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' };
-      if (only && proposalSource_(row, convs) !== only) {
-        return { proposal_id: row.proposal_id, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH };
+      if (!row) return { proposal_id: LMS.toStr(id), proposal: null, error: '제안을 찾을 수 없습니다.' };
+      var error = '';
+      try {
+        if (mustSettle(row, 'rejected')) {
+          row.status = 'rejected';
+          row.executed_at = ts;
+          changed = true;
+        }
+      } catch (e) {
+        if (e.code !== LMS.AGENT_PROPOSAL_SETTLED) throw e;
+        error = e.message;
       }
-      if (row.status === 'pending') {
-        row.status = 'rejected';
-        row.executed_at = ts;
-        changed = true;
-      }
-      return {
-        proposal_id: row.proposal_id,
-        status: row.status,
-        verification_status: row.verification_status || '',
-        error: row.status === 'rejected' ? '' : '이미 처리된 제안입니다.'
-      };
+      return { proposal_id: row.proposal_id, proposal: slimProposal(row), error: error };
     });
     if (changed) saveTable('AgentProposals', rows);
     return results;
@@ -443,7 +438,6 @@ LMS.createAgent = function (ctx) {
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,
-    rejectAgentProposal: rejectAgentProposal,
     listPendingProposals: listPendingProposals,
     getAgentProposalOrder: getAgentProposalOrder,
     rejectAgentProposals: rejectAgentProposals
