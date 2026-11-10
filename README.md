@@ -142,7 +142,7 @@ Anthropic API로 직접 부를 때는 temperature를 보내지 않고, 답변 �
 - **안 하는 일**: 성적 입력, 진도 수정, 문자 발송은 아직 도구가 없어 해당 화면을 안내합니다. AI가 SQL이나 테이블을 직접 건드리지 않습니다.
 - **사용량 제한**: AI 비용이 늘지 않도록 한 시간에 `AGENT_RATE_LIMIT_PER_HOUR`번(기본 60, `0`이면 제한 없음)까지만 대화를 처리합니다. 횟수는 DB(`AgentUsage`)에 남겨 서버 인스턴스가 여럿이어도 함께 셉니다. 넘으면 429와 함께 몇 분 뒤에 다시 쓸 수 있는지 알려 줍니다. 승인(`/api/agent/apply`)은 AI를 부르지 않고 제안마다 한 번만 실행되므로 세지 않습니다.
 - **기록**: 대화(`AgentConversations`, `AgentMessages`)와 제안(`AgentProposals`: 변경 전/후, 상태, 검증 결과, 실행 시각)은 따로 저장합니다. 대화는 참고용이고, 학생 데이터의 기준은 언제나 업무 테이블입니다. 90일 동안 이어지지 않은 대화는 새 대화를 저장할 때 메시지와 함께 지웁니다(승인 대기 제안이 있는 대화는 남김). 제안 기록은 지우지 않습니다.
-- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 `lib/agent-anthropic.js`(Anthropic) 또는 OpenRouter) · 승인은 `/api/agent/apply`, 거절은 `/api/agent/reject`(한 건 `proposal_id`, 여러 건 `proposal_ids`) · 도구 목록 `lib/agent-tools.js` · 제안 만들기·반영·거절 `lib/proposals.js`(대화·MCP·승인 화면 모두 이것만 부름), 제안 저장·검증 `src/07_Agent.js`.
+- 구조: `components/shell/AgentPanel.js` → `/api/agent`(`lib/agent.js` 도구 호출 루프, AI 대기 중에는 DB 잠금을 잡지 않음 · 연결은 AI 제공자 adapter `lib/agent-anthropic.js`(Anthropic) 또는 `lib/agent-openai.js`(OpenRouter)) · 승인은 `/api/agent/apply`, 거절은 `/api/agent/reject`(한 건 `proposal_id`, 여러 건 `proposal_ids`) · 도구 목록 `lib/agent-tools.js` · 제안 만들기·반영·거절 `lib/proposals.js`(대화·MCP·승인 화면 모두 이것만 부름), 제안 저장·검증 `src/07_Agent.js`.
 
 ## Claude 커넥터
 
@@ -159,9 +159,12 @@ claude.ai에서 이 앱을 **커스텀 커넥터**(원격 MCP)로 연결하면, 
 3. claude.ai의 설정 → 커넥터 → **커스텀 커넥터 추가**에 `https://<도메인>/api/mcp`를 넣습니다.
 4. 로그인 창이 열리면 `LMS_PASSWORD`로 로그인하고 **허용**을 누릅니다.
 
+- **연결 목록**: 설정 카드의 `연결된 커넥터`에 동의 화면에서 허용한 연결마다 이름, 허용한 때, 마지막 갱신이 나옵니다(`OAuthGrants`). `끊기`는 그 연결의 토큰만 무효로 합니다. 이 목록이 생기기 전에 연결한 커넥터는 다음 토큰 갱신(1시간 안) 뒤에 나타납니다.
 - **연결 끊기**: 설정 카드의 `연결 끊기`는 지금까지 Claude에 발급된 접근·갱신 토큰을 모두 무효로 만듭니다(설정 `mcp_token_version`을 올림). 다시 쓰려면 claude.ai에서 다시 연결합니다.
+- **재사용 감지**: 이미 쓴 인가 코드나 갱신 토큰이 다시 오면 그 연결을 끊습니다. Claude에서 다시 연결해야 합니다.
+- **동의 화면**: 직접 시작한 연결이 아니면 거부하라는 경고가 나옵니다. 클라이언트 등록(`/api/oauth/register`)은 15분에 IP당 10번, 전체 30번까지입니다(`lms.login_attempts`의 `register:` 칸).
 - **도구**: 조회는 학생 찾기, 학생 개요, 출결 달력, 수업 기록, 성적, 숙제 이행, 상담 기록, 하루 현황, 반 목록·명단. 변경(조회만이 아닐 때)은 출결 변경, 상담 기록 추가, 할 일 상태 변경. 읽기 도구는 읽기 전용, 쓰기 도구는 되돌릴 수 없는 작업으로 표시되어 Claude가 실행 전에 확인을 받습니다.
-- **인증**: OAuth 2.1(PKCE S256, 동적 클라이언트 등록). 토큰은 `AUTH_SECRET`으로 서명하며 따로 저장하지 않습니다. 인가 코드와 갱신 토큰은 한 번만 쓸 수 있도록 쓴 것의 ID만 만료 때까지 DB(`OAuthJti`)에 남기고, 갱신할 때마다 새 갱신 토큰을 줍니다. 인가 코드 5분, 액세스 토큰 1시간, 갱신 토큰 30일. 돌려보낼 주소는 claude.ai·claude.com의 커넥터 콜백만 허용합니다.
+- **인증**: OAuth 2.1(PKCE S256, 동적 클라이언트 등록). 토큰은 `AUTH_SECRET`에서 용도(로그인 쿠키, 클라이언트 ID, 인가 코드, 토큰)마다 HKDF로 만든 키로 서명하며 따로 저장하지 않습니다(`lib/signing.js`, 예전에 `AUTH_SECRET` 자체로 서명한 값도 만료 때까지 통과). 인가 코드와 갱신 토큰은 한 번만 쓸 수 있도록 쓴 것의 ID만 만료 때까지 DB(`OAuthJti`)에 남기고, 갱신할 때마다 새 갱신 토큰을 줍니다. 인가 코드 5분, 액세스 토큰 1시간, 갱신 토큰 30일. 돌려보낼 주소는 claude.ai·claude.com의 커넥터 콜백만 허용합니다.
 - 구조: `/api/mcp`(`app/api/mcp/route.js` → `lib/mcp-server.js`, 무상태 Streamable HTTP) · OAuth `lib/oauth.js`, `/.well-known/oauth-*`, `/api/oauth/register`, `/api/oauth/token`, 동의 화면 `/oauth/authorize`.
 
 ## 숙제 체크리스트

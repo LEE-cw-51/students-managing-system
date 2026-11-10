@@ -47,6 +47,12 @@
 - **이미 처리됨**: 반영된 제안을 다시 반영하거나 거절된 제안을 다시 거절하면 그대로 돌려줍니다. 다른 처리된 제안은 `이미 처리된 제안입니다.`로 거부합니다. 이 규칙은 `src/07_Agent.js`의 한 곳에서만 판단합니다.
 - **호출자**: 제안 interface를 부르는 쪽입니다. `APP_SESSION`(앱에 로그인한 강사)과 `MCP_CONNECTOR`(Claude 커넥터) 둘뿐입니다. 둘 다 제안을 만들 수 있고, **반영과 거절은 `APP_SESSION`만** 할 수 있습니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)).
 
+## AI 비서
+
+- **AI 제공자**(provider): AI 비서 한 턴의 모델 대화를 맡는 adapter입니다. 턴(`system`, `history`, `message`)을 받아 `send` → `{ text, toolCalls, model }`와 `addToolResults`를 가진 대화를 돌려줍니다. 도구 실행, 제안 모으기, 시간 예산, 진행 이벤트는 `lib/agent.js`의 도구 루프가 맡고, 제공자는 요청 형식과 오류 문구만 압니다.
+  - 실제 adapter는 Anthropic(`lib/agent-anthropic.js`)과 OpenAI 호환(OpenRouter, `lib/agent-openai.js`) 둘입니다. `ANTHROPIC_API_KEY`가 있으면 Anthropic, 없으면 OpenRouter입니다.
+  - 도구 루프 테스트는 같은 자리에 가짜 제공자를 꽂고, 각 API의 요청 형식은 adapter 테스트에서만 확인합니다.
+
 ## 시험대비 기간
 
 시험대비 기간(`ExamPeriods` 행)의 시험대비 반, 휴강 반, 복귀일은 `src/09_ExamPeriods.js`(`createExamPeriods`)만 답하고, `ExamPeriods` 행도 이 module만 고칩니다. 임시 배정(`StudentClasses` 행)은 반 배정 module(`src/02_Assignments.js`)만 쓰고, 임시 배정이나 그 기간의 정규 배정이 바뀌면 이 module에 알려 복귀일을 다시 계산하게 합니다.
@@ -69,3 +75,12 @@
 - **다가오는 시험**: 아직 끝나지 않았고, 시험 중이거나 D-day 기준일이 기간(예: 60일) 안에 드는 시험입니다. 순서는 D-day 기준일 → 시작일 → 학교 → ID입니다. 학생의 **다음 시험**은 그 학교·학년의 첫 번째 다가오는 시험입니다. (`upcoming`, `nextByKey`)
 - **시험 view**: 화면·조회·AI 도구가 함께 쓰는 시험 모양입니다. 저장된 행에 `label`, `d_day`, `in_progress`, `d_day_label`, `d_day_tone`, `math_label`을 더합니다. (`view`)
 - **D-day 색** (`d_day_tone`): 시험 중이면 `danger`, 지난 시험은 `muted`, D-7 이내 `danger`, D-21 이내 `amber`, 그 밖은 없음입니다. 화면은 이 값을 그대로 그리고 다시 계산하지 않습니다.
+
+## Claude 커넥터 인증
+
+- **서명 용도**: 서명한 값(로그인 쿠키, OAuth 클라이언트 ID, 인가 코드, 액세스·갱신 토큰)이 무엇에 쓰이는지입니다. `session`, `client`, `code`, `token` 넷이고, 용도마다 `AUTH_SECRET`에서 HKDF로 만든 다른 키로 서명합니다. 한 용도로 만든 값은 다른 용도로 통과하지 않습니다. 서명·검사는 `lib/signing.js`(`sign`, `unsign`)만 합니다.
+  - **옛 키**: 용도별 키 전에는 `AUTH_SECRET` 자체로 서명했습니다. 이렇게 서명된 값도 통과시켜서 배포 뒤에 다시 로그인하거나 커넥터를 다시 연결하지 않아도 됩니다. 쿠키·토큰·코드는 원래 만료 시각에 끝나고, 클라이언트 ID는 만료가 없습니다.
+- **커넥터 연결** (`OAuthGrants` 행): 동의 화면에서 허용 한 번으로 생기는 연결입니다. 그 인가 코드와, 그 코드에서 이어지는 모든 액세스·갱신 토큰이 같은 연결 ID(`gid`, 인가 코드의 `jti`)를 가집니다. 갱신할 때마다 만료를 새 갱신 토큰의 만료로 미룹니다. 설정 화면에서 연결마다 끊을 수 있습니다.
+  - 연결 기록 전에 발급된 갱신 토큰은 `gid`가 없고, 처음 갱신할 때 연결로 기록됩니다.
+- **연결 끊기(전체)**: 설정 `mcp_token_version`을 올려 지금까지의 모든 연결, 토큰, 코드를 무효로 합니다. 연결 목록도 비워집니다.
+- **재사용 감지**: 이미 쓴 인가 코드나 갱신 토큰이 다시 오면 도난이나 재전송으로 보고 그 연결을 끊습니다. `gid`가 없는 예전 갱신 토큰이면 연결 끊기(전체)를 합니다. 판단은 `lib/oauth.js`의 한 트랜잭션에서 합니다.
