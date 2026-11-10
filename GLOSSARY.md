@@ -47,6 +47,12 @@
 - **이미 처리됨**: 반영된 제안을 다시 반영하거나 거절된 제안을 다시 거절하면 그대로 돌려줍니다. 다른 처리된 제안은 `이미 처리된 제안입니다.`로 거부합니다. 이 규칙은 `src/07_Agent.js`의 한 곳에서만 판단합니다.
 - **호출자**: 제안 interface를 부르는 쪽입니다. `APP_SESSION`(앱에 로그인한 강사)과 `MCP_CONNECTOR`(Claude 커넥터) 둘뿐입니다. 둘 다 제안을 만들 수 있고, **반영과 거절은 `APP_SESSION`만** 할 수 있습니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)).
 
+## AI 비서
+
+- **AI 제공자**(provider): AI 비서 한 턴의 모델 대화를 맡는 adapter입니다. 턴(`system`, `history`, `message`)을 받아 `send` → `{ text, toolCalls, model }`와 `addToolResults`를 가진 대화를 돌려줍니다. 도구 실행, 제안 모으기, 시간 예산, 진행 이벤트는 `lib/agent.js`의 도구 루프가 맡고, 제공자는 요청 형식과 오류 문구만 압니다.
+  - 실제 adapter는 Anthropic(`lib/agent-anthropic.js`)과 OpenAI 호환(OpenRouter, `lib/agent-openai.js`) 둘입니다. `ANTHROPIC_API_KEY`가 있으면 Anthropic, 없으면 OpenRouter입니다.
+  - 도구 루프 테스트는 같은 자리에 가짜 제공자를 꽂고, 각 API의 요청 형식은 adapter 테스트에서만 확인합니다.
+
 ## 학교 시험 일정
 
 학교 시험 일정(`SchoolExams` 행)의 입력 검사, D-day, 다가오는 시험 고르기는 `src/04_SchoolExams.js`(`LMS.schoolExams`)만 합니다.
