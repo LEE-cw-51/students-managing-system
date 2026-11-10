@@ -207,6 +207,65 @@ LMS.createAgent = function (ctx) {
     return !used;
   }
 
+  function mcpTokenVersion_() {
+    var v = ctx.service().getSettings().mcp_token_version;
+    return LMS.toStr(v == null || v === '' ? '0' : v);
+  }
+
+  // Connections that still count: not past their refresh token's expiry, and made after the last "연결 끊기".
+  function liveOAuthGrants_(nowMs) {
+    var ver = mcpTokenVersion_();
+    return table('OAuthGrants').filter(function (g) {
+      return Number(g.exp_ms) > nowMs && LMS.toStr(g.ver) === ver;
+    });
+  }
+
+  /**
+   * Server-only: records one Claude connector connection (OAuthGrants row, one per approval on
+   * the consent screen), or after a refresh moves its expiry on to `exp_ms` (epoch ms).
+   * Expired rows and rows from before the last "연결 끊기" are dropped.
+   */
+  function saveOAuthGrant(grant, nowMs) {
+    var id = LMS.toStr(grant && grant.grant_id);
+    if (!id) throw new Error('커넥터 연결 ID가 필요합니다.');
+    var rows = liveOAuthGrants_(nowMs);
+    var row = LMS.findById(rows, 'grant_id', id);
+    var ts = ctx.now();
+    if (!row) {
+      row = { grant_id: id, client_name: LMS.toStr(grant.client_name).slice(0, 100) || 'Claude', ver: mcpTokenVersion_(), created_at: ts };
+      rows.push(row);
+    }
+    row.last_used_at = ts;
+    row.exp_ms = Number(grant.exp_ms);
+    saveTable('OAuthGrants', rows);
+    return row;
+  }
+
+  /** Server-only: whether the connection a token belongs to is still connected. */
+  function hasOAuthGrant(grantId, nowMs) {
+    var id = LMS.toStr(grantId);
+    return !!id && liveOAuthGrants_(nowMs).some(function (g) { return LMS.toStr(g.grant_id) === id; });
+  }
+
+  /** Claude connector connections for the settings screen, newest first. */
+  function listMcpConnections() {
+    return liveOAuthGrants_(Date.now())
+      .map(function (g) {
+        return { grant_id: g.grant_id, client_name: g.client_name, created_at: g.created_at, last_used_at: g.last_used_at };
+      })
+      .sort(function (a, b) { return LMS.toStr(b.created_at).localeCompare(LMS.toStr(a.created_at)); });
+  }
+
+  /** Cuts one connection: its access and refresh tokens stop working. False when it was not connected. */
+  function revokeMcpConnection(grantId) {
+    var id = LMS.toStr(grantId);
+    var rows = table('OAuthGrants');
+    var next = rows.filter(function (g) { return LMS.toStr(g.grant_id) !== id; });
+    if (next.length === rows.length) return false;
+    saveTable('OAuthGrants', next);
+    return true;
+  }
+
   /**
    * Every request loads every table, so old chat must not pile up. Drops conversations not
    * updated for AGENT_CONVERSATION_KEEP_DAYS and their messages. A conversation that still
@@ -435,6 +494,10 @@ LMS.createAgent = function (ctx) {
     reserveAgentTurn: reserveAgentTurn,
     releaseAgentTurn: releaseAgentTurn,
     consumeOAuthJti: consumeOAuthJti,
+    saveOAuthGrant: saveOAuthGrant,
+    hasOAuthGrant: hasOAuthGrant,
+    listMcpConnections: listMcpConnections,
+    revokeMcpConnection: revokeMcpConnection,
     saveAgentTurn: saveAgentTurn,
     applyAgentProposal: applyAgentProposal,
     markAgentProposalFailed: markAgentProposalFailed,

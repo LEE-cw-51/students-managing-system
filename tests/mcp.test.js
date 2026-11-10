@@ -470,9 +470,9 @@ describe('/api/mcp route', () => {
     const { POST, GET, DELETE } = await routeP;
     assertUnauthorized(await POST(rpc(LIST)));
     assertUnauthorized(await POST(rpc(LIST, { Authorization: 'Bearer nope' })));
-    const forged = sign({ typ: 'access', ver: '0', exp: Math.floor(Date.now() / 1000) + 60 }).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
+    const forged = sign({ typ: 'access', ver: '0', exp: Math.floor(Date.now() / 1000) + 60 }, 'token').replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
     assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${forged}` })));
-    const expired = sign({ typ: 'access', cid: 'c', ver: '0', exp: Math.floor(Date.now() / 1000) - 1 });
+    const expired = sign({ typ: 'access', cid: 'c', ver: '0', exp: Math.floor(Date.now() / 1000) - 1 }, 'token');
     assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${expired}` })));
     assertUnauthorized(await GET(new Request('https://lms.test/api/mcp')));
     assertUnauthorized(await DELETE(new Request('https://lms.test/api/mcp', { method: 'DELETE' })));

@@ -18,6 +18,8 @@ process.env.NODE_ENV = 'test';
 const oauth = require('../lib/oauth.js');
 const { sign, unsign } = require('../lib/signing.js');
 const { safeNext } = require('../lib/safe-next.js');
+const { sessionValid } = require('../lib/session-version.js');
+const crypto = require('node:crypto');
 const { withService, LMS } = require('../lib/store.js');
 const { createMemoryStore } = require('./memory-store.js');
 
@@ -34,6 +36,12 @@ after(() => {
 const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const VERIFIER = 'abcdefghijklmnopqrstuvwxyz0123456789-._~ABCDEFG';
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** A token as signed before keys were split per purpose: HMAC with AUTH_SECRET itself. */
+function legacySign(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${body}.${crypto.createHmac('sha256', 'test-secret').update(body).digest('base64url')}`;
+}
 
 function authorizeParams(clientId, extra = {}) {
   return {
@@ -172,9 +180,9 @@ describe('oauth token exchange', () => {
     const replay = await exchangeToken(body);
     assert.equal(replay.error, 'invalid_grant');
     assert.equal(replay.tokens, undefined);
-    const { jti, ...withoutJti } = unsign(code);
+    const { jti, ...withoutJti } = unsign(code, 'code');
     assert.ok(jti);
-    const noJti = sign(withoutJti);
+    const noJti = sign(withoutJti, 'code');
     assert.equal((await exchangeToken({ ...body, code: noJti })).error, 'invalid_grant');
   });
 
@@ -195,17 +203,16 @@ describe('oauth token exchange', () => {
     assert.equal((await exchangeToken({ grant_type: 'password' })).error, 'unsupported_grant_type');
   });
 
-  it('rotates refresh tokens: an old one is refused, the new one works', async () => {
+  it('rotates refresh tokens: each new one works once', async () => {
     const { clientId, tokens } = await issueTokens();
     const first = await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
     assert.ok(first.tokens);
-    const reuse = await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
-    assert.equal(reuse.error, 'invalid_grant');
-    assert.equal(reuse.tokens, undefined);
     const second = await exchangeToken({ grant_type: 'refresh_token', refresh_token: first.tokens.refresh_token, client_id: clientId });
     assert.ok(second.tokens);
     assert.ok(await verifyAccessToken(second.tokens.access_token));
-    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: first.tokens.refresh_token })).error, 'invalid_grant');
+    const gid = (t) => unsign(t, 'token').gid;
+    assert.ok(gid(tokens.access_token));
+    assert.equal(gid(second.tokens.refresh_token), gid(tokens.access_token), 'one connection across refreshes');
   });
 
   it('keeps used ids only until they expire', () => {
@@ -232,14 +239,14 @@ describe('oauth token expiry and revocation', () => {
     assert.equal(refresh.error, 'invalid_grant');
 
     const ver = await currentTokenVersion();
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp: nowSec() - 1 })), null);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver })), null, 'no exp');
-    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp: nowSec() + 60 })));
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp: nowSec() - 1 }, 'token')), null);
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver }, 'token')), null, 'no exp');
+    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp: nowSec() + 60 }, 'token')));
   });
 
   it('rejects forged or garbled tokens', async () => {
     const ver = await currentTokenVersion();
-    const good = sign({ typ: 'access', cid: 'c', ver, exp: nowSec() + 60 });
+    const good = sign({ typ: 'access', cid: 'c', ver, exp: nowSec() + 60 }, 'token');
     const [body] = good.split('.');
     const otherSecret = require('node:crypto').createHmac('sha256', 'other').update(body).digest('base64url');
     for (const token of ['', 'abc', 'a.b', `${body}.${otherSecret}`, `${body}.`, null, undefined]) {
@@ -259,6 +266,135 @@ describe('oauth token expiry and revocation', () => {
     // A fresh connection works again on the new version.
     const fresh = await issueTokens();
     assert.ok(await verifyAccessToken(fresh.tokens.access_token));
+  });
+});
+
+describe('oauth replay detection', () => {
+  const refreshWith = (refresh_token) => exchangeToken({ grant_type: 'refresh_token', refresh_token });
+
+  it('a refresh token used twice cuts its connection, and only that one', async () => {
+    const mine = await issueTokens();
+    const other = await issueTokens();
+    const first = await refreshWith(mine.tokens.refresh_token);
+    assert.ok(first.tokens);
+    const reuse = await refreshWith(mine.tokens.refresh_token);
+    assert.equal(reuse.error, 'invalid_grant');
+    assert.match(reuse.error_description, /다시 연결/);
+    assert.equal(await verifyAccessToken(first.tokens.access_token), null);
+    assert.equal((await refreshWith(first.tokens.refresh_token)).error, 'invalid_grant');
+    assert.ok(await verifyAccessToken(other.tokens.access_token));
+    assert.ok((await refreshWith(other.tokens.refresh_token)).tokens);
+  });
+
+  it('a code used twice cuts the tokens it gave', async () => {
+    const { clientId, code } = await issueCode();
+    const body = { grant_type: 'authorization_code', code, code_verifier: VERIFIER, client_id: clientId, redirect_uri: REDIRECT };
+    const { tokens } = await exchangeToken(body);
+    assert.ok(await verifyAccessToken(tokens.access_token));
+    assert.equal((await exchangeToken(body)).error, 'invalid_grant');
+    assert.equal(await verifyAccessToken(tokens.access_token), null);
+    assert.equal((await refreshWith(tokens.refresh_token)).error, 'invalid_grant');
+  });
+
+  it('a replayed refresh token from before connections were recorded cuts every connection', async () => {
+    const other = await issueTokens();
+    const ver = await currentTokenVersion();
+    const old = legacySign({ typ: 'refresh', cid: 'c', ver, sc: '', iat: nowSec(), exp: nowSec() + 600, jti: 'legacy-replay' });
+    assert.ok((await refreshWith(old)).tokens);
+    assert.equal((await refreshWith(old)).error, 'invalid_grant');
+    assert.notEqual(await currentTokenVersion(), ver);
+    assert.equal(await verifyAccessToken(other.tokens.access_token), null);
+  });
+});
+
+describe('connector connections', () => {
+  const gidOf = (tokens) => unsign(tokens.access_token, 'token').gid;
+  const listed = () => withService((api) => api.listMcpConnections());
+
+  it('lists each approved connection and cuts one without touching the others', async () => {
+    const a = await issueTokens();
+    const b = await issueTokens();
+    const rows = await listed();
+    const rowA = rows.find((r) => r.grant_id === gidOf(a.tokens));
+    assert.ok(rowA);
+    assert.equal(rowA.client_name, 'Claude');
+    assert.ok(rowA.created_at);
+    assert.ok(rowA.last_used_at);
+    assert.deepEqual(Object.keys(rowA).sort(), ['client_name', 'created_at', 'grant_id', 'last_used_at']);
+
+    assert.equal(await withService((api) => api.revokeMcpConnection(gidOf(a.tokens))), true);
+    assert.equal(await withService((api) => api.revokeMcpConnection(gidOf(a.tokens))), false);
+    assert.equal(await verifyAccessToken(a.tokens.access_token), null);
+    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: a.tokens.refresh_token })).error, 'invalid_grant');
+    assert.ok(await verifyAccessToken(b.tokens.access_token));
+    const after = await listed();
+    assert.equal(after.some((r) => r.grant_id === gidOf(a.tokens)), false);
+    assert.equal(after.some((r) => r.grant_id === gidOf(b.tokens)), true);
+  });
+
+  it('"연결 끊기" empties the list', async () => {
+    await issueTokens();
+    assert.ok((await listed()).length);
+    await bumpTokenVersion();
+    assert.deepEqual(await listed(), []);
+  });
+
+  it('drops a connection once its refresh token has expired', async (t) => {
+    const { tokens } = await issueTokens();
+    const gid = gidOf(tokens);
+    assert.ok((await listed()).some((r) => r.grant_id === gid));
+    assert.equal(await later(t, REFRESH_TTL + 1, () => listed()).then((rows) => rows.some((r) => r.grant_id === gid)), false);
+  });
+});
+
+describe('signing keys per purpose', () => {
+  const HKDF_SALT = 'students-managing-system/signing/v1';
+  const derivedMac = (info, body) => crypto.createHmac('sha256', Buffer.from(crypto.hkdfSync('sha256', 'test-secret', HKDF_SALT, info, 32))).update(body).digest('base64url');
+
+  it('signs new tokens with a key derived for their purpose, never AUTH_SECRET itself', async () => {
+    const { tokens } = await issueTokens();
+    const [body, mac] = tokens.access_token.split('.');
+    assert.equal(mac, derivedMac('lms/oauth-token', body));
+    assert.notEqual(mac, legacySign(JSON.parse(Buffer.from(body, 'base64url').toString())).split('.')[1]);
+    const session = sign({ ok: true, at: Date.now() }, 'session');
+    assert.equal(session.split('.')[1], derivedMac('lms/session', session.split('.')[0]));
+    const { client } = registerClient({ redirect_uris: [REDIRECT] });
+    assert.equal(client.client_id.split('.')[1], derivedMac('lms/oauth-client', client.client_id.split('.')[0]));
+  });
+
+  it('a token made for one purpose never verifies as another', async () => {
+    const { tokens } = await issueTokens();
+    assert.equal(unsign(tokens.access_token, 'session'), null);
+    assert.equal(unsign(tokens.access_token, 'client'), null);
+    assert.equal(validateAuthorizeParams(authorizeParams(tokens.access_token)).fatal, true);
+    const fakeClient = sign({ typ: 'client', ru: [REDIRECT], name: 'x', iat: nowSec() }, 'token');
+    assert.equal(validateAuthorizeParams(authorizeParams(fakeClient)).fatal, true);
+    const fakeCode = sign({ typ: 'code', cid: 'c', ru: REDIRECT, cc: pkceChallenge(VERIFIER), ver: '0', exp: nowSec() + 60, jti: 'x' }, 'token');
+    assert.equal((await exchangeToken({ grant_type: 'authorization_code', code: fakeCode, code_verifier: VERIFIER, client_id: 'c', redirect_uri: REDIRECT })).error, 'invalid_grant');
+    assert.throws(() => sign({}, 'nope'), /서명 용도/);
+  });
+
+  it('keeps accepting tokens signed with the old key until they expire, so nobody has to sign in or reconnect', async () => {
+    assert.ok(sessionValid(unsign(legacySign({ ok: true, at: Date.now(), sv: '0' }), 'session'), '0'));
+
+    const ver = await currentTokenVersion();
+    assert.ok(await verifyAccessToken(legacySign({ typ: 'access', cid: 'c', ver, iat: nowSec(), exp: nowSec() + 60 })));
+    assert.equal(await verifyAccessToken(legacySign({ typ: 'access', cid: 'c', ver, iat: nowSec() - 7200, exp: nowSec() - 1 })), null);
+
+    const oldClient = legacySign({ typ: 'client', ru: [REDIRECT], name: '예전 Claude', iat: nowSec() - 86400 });
+    const params = validateAuthorizeParams(authorizeParams(oldClient));
+    assert.equal(params.error, undefined);
+    assert.equal(params.clientName, '예전 Claude');
+
+    const oldRefresh = legacySign({ typ: 'refresh', cid: oldClient, ver, sc: '', iat: nowSec(), exp: nowSec() + 600, jti: 'legacy-ok' });
+    const out = await exchangeToken({ grant_type: 'refresh_token', refresh_token: oldRefresh, client_id: oldClient });
+    assert.ok(out.tokens, JSON.stringify(out));
+    const [body, mac] = out.tokens.refresh_token.split('.');
+    assert.equal(mac, derivedMac('lms/oauth-token', body), 'the refreshed token uses the derived key');
+    const gid = unsign(out.tokens.access_token, 'token').gid;
+    assert.ok(gid, 'an old connection gets recorded on its first refresh');
+    const row = (await withService((api) => api.listMcpConnections())).find((r) => r.grant_id === gid);
+    assert.equal(row.client_name, '예전 Claude');
   });
 });
 

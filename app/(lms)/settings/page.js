@@ -151,6 +151,65 @@ function PromotionModal({ onClose, onDone }) {
   );
 }
 
+const stamp = (v) => String(v || '').slice(0, 16).replace('T', ' ');
+
+function McpConnections({ tokenVersion }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const state = useApi(() => api('listMcpConnections'), [tokenVersion]);
+  const [busyId, setBusyId] = useState('');
+  const headId = useId();
+  const revoke = async (c) => {
+    const ok = await confirm({
+      title: '이 연결 끊기',
+      message: `${c.client_name} 연결(${stamp(c.created_at)} 허용)의 접근 권한이 무효가 됩니다. 다른 연결은 그대로입니다.`,
+      confirmLabel: '끊기',
+      danger: true
+    });
+    if (!ok) return;
+    setBusyId(c.grant_id);
+    try {
+      await api('revokeMcpConnection', c.grant_id);
+      toast('연결을 끊었습니다.');
+      state.reload();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setBusyId('');
+    }
+  };
+  return (
+    <div className="field">
+      <span id={headId} style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>연결된 커넥터</span>
+      <div aria-labelledby={headId} role="group">
+        <Async state={state}>
+          {(list) => (list.length ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr><th>이름</th><th>허용한 때</th><th>마지막 갱신</th><th aria-label="끊기" /></tr></thead>
+                <tbody>
+                  {list.map((c) => (
+                    <tr key={c.grant_id}>
+                      <td>{c.client_name}</td>
+                      <td>{stamp(c.created_at)}</td>
+                      <td>{stamp(c.last_used_at)}</td>
+                      <td className="num">
+                        <button type="button" className="btn secondary sm" disabled={busyId === c.grant_id} onClick={() => revoke(c)}>
+                          {busyId === c.grant_id ? '처리 중…' : '끊기'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="st-hint" style={{ margin: 0 }}>연결된 커넥터가 없습니다.</p>)}
+        </Async>
+      </div>
+    </div>
+  );
+}
+
 function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -200,6 +259,7 @@ function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) 
             </div>
           )}
         </Field>
+        <McpConnections tokenVersion={tokenVersion} />
         <div className="st-promote">
           <span className="st-hint" style={{ margin: 0, flex: '1 1 260px' }}>연결 끊기는 지금까지 발급된 Claude 접근 권한을 모두 무효로 만듭니다. 설정 저장과 별개로 바로 적용됩니다.</span>
           <button type="button" className="btn secondary" disabled={busy} onClick={disconnect}>{busy ? '처리 중…' : '연결 끊기…'}</button>
