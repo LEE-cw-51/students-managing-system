@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage({ searchParams }) {
   const params = await searchParams;
   const errored = params?.error === '1';
+  const lockedMinutes = /^locked-(\d{1,3})$/.exec(String(params?.error || ''))?.[1];
   const next = safeNext(params?.next);
   return (
     <div className="login-wrap">
@@ -19,6 +20,7 @@ export default async function LoginPage({ searchParams }) {
           </div>
         </div>
         {errored ? <div className="login-error" role="alert">비밀번호가 올바르지 않습니다.</div> : null}
+        {lockedMinutes ? <div className="login-error" role="alert">로그인 시도가 너무 많습니다. 약 {lockedMinutes}분 뒤에 다시 시도해 주세요.</div> : null}
         <div className="field">
           <label htmlFor="password">비밀번호</label>
           <div className="password-row">

@@ -7,11 +7,14 @@ import {
   isMonthlyAiConfigured
 } from '../../../lib/monthly-ai.js';
 import { errorResponse } from '../../../lib/api-error.js';
+import { guardPost } from '../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(req) {
+  const refused = guardPost(req);
+  if (refused) return refused;
   if (!(await isAuthed())) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
