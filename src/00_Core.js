@@ -1587,32 +1587,37 @@ LMS.initialTextbookHistory = function (name, startDate) {
   return [{ textbook: textbook, from: from, to: '' }];
 };
 
+/** Error for a textbook change without a usable date, or '' when the change needs none. */
+LMS.textbookChangeDateError = function (previousName, nextName, date) {
+  var next = LMS.toStr(nextName);
+  if (LMS.toStr(previousName) === next || LMS.isIsoDate(LMS.toStr(date))) return '';
+  return next ? '교재를 바꿀 때는 시작일을 입력해 주세요.' : '교재를 비울 때는 끝내는 날을 입력해 주세요.';
+};
+
 /**
- * Keep the previous textbook when the name changes. startDate is the first day of the new
- * name (or the first day with no textbook). The previous open period ends the day before.
+ * Keep the previous textbook when the name changes. For a new name, date is its first day and
+ * the previous open period ends the day before. When the name is cleared, date is the last day
+ * of the previous textbook. An unchanged name leaves the history as it is.
  */
-LMS.applyTextbookChange = function (previousName, history, nextName, startDate) {
+LMS.applyTextbookChange = function (previousName, history, nextName, date) {
   var prev = LMS.toStr(previousName);
   var next = LMS.toStr(nextName);
   var rows = LMS.normalizeTextbookHistory(history);
-  if (prev === next) {
-    if (next && !rows.some(function (r) { return !r.to; })) {
-      rows.push({ textbook: next, from: '', to: '' });
-    }
-    return { textbook: next, textbook_history: rows };
-  }
-  var start = LMS.toStr(startDate);
-  if (!LMS.isIsoDate(start)) throw new Error('교재를 바꿀 때는 시작일을 입력해 주세요.');
+  if (prev === next) return { textbook: next, textbook_history: rows };
+  var problem = LMS.textbookChangeDateError(prev, next, date);
+  if (problem) throw new Error(problem);
+  var day = LMS.toStr(date);
   if (!rows.length && prev) rows.push({ textbook: prev, from: '', to: '' });
-  var end = LMS.addDays(start, -1);
+  var end = next ? LMS.addDays(day, -1) : day;
   rows.forEach(function (r) {
     if (r.to) return;
     if (r.from && end < r.from) {
-      throw new Error('새 교재 시작일은 이전 교재가 시작된 다음 날부터 고를 수 있습니다.');
+      throw new Error(next ? '새 교재 시작일은 이전 교재가 시작된 다음 날부터 고를 수 있습니다.'
+        : '교재를 끝내는 날은 이전 교재 시작일부터 고를 수 있습니다.');
     }
     r.to = end;
   });
-  if (next) rows.push({ textbook: next, from: start, to: '' });
+  if (next) rows.push({ textbook: next, from: day, to: '' });
   return { textbook: next, textbook_history: rows };
 };
 

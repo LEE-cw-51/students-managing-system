@@ -35,6 +35,21 @@ describe('errorResponse', () => {
     assert.deepEqual(await other.json(), { ok: false, error: '연결 오류' });
   });
 
+  it('hides database, network and other non-Korean messages behind a generic 500', async (t) => {
+    const logged = [];
+    t.mock.method(console, 'error', (e) => logged.push(e));
+    const pg = Object.assign(new Error('duplicate key value violates unique constraint "kv_pkey"'), { name: 'PostgresError', code: '23505' });
+    const net = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED', errno: -111, syscall: 'connect' });
+    const closed = Object.assign(new Error('write CONNECTION_CLOSED db.example:5432'), { code: 'CONNECTION_CLOSED' });
+    const koreanPg = Object.assign(new Error('관계 "lms.kv"가 없습니다'), { name: 'PostgresError', code: '42P01' });
+    for (const e of [pg, net, closed, koreanPg, new Error('Unexpected token < in JSON')]) {
+      const res = errorResponse(e);
+      assert.equal(res.status, 500);
+      assert.deepEqual(await res.json(), { ok: false, error: '서버 오류가 발생했습니다.' });
+    }
+    assert.deepEqual(logged, [pg, net, closed, koreanPg, logged[4]]);
+  });
+
   it('handles non-Error throws', async () => {
     const res = errorResponse('문자열 오류');
     assert.equal(res.status, 200);

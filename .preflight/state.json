@@ -3,7 +3,7 @@
   "title": "공통 틀 컴팩트화",
   "platform": "responsive",
   "created_at": "2026-11-01T18:30:31+00:00",
-  "stage": "locked",
+  "stage": "review",
   "versions": [
     {
       "v": 1,
@@ -94,17 +94,36 @@
       "created_at": "2026-11-02T03:11:24+00:00",
       "lint": "pass",
       "sha256": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140"
+    },
+    {
+      "v": 11,
+      "file": "wireframes/v11.html",
+      "from": 10,
+      "note": "textbook tracking screens",
+      "created_at": "2026-11-09T15:48:05+00:00",
+      "lint": "pass",
+      "sha256": "32a59994105fcd28f504a26437390a79339cd5e455c059bd8364454da8f8cc92"
+    },
+    {
+      "v": 12,
+      "file": "wireframes/v12.html",
+      "from": 11,
+      "note": "remove bookstore search, register goes straight to editor",
+      "created_at": "2026-11-09T16:07:35+00:00",
+      "lint": "pass",
+      "sha256": "6a0b48269feacc3b69b93d914daaa8348d39506872d5599914bcfb2f47d4e12b"
+    },
+    {
+      "v": 13,
+      "file": "wireframes/v13.html",
+      "from": 10,
+      "note": "unit-based progress, outstanding homework dashboard",
+      "created_at": "2026-11-09T16:54:11+00:00",
+      "lint": "pass",
+      "sha256": "5d2b613d74a5a2e36fe9c765e3ce3cee2c4e85aa710e9d2c47eb8afe48decfa0"
     }
   ],
-  "lock": {
-    "version": 10,
-    "source": "wireframes/v10.html",
-    "sha256_source": "ac579b2ee9e2dba5b7ee3c77fb42782baef9cb2de3d49d1efa48386e0043a140",
-    "sha256_lock": "9fc58c8b90df731306c2cbe2127441a44fbd2e6642e9ba57b66e6b5eedc0b8cd",
-    "approved_at": "2026-11-02T03:14:12+00:00",
-    "quote": "좋아요, 위 답대로 확정하고 구현",
-    "evidence": "unverified"
-  },
+  "lock": null,
   "gate": {
     "skipped": false,
     "extra_paths": [],
@@ -615,6 +634,91 @@
       "event": "approve",
       "v": 10,
       "evidence": "unverified"
+    },
+    {
+      "ts": "2026-11-09T15:48:05+00:00",
+      "event": "reopen",
+      "was": 10,
+      "reason": "교재·강의 계획·숙제 연동 화면 추가"
+    },
+    {
+      "ts": "2026-11-09T15:48:05+00:00",
+      "event": "new",
+      "v": 11,
+      "from": 10,
+      "note": "textbook tracking screens"
+    },
+    {
+      "ts": "2026-11-09T15:52:07+00:00",
+      "event": "check",
+      "v": 11,
+      "lint_errors": 15,
+      "rules": [
+        "layout/grid-wrapper"
+      ]
+    },
+    {
+      "ts": "2026-11-09T15:52:52+00:00",
+      "event": "check",
+      "v": 11,
+      "violations": [],
+      "hints": 5
+    },
+    {
+      "ts": "2026-11-09T15:53:07+00:00",
+      "event": "check",
+      "v": 11,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-09T15:54:11+00:00",
+      "event": "check",
+      "v": 11,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-09T15:54:39+00:00",
+      "event": "check",
+      "v": 11,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-09T16:07:35+00:00",
+      "event": "new",
+      "v": 12,
+      "from": 11,
+      "note": "remove bookstore search, register goes straight to editor"
+    },
+    {
+      "ts": "2026-11-09T16:08:30+00:00",
+      "event": "check",
+      "v": 12,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-09T16:54:11+00:00",
+      "event": "new",
+      "v": 13,
+      "from": 10,
+      "note": "unit-based progress, outstanding homework dashboard"
+    },
+    {
+      "ts": "2026-11-09T16:55:49+00:00",
+      "event": "check",
+      "v": 13,
+      "violations": [],
+      "hints": 4
+    },
+    {
+      "ts": "2026-11-09T16:56:11+00:00",
+      "event": "check",
+      "v": 13,
+      "violations": [],
+      "hints": 4
     }
   ]
 }

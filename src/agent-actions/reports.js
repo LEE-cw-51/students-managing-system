@@ -1,15 +1,27 @@
 /**
- * AI write actions: monthly reports (리포트). Same shape as LMS.AGENT_WRITE_ACTIONS in
- * 07_Agent.js ({ label, preview, run, verify }); each name needs a tool in lib/mcp-tools/write-reports.js.
+ * AI write actions: monthly reports (리포트). Definition shape: src/08_AgentActions.js.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
-  LMS = require('../07_Agent.js');
+  LMS = require('../00_Core.js');
 }
 
-LMS.registerAgentWriteActions({
+var actions = {
   save_monthly_report: {
     label: '월간 리포트 저장',
+    progress: '월간 리포트 저장 준비 중',
+    description: '학생의 월간 리포트를 저장합니다. 같은 달 리포트가 이미 있으면 내용과 상태를 덮어씁니다. 확정은 학부모에게 보낼 최종본이므로 사용자가 원할 때만 씁니다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        student_id: LMS.AGENT_PARAM.studentId,
+        year: { type: 'integer', description: '연도 (예: 2026)' },
+        month: { type: 'integer', minimum: 1, maximum: 12, description: '월 (1~12)' },
+        report_text: { type: 'string', description: '리포트 전체 내용' },
+        status: { type: 'string', enum: LMS.REPORT_STATUS, description: '임시(기본) 또는 확정' }
+      },
+      required: ['student_id', 'year', 'month', 'report_text']
+    },
     preview: function (svc, args) {
       args = args || {};
       var studentId = LMS.toStr(args.student_id);
@@ -47,8 +59,8 @@ LMS.registerAgentWriteActions({
       return { ok: ok, after: row ? LMS.toStr(row.status) : '' };
     }
   }
-});
+};
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = LMS;
+  module.exports = actions;
 }

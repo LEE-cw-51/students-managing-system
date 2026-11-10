@@ -1,17 +1,40 @@
 /**
- * AI write actions: lesson records (student lessons, class records, class notices). Same shape as
- * LMS.AGENT_WRITE_ACTIONS in 07_Agent.js ({ label, preview, run, verify }); each name needs a tool
- * in lib/mcp-tools/write-lessons.js.
+ * AI write actions: lesson records (attendance, student lessons, class records, class notices).
+ * Definition shape: src/08_AgentActions.js.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
-  LMS = require('../07_Agent.js');
+  LMS = require('../00_Core.js');
 }
 
-var LES_STUDENT_FIELDS_ = [
-  'attendance', 'test_status', 'test_score', 'test_max_score', 'test_difficulty', 'assignment_completion',
-  'concentration', 'special_note', 'student_notice'
-];
+var STUDENT_ID = LMS.AGENT_PARAM.studentId;
+var CLASS_ID = LMS.AGENT_PARAM.classId;
+var DATE = LMS.AGENT_PARAM.date;
+
+var LESSON_PARAMS = {
+  attendance: { type: 'string', enum: LMS.ATTENDANCE, description: '출석 또는 결석 (기본 출석)' },
+  test_status: { type: 'string', enum: LMS.TEST_STATUS, description: '테스트 실시 여부 (기본 미실시)' },
+  test_score: { type: 'number', description: '테스트 점수 (실시일 때)' },
+  test_max_score: { type: 'number', description: '테스트 만점 (비우면 그날 반 기록의 만점)' },
+  test_difficulty: { type: 'string', enum: LMS.DIFFICULTY, description: '테스트 난이도' },
+  assignment_completion: { type: 'string', enum: LMS.ASSIGNMENT, description: '과제 이행 등급 A–F' },
+  concentration: { type: 'string', enum: LMS.CONCENTRATION, description: '수업 집중도 A–D, 결석이면 ABSENT' },
+  special_note: { type: 'string', description: '특이사항' },
+  student_notice: { type: 'string', description: '학생·학부모 전달사항' }
+};
+
+var SESSION_PARAMS = {
+  progress: { type: 'string', description: '진도' },
+  content: { type: 'string', description: '수업 내용' },
+  test_title: { type: 'string', description: '테스트 제목' },
+  test_max_score: { type: 'number', description: '테스트 만점' },
+  test_difficulty: { type: 'string', enum: LMS.DIFFICULTY, description: '테스트 난이도' },
+  test_scope: { type: 'string', description: '시험 범위' },
+  class_notice: { type: 'string', description: '반 공지' },
+  memo: { type: 'string', description: '메모' }
+};
+
+var LES_STUDENT_FIELDS_ = Object.keys(LESSON_PARAMS);
 // Class values: an edit on one student row becomes the class record of that day.
 var LES_CLASS_FIELDS_ = ['progress', 'homework'];
 var LES_LABELS_ = {
@@ -132,9 +155,55 @@ function lesNames_(names) {
   return names.length > 10 ? names.slice(0, 10).join(', ') + ' 외 ' + (names.length - 10) + '명' : names.join(', ');
 }
 
-LMS.registerAgentWriteActions({
+var actions = {
+  update_attendance: {
+    label: '출결 변경',
+    progress: '출결 변경 준비 중',
+    description: '[승인 필요] 이미 기록된 수업의 출결을 바꿉니다. lesson_id는 get_attendance 또는 get_student_lessons에서 찾습니다. 그날 수업 기록이 없으면 쓸 수 없으니, 수업 기록 화면에서 먼저 기록하도록 안내합니다.',
+    surfaces: ['assistant', 'mcp'],
+    parameters: {
+      type: 'object',
+      properties: {
+        lesson_id: { type: 'string', description: '수업 기록 ID (예: LES-0012)' },
+        attendance: { type: 'string', enum: LMS.ATTENDANCE, description: '출석 또는 결석' }
+      },
+      required: ['lesson_id', 'attendance']
+    },
+    preview: function (svc, args) {
+      var lessonId = LMS.toStr(args && args.lesson_id);
+      var attendance = LMS.assertEnum(LMS.toStr(args && args.attendance), LMS.ATTENDANCE, '출석');
+      var row = LMS.findById(svc.table('Lessons'), 'lesson_id', lessonId);
+      if (!row) throw new Error('수업 기록(' + (lessonId || '없음') + ')을 찾을 수 없습니다. 수업 기록이 있는 날만 출결을 바꿀 수 있습니다.');
+      var name = LMS.agentStudentName(svc.table, row.student_id);
+      var before = LMS.toStr(row.attendance);
+      return {
+        args: { lesson_id: lessonId, attendance: attendance },
+        target: { student_id: LMS.toStr(row.student_id), student_name: name, date: row.lesson_date, class_name: LMS.agentClassName(svc.table, row.class_id) },
+        before: before,
+        after: attendance,
+        text: name + ' · ' + row.lesson_date + ' ' + LMS.agentClassName(svc.table, row.class_id) + ' 출결: ' + (before || '없음') + ' → ' + attendance
+      };
+    },
+    run: function (svc, args) {
+      return svc.api.updateLessonAttendance({ lesson_id: args.lesson_id, attendance: args.attendance });
+    },
+    verify: function (svc, args) {
+      var row = LMS.findById(svc.table('Lessons'), 'lesson_id', args.lesson_id);
+      var after = row ? LMS.toStr(row.attendance) : '';
+      return { ok: after === args.attendance, after: after };
+    }
+  },
+
   save_lesson: {
     label: '수업 기록 추가',
+    progress: '수업 기록 추가 준비 중',
+    description: '학생 한 명의 하루 수업 기록을 새로 만듭니다. 이미 그날 기록이 있으면 update_lesson을 씁니다(get_student_lessons로 lesson_id 확인). 진도·숙제처럼 반 전체 값은 save_class_session을 씁니다.',
+    destructive: false,
+    parameters: {
+      type: 'object',
+      properties: Object.assign({ student_id: STUDENT_ID, class_id: CLASS_ID, lesson_date: DATE('수업일') }, LESSON_PARAMS),
+      required: ['student_id', 'class_id', 'lesson_date']
+    },
     preview: function (svc, args) {
       args = args || {};
       var student = lesStudent_(svc, args.student_id);
@@ -165,6 +234,16 @@ LMS.registerAgentWriteActions({
 
   update_lesson: {
     label: '수업 기록 수정',
+    progress: '수업 기록 수정 준비 중',
+    description: '이미 있는 수업 기록을 고칩니다. 바꿀 항목만 넣습니다. lesson_id는 get_student_lessons 또는 get_attendance에서 찾습니다. progress·homework를 바꾸면 그날 반 기록이 바뀌어 같은 반 학생 모두에게 반영됩니다.',
+    parameters: {
+      type: 'object',
+      properties: Object.assign({ lesson_id: { type: 'string', description: '수업 기록 ID (예: LES-0012)' } }, LESSON_PARAMS, {
+        progress: { type: 'string', description: '진도 (반 기록)' },
+        homework: { type: 'string', description: '숙제 (반 기록)' }
+      }),
+      required: ['lesson_id']
+    },
     preview: function (svc, args) {
       args = args || {};
       var row = LMS.findById(svc.table('Lessons'), 'lesson_id', lesStr_(args.lesson_id));
@@ -204,13 +283,30 @@ LMS.registerAgentWriteActions({
 
   save_lessons_batch: {
     label: '수업 기록 일괄 저장',
+    progress: '수업 기록 저장 준비 중',
+    description: '한 반의 하루 수업 기록을 여러 학생 한꺼번에 저장합니다. 이미 기록이 있는 학생은 덮어쓰고, 넣지 않은 항목은 비워집니다. 학생 명단은 get_class_members로 찾습니다.',
+    parameters: {
+      type: 'object',
+      properties: {
+        class_id: CLASS_ID,
+        lesson_date: DATE('수업일'),
+        items: {
+          type: 'array',
+          maxItems: LMS.AGENT_BATCH_MAX,
+          description: '학생별 기록 (최대 ' + LMS.AGENT_BATCH_MAX + '명)',
+          items: { type: 'object', properties: Object.assign({ student_id: STUDENT_ID }, LESSON_PARAMS), required: ['student_id'] }
+        },
+        class_notice: { type: 'string', description: '반 공지 (선택)' }
+      },
+      required: ['class_id', 'lesson_date', 'items']
+    },
+    limits: { items: '명' },
     preview: function (svc, args) {
       args = args || {};
       var cls = lesClass_(svc, args.class_id);
       var date = lesDate_(args.lesson_date);
       var list = Array.isArray(args.items) ? args.items : [];
       if (!list.length) throw new Error('저장할 학생 기록(items)을 하나 이상 넣어 주세요.');
-      LMS.assertAgentBatch(list, '명');
       var seen = {};
       var fresh = [];
       var overwrite = [];
@@ -260,6 +356,13 @@ LMS.registerAgentWriteActions({
 
   save_class_session: {
     label: '반 수업 기록',
+    progress: '반 수업 기록 준비 중',
+    description: '반의 하루 기록(진도·수업 내용·테스트 정보·시험 범위·공지·메모)을 저장합니다. 바꿀 항목만 넣습니다. 그날 학생 기록에도 진도와 테스트 정보가 함께 반영됩니다. class_id는 list_classes로 찾습니다.',
+    parameters: {
+      type: 'object',
+      properties: Object.assign({ class_id: CLASS_ID, lesson_date: DATE('수업일') }, SESSION_PARAMS),
+      required: ['class_id', 'lesson_date']
+    },
     preview: function (svc, args) {
       args = args || {};
       var cls = lesClass_(svc, args.class_id);
@@ -298,6 +401,13 @@ LMS.registerAgentWriteActions({
 
   save_class_session_notice: {
     label: '반 공지',
+    progress: '반 공지 준비 중',
+    description: '반의 하루 공지를 바꿉니다. 빈 문자열이면 공지를 지웁니다. class_id는 list_classes로 찾습니다.',
+    parameters: {
+      type: 'object',
+      properties: { class_id: CLASS_ID, lesson_date: DATE('수업일'), text: { type: 'string', description: '공지 내용 (빈 값이면 삭제)' } },
+      required: ['class_id', 'lesson_date', 'text']
+    },
     preview: function (svc, args) {
       args = args || {};
       var cls = lesClass_(svc, args.class_id);
@@ -321,8 +431,8 @@ LMS.registerAgentWriteActions({
       return { ok: after === args.text, after: after };
     }
   }
-});
+};
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = LMS;
+  module.exports = actions;
 }

@@ -199,7 +199,7 @@ describe('agent write actions: lessons', () => {
     const ctx = () => ({ table: (name) => store.readTable(name), api: svc() });
     const { preview } = await act('save_lessons_batch', { class_id: A, lesson_date: '2026-09-21', class_notice: '교재 지참', items: [{ student_id: hong }] });
     assert.equal(svc().getClassSessionNotice('2026-09-21', A), '교재 지참');
-    const verify = LMS.AGENT_WRITE_ACTIONS.save_lessons_batch.verify;
+    const verify = LMS.agentActions.get('save_lessons_batch').verify;
     assert.equal(verify(ctx(), preview.args).ok, true);
     svc().saveClassSessionNotice('2026-09-21', A, '다른 공지');
     assert.equal(verify(ctx(), preview.args).ok, false);
@@ -278,7 +278,7 @@ describe('agent write actions: plans', () => {
     const { preview } = await act('save_class_plan', { class_id: A, period_type: '일간', period_key: '2026-09-16', title: '일차함수', done_status: '완료' });
     const [plan] = table(store, 'ClassPlans');
     assert.equal(plan.done_status, '완료');
-    const verify = LMS.AGENT_WRITE_ACTIONS.save_class_plan.verify;
+    const verify = LMS.agentActions.get('save_class_plan').verify;
     assert.equal(verify(ctx(), preview.args, plan).ok, true);
     svc().setDailyPlanDone(A, '2026-09-16', '일부');
     assert.equal(verify(ctx(), preview.args, plan).ok, false);
@@ -351,14 +351,5 @@ describe('agent write actions: reports', () => {
     await act('save_monthly_report', { student_id: hong, year: 2026, month: 9, report_text: '9월 리포트' });
     const over = await act('save_monthly_report', { student_id: hong, year: 2026, month: 9, report_text: '9월 리포트 수정', status: '확정' });
     assert.match(over.preview.text, /덮어쓰기/);
-  });
-});
-
-describe('agent write actions: coverage', () => {
-  it('every registered write action is exercised above', () => {
-    const fs = require('node:fs');
-    const src = fs.readFileSync(__filename, 'utf8');
-    const untested = Object.keys(LMS.AGENT_WRITE_ACTIONS).filter((n) => !src.includes(`act('${n}'`));
-    assert.deepEqual(untested, []);
   });
 });

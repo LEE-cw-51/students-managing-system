@@ -45,15 +45,20 @@ if ! sudo -u postgres psql -d lms -tAc \
     sudo -u postgres psql -d lms -v ON_ERROR_STOP=1 -f "$f"
   done
 fi
+# Later migrations that are safe to re-run, for databases created before them.
+sudo -u postgres psql -d lms -v ON_ERROR_STOP=1 -f supabase/migrations/20261110000000_login_attempts.sql >/dev/null
 
 # --- Dev environment file (generated; never committed) --------------------
 if [ ! -f .env.local ]; then
+  LMS_PASSWORD="$(openssl rand -base64 24 2>/dev/null || head -c 24 /dev/urandom | base64)"
+  LMS_PASSWORD="$(printf '%s' "$LMS_PASSWORD" | tr -d '\n')"
   cat > .env.local <<EOF
 DATABASE_URL=postgres://lms_app:lms_local_pw@127.0.0.1:5432/lms
 AUTH_SECRET=$(openssl rand -hex 32)
-LMS_PASSWORD=math1234
+LMS_PASSWORD=$LMS_PASSWORD
 LMS_TZ=Asia/Seoul
 EOF
+  echo "install.sh: generated dev LMS_PASSWORD (saved in .env.local, shown once): $LMS_PASSWORD"
 fi
 
 # --- Node dependencies ----------------------------------------------------

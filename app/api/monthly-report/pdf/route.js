@@ -3,14 +3,19 @@ import { isAuthed } from '../../../../lib/auth.js';
 import { withService } from '../../../../lib/store.js';
 import { renderMonthlyReportPdf } from '../../../../lib/monthly-pdf.js';
 import { errorResponse } from '../../../../lib/api-error.js';
+import { guardPost } from '../../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
+
+const REPORT_TEXT_MAX = 100000;
 
 function safeFilename(name) {
   return String(name || 'report').replace(/[^\w\u3131-\uD79D.-]+/g, '_').slice(0, 80);
 }
 
 export async function POST(req) {
+  const refused = guardPost(req);
+  if (refused) return refused;
   if (!(await isAuthed())) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
@@ -25,6 +30,9 @@ export async function POST(req) {
   }
   if (!reportText) {
     return NextResponse.json({ ok: false, error: 'PDF로 내보낼 보고서 내용이 없습니다.' }, { status: 400 });
+  }
+  if (reportText.length > REPORT_TEXT_MAX) {
+    return NextResponse.json({ ok: false, error: '보고서 내용은 100,000자까지 PDF로 만들 수 있습니다.' }, { status: 400 });
   }
 
   try {

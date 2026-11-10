@@ -18,7 +18,7 @@ process.env.NODE_ENV = 'test';
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, getAgentTool, mcpTools, toolDefinitions } = require('../lib/agent-tools.js');
-const { MCP_READ_TOOLS, MCP_WRITE_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/mcp-tools/index.js');
+const { MCP_READ_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/mcp-tools/index.js');
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
 const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
 const { applyProposal, applyProposals, rejectProposals } = require('../lib/agent.js');
@@ -152,7 +152,7 @@ describe('mcp write modes', () => {
 
 describe('mcp tool surfaces', () => {
   const MCP_ONLY_READS = MCP_READ_TOOLS.map((t) => t.name);
-  const MCP_ONLY_WRITES = MCP_WRITE_TOOLS.map((t) => t.name);
+  const MCP_ONLY_WRITES = LMS.agentActions.list().filter((a) => !a.surfaces.includes('assistant')).map((a) => a.name);
   const MCP_ONLY = [...MCP_ONLY_READS, ...MCP_ONLY_WRITES, ...MCP_APPROVAL_TOOLS.map((t) => t.name)];
 
   it('read_only lists every read tool, including the MCP-only ones, and no write tool', () => {
@@ -167,13 +167,13 @@ describe('mcp tool surfaces', () => {
     assert.equal(MCP_ONLY_WRITES.length, 46);
     const names = listTools('proposal').map((t) => t.name);
     WRITE_NAMES.forEach((n) => assert.ok(names.includes(n), n));
-    assert.deepEqual([...WRITE_NAMES].sort(), Object.keys(LMS.AGENT_WRITE_ACTIONS).sort());
+    assert.deepEqual([...WRITE_NAMES].sort(), LMS.agentActions.list().map((a) => a.name).sort());
   });
 
   it('never exposes a settings writer; get_settings hides tokens and allowed emails', async () => {
     const names = mcpTools().map((t) => t.name);
     assert.deepEqual(names.filter((n) => /setting/.test(n)), ['get_settings']);
-    assert.ok(!Object.keys(LMS.AGENT_WRITE_ACTIONS).some((n) => /setting/i.test(n)));
+    assert.ok(!LMS.agentActions.list().some((a) => /setting/i.test(a.name)));
     const { api, run } = setup();
     api.saveSettings({ mcp_token_version: '7', allowed_emails: 'a@b.c', academy_name: '테스트 학원' });
     const out = parse(await handleToolCall('get_settings', {}, { run, mode: 'proposal' }));

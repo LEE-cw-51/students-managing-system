@@ -53,10 +53,43 @@ describe('textbook history', () => {
       () => api.updateClass(Object.assign({}, next, { textbook: '블랙라벨', textbook_started_on: '2026-07-01' })),
       /다음 날/
     );
+    assert.throws(() => api.updateClass(Object.assign({}, next, { textbook: '' })), /끝내는 날/);
+    assert.throws(
+      () => api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-06-30' })),
+      /끝내는 날/
+    );
     const cleared = api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-09-01' }));
     assert.equal(cleared.textbook, '');
-    assert.equal(cleared.textbook_history.length, 2);
-    assert.equal(cleared.textbook_history[1].to, '2026-08-31');
+    assert.deepEqual(cleared.textbook_history, [
+      { textbook: '개념원리', from: '2026-03-01', to: '2026-06-30' },
+      { textbook: '쎈', from: '2026-07-01', to: '2026-09-01' }
+    ]);
+  });
+
+  it('leaves the history alone when the textbook is unchanged', () => {
+    const store = createMemoryStore({ today: '2026-09-14' });
+    const closed = [{ textbook: '개념원리', from: '2026-03-01', to: '2026-06-30' }];
+    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', textbook: '개념원리', textbook_history: closed, status: '운영' }]);
+    const api = LMS.createService(store);
+    const once = api.updateClass(Object.assign({}, api.getClass('CLS_1'), { memo: '한 번' }));
+    const twice = api.updateClass(Object.assign({}, once, { memo: '두 번' }));
+    assert.deepEqual(once.textbook_history, closed);
+    assert.deepEqual(twice.textbook_history, closed);
+  });
+
+  it('update_class preview needs a date when the textbook changes', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반', textbook: '개념원리', textbook_started_on: '2026-03-01' });
+    assert.throws(() => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '쎈' }), /시작일을 입력/);
+    assert.throws(() => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '' }), /끝내는 날을 입력/);
+    assert.throws(
+      () => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '쎈', textbook_started_on: '2026-03-01' }),
+      /다음 날/
+    );
+    const preview = api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '', textbook_started_on: '2026-08-31' });
+    assert.equal(preview.args.textbook_started_on, '2026-08-31');
+    const same = api.previewAgentAction('update_class', { class_id: c.class_id, textbook: ' 개념원리 ', memo: '메모' });
+    assert.equal(same.args.textbook, undefined);
   });
 
   it('backfills an open period for classes that already have a textbook', () => {

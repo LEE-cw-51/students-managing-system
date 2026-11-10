@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server';
 import { isAuthed } from '../../../lib/auth.js';
 import { withService, isPublicApi } from '../../../lib/store.js';
 import { errorResponse } from '../../../lib/api-error.js';
+import { guardPost } from '../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
 
 export async function POST(req, ctx) {
+  const refused = guardPost(req);
+  if (refused) return refused;
   if (!(await isAuthed())) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }

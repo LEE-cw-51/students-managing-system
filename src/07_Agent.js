@@ -4,6 +4,7 @@
  * The assistant only reads through view functions. Every change it wants is stored as a
  * proposal (AgentProposals) and runs only when the teacher approves it, through the same
  * service functions the screens use. After running, each change is read back and checked.
+ * The changes that can be proposed are the write actions of 08_AgentActions.js.
  * Conversation rows are notes for context; the business tables stay the source of truth.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
@@ -34,154 +35,12 @@ function conversationNotFound_() {
   return e;
 }
 
-function agentStudentName_(table, studentId) {
-  var s = LMS.findById(table('Students'), 'student_id', studentId);
-  return s ? LMS.toStr(s.name) : LMS.toStr(studentId);
-}
-
-function agentClassName_(table, classId) {
-  var c = LMS.findById(table('Classes'), 'class_id', classId);
-  return c ? LMS.toStr(c.class_name) : LMS.toStr(classId);
-}
-
-/**
- * Changes the assistant may propose. Each action:
- * - preview(svc, args): validates without writing; returns { args, target, before, after, text }
- * - run(svc, args): performs the change through a service function
- * - verify(svc, args, ran): reads the stored data back; returns { ok, after }
- * svc is { table, api }. Errors carry a Korean message meant for the teacher (and the model).
- */
-LMS.AGENT_WRITE_ACTIONS = {
-  update_attendance: {
-    label: '출결 변경',
-    preview: function (svc, args) {
-      var lessonId = LMS.toStr(args && args.lesson_id);
-      var attendance = LMS.assertEnum(LMS.toStr(args && args.attendance), LMS.ATTENDANCE, '출석');
-      var row = LMS.findById(svc.table('Lessons'), 'lesson_id', lessonId);
-      if (!row) throw new Error('수업 기록(' + (lessonId || '없음') + ')을 찾을 수 없습니다. 수업 기록이 있는 날만 출결을 바꿀 수 있습니다.');
-      var name = agentStudentName_(svc.table, row.student_id);
-      var before = LMS.toStr(row.attendance);
-      return {
-        args: { lesson_id: lessonId, attendance: attendance },
-        target: { student_id: LMS.toStr(row.student_id), student_name: name, date: row.lesson_date, class_name: agentClassName_(svc.table, row.class_id) },
-        before: before,
-        after: attendance,
-        text: name + ' · ' + row.lesson_date + ' ' + agentClassName_(svc.table, row.class_id) + ' 출결: ' + (before || '없음') + ' → ' + attendance
-      };
-    },
-    run: function (svc, args) {
-      return svc.api.updateLessonAttendance({ lesson_id: args.lesson_id, attendance: args.attendance });
-    },
-    verify: function (svc, args) {
-      var row = LMS.findById(svc.table('Lessons'), 'lesson_id', args.lesson_id);
-      var after = row ? LMS.toStr(row.attendance) : '';
-      return { ok: after === args.attendance, after: after };
-    }
-  },
-
-  create_counseling: {
-    label: '상담 기록',
-    preview: function (svc, args) {
-      args = args || {};
-      var input = LMS.validateCounselingNoteInput({
-        student_id: args.student_id,
-        kind: LMS.toStr(args.kind) || '학생',
-        counsel_date: args.counsel_date,
-        title: args.title,
-        content: args.content,
-        follow_up_date: args.follow_up_date,
-        follow_up_title: args.follow_up_title
-      }, false);
-      if (!LMS.findById(svc.table('Students'), 'student_id', input.student_id)) throw new Error('학생 정보를 찾을 수 없습니다.');
-      var name = agentStudentName_(svc.table, input.student_id);
-      delete input.note_id;
-      var follow = input.follow_up_date ? ' (후속: ' + input.follow_up_date + ' ' + input.follow_up_title + ')' : '';
-      return {
-        args: input,
-        target: { student_id: input.student_id, student_name: name, date: input.counsel_date },
-        before: '',
-        after: input.content,
-        text: name + ' · ' + input.counsel_date + ' ' + input.kind + ' 상담 기록 추가' + (input.title ? ' 「' + input.title + '」' : '') + follow
-      };
-    },
-    run: function (svc, args) {
-      return svc.api.saveCounselingNote(args);
-    },
-    verify: function (svc, args, ran) {
-      var id = ran && ran.note_id;
-      var row = id ? LMS.findById(svc.table('CounselingNotes'), 'note_id', id) : null;
-      return { ok: Boolean(row) && LMS.toStr(row.content) === LMS.toStr(args.content), after: id || '' };
-    }
-  },
-
-  update_task_status: {
-    label: '할 일 상태',
-    preview: function (svc, args) {
-      var taskId = LMS.toStr(args && args.task_id);
-      var status = LMS.assertEnum(LMS.toStr(args && args.status), LMS.TASK_STATUS, '할 일 상태');
-      var task = LMS.findById(svc.table('Tasks'), 'task_id', taskId);
-      if (!task) throw new Error('할 일(' + (taskId || '없음') + ')을 찾을 수 없습니다.');
-      var who = task.student_id ? agentStudentName_(svc.table, task.student_id) + ' · ' : '';
-      return {
-        args: { task_id: taskId, status: status },
-        target: { student_id: LMS.toStr(task.student_id), student_name: who ? agentStudentName_(svc.table, task.student_id) : '', date: LMS.toStr(task.due_date) },
-        before: LMS.toStr(task.status),
-        after: status,
-        text: who + '할 일 「' + LMS.toStr(task.title) + '」: ' + LMS.toStr(task.status) + ' → ' + status
-      };
-    },
-    run: function (svc, args) {
-      return svc.api.updateTaskStatus(args.task_id, args.status);
-    },
-    verify: function (svc, args) {
-      var task = LMS.findById(svc.table('Tasks'), 'task_id', args.task_id);
-      var after = task ? LMS.toStr(task.status) : '';
-      return { ok: after === args.status, after: after };
-    }
-  }
-};
-
-// Shared with the per-area action files (src/agent-actions/).
-LMS.agentStudentName = agentStudentName_;
-LMS.agentClassName = agentClassName_;
-
-/** Most students / rows / classes / titles one write call may carry (about a large class). */
-LMS.AGENT_BATCH_MAX = 50;
-/** Homework checks are students × items, so one class's full check-off needs more room. */
-LMS.AGENT_CHECKS_MAX = 300;
-
-/** Throws when a bulk input holds more than max entries; unit is the counter word (명, 건, 개). */
-LMS.assertAgentBatch = function (list, unit, max) {
-  max = max || LMS.AGENT_BATCH_MAX;
-  if (Array.isArray(list) && list.length > max) {
-    throw new Error('한 번에 ' + max + unit + '까지 넣을 수 있습니다. 나눠서 요청해 주세요.');
-  }
-};
-
-/** Adds actions (same shape as above) to AGENT_WRITE_ACTIONS; a name may be added only once. */
-LMS.registerAgentWriteActions = function (actions) {
-  Object.keys(actions).forEach(function (name) {
-    if (Object.prototype.hasOwnProperty.call(LMS.AGENT_WRITE_ACTIONS, name)) throw new Error('Duplicate agent write action: ' + name);
-    var a = actions[name];
-    if (!a || typeof a.preview !== 'function' || typeof a.run !== 'function' || typeof a.verify !== 'function') {
-      throw new Error('Agent write action needs preview, run and verify: ' + name);
-    }
-    LMS.AGENT_WRITE_ACTIONS[name] = a;
-  });
-};
-
 LMS.createAgent = function (ctx) {
   var table = ctx.table;
   var saveTable = ctx.saveTable;
 
   function svc() {
     return { table: table, api: ctx.service() };
-  }
-
-  function writeAction(tool) {
-    var action = Object.prototype.hasOwnProperty.call(LMS.AGENT_WRITE_ACTIONS, tool) ? LMS.AGENT_WRITE_ACTIONS[tool] : null;
-    if (!action) throw new Error('지원하지 않는 변경입니다: ' + tool);
-    return action;
   }
 
   function requireProposal(proposalId) {
@@ -282,7 +141,7 @@ LMS.createAgent = function (ctx) {
 
   /** Server-only: check one proposed change without writing. Throws when it cannot run. */
   function previewAgentAction(tool, args) {
-    return writeAction(tool).preview(svc(), args || {});
+    return LMS.agentActions.preview(svc(), tool, args);
   }
 
   /**
@@ -384,7 +243,7 @@ LMS.createAgent = function (ctx) {
     var proposal = null;
     var calls = (Array.isArray(data.calls) ? data.calls : []).map(function (c) {
       var preview = c.preview || previewAgentAction(c.tool, c.args);
-      return { tool: c.tool, label: writeAction(c.tool).label, args: preview.args, target: preview.target, before: preview.before, after: preview.after, text: preview.text };
+      return { tool: c.tool, label: LMS.agentActions.get(c.tool).label, args: preview.args, target: preview.target, before: preview.before, after: preview.after, text: preview.text };
     });
     if (calls.length) {
       var proposals = table('AgentProposals');
@@ -449,11 +308,7 @@ LMS.createAgent = function (ctx) {
     var s = svc();
     var results = calls.map(function (c, i) {
       if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
-      var action = writeAction(c.tool);
-      // Re-check against the current data: something may have changed since the proposal.
-      var preview = action.preview(s, c.args);
-      var ran = action.run(s, preview.args);
-      var check = action.verify(s, preview.args, ran);
+      var check = LMS.agentActions.apply(s, c.tool, c.args);
       return { tool: c.tool, text: c.text, ok: check.ok, after: check.after };
     });
     var rows = table('AgentProposals');

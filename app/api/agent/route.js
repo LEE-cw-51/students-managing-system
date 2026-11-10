@@ -4,6 +4,7 @@ import { withService } from '../../../lib/store.js';
 import { isAgentConfigured } from '../../../lib/ai-client.js';
 import { runAgentTurn } from '../../../lib/agent.js';
 import { errorDetails, errorResponse } from '../../../lib/api-error.js';
+import { guardPost } from '../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -14,6 +15,8 @@ export const maxDuration = 60;
  * final `{ type: 'done', data }` or `{ type: 'error', error, code }` line.
  */
 export async function POST(req) {
+  const refused = guardPost(req);
+  if (refused) return refused;
   if (!(await isAuthed())) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
