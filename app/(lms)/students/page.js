@@ -15,7 +15,6 @@ import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, relativeDay, shortDate, telHref } from '@/lib/format';
-import { examDDayLabel, mathExamLabel } from '@/lib/term';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useUrlState } from '@/components/ui/useUrlState';
 import { SortTh, useSort } from '@/components/ui/useSort';
@@ -56,11 +55,11 @@ function StudentsView() {
 }
 
 function ExamTag({ exam }) {
-  return <span className={'tag ' + (exam.in_progress || exam.d_day <= 7 ? 'danger' : exam.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(exam.d_day, exam.in_progress)}</span>;
+  return <span className={'tag ' + exam.d_day_tone}>{exam.d_day_label}</span>;
 }
 
 function examDates(exam) {
-  return [dateRange(exam.date, exam.end_date), mathExamLabel(exam.math_date, exam.date, exam.end_date)].filter(Boolean).join(' · ');
+  return [dateRange(exam.exam_date, exam.exam_end_date), exam.math_label].filter(Boolean).join(' · ');
 }
 
 function ClassTags({ r, none }) {
@@ -112,7 +111,7 @@ function StudentList({ onCreate }) {
     name: (r) => r.name,
     grade: (r) => (gradeOrder.includes(r.grade) ? String(gradeOrder.indexOf(r.grade)).padStart(2, '0') + (r.school || '') : null),
     last: (r) => r.last_lesson_date,
-    exam: (r) => r.next_exam && r.next_exam.date
+    exam: (r) => (r.next_exam ? r.next_exam.d_day : null)
   });
   const flaggedCount = (state.data || []).filter((r) => r.badges.some((b) => b.tone !== 'muted')).length;
   const sel = useSelection(rows.map((r) => r.student_id));

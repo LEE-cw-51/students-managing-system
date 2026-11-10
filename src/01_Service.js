@@ -6,6 +6,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
   LMS = require('./00_Core.js');
   require('./02_Assignments.js');
   require('./03_Sessions.js');
+  require('./04_SchoolExams.js');
   require('./05_Views.js');
   require('./06_Plans.js');
   require('./07_Agent.js');
@@ -2837,7 +2838,7 @@ LMS.createService = function (store) {
   // ----- School exam schedule (math only) -----
 
   function saveSchoolExam(data) {
-    var input = LMS.validateSchoolExamInput(data);
+    var input = LMS.schoolExams.validate(data);
     var rows = table('SchoolExams');
     var key = LMS.schoolExamKey(input);
     var ts = now();

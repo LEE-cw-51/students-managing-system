@@ -9,8 +9,6 @@ import MakeupForm from './MakeupForm';
 import TaskForm, { TASK_LABEL } from './TaskForm';
 import { api, useApi } from '@/lib/client-api';
 import { dateRange, shortDate } from '@/lib/format';
-import { examDDayLabel, mathExamLabel } from '@/lib/term';
-
 export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
   const toast = useToast();
   const [addingMakeup, setAddingMakeup] = useState(false);
@@ -138,7 +136,7 @@ export default function TodayBoard({ date, onOpenClass, onTasksChanged }) {
                     <div key={x.school_exam_id}>
                       <div className="split">
                         <strong>{x.school} {x.grade}</strong>
-                        <span>{[dateRange(x.exam_date, x.exam_end_date), mathExamLabel(x.math_exam_date, x.exam_date, x.exam_end_date)].filter(Boolean).join(' · ')} <span className="tag danger">{examDDayLabel(x.d_day, x.in_progress)}</span></span>
+                        <span>{[dateRange(x.exam_date, x.exam_end_date), x.math_label].filter(Boolean).join(' · ')} <span className={'tag ' + x.d_day_tone}>{x.d_day_label}</span></span>
                       </div>
                       <div className="muted prewrap">{[x.textbook, x.scope].filter(Boolean).join(' · ') || '범위 미입력'} · {x.students.map((s) => s.name).join(', ')}</div>
                     </div>

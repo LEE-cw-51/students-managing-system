@@ -676,13 +676,18 @@ LMS.createPlanner = function (ctx) {
       return LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.inRange(l.lesson_date, since, now);
     });
     var homeworkCells = ctx.homeworkCells({ classId: classId, from: since, to: now });
-    var examsByKey = {};
-    table('SchoolExams').forEach(function (e) {
-      if (LMS.schoolExamDueBy(e, now, LMS.addDays(now, 60))) {
-        var k = LMS.toStr(e.school_key);
-        if (!examsByKey[k] || LMS.compareSchoolExamsByDDay(e, examsByKey[k]) < 0) examsByKey[k] = e;
-      }
-    });
+    var schoolExamRows = table('SchoolExams');
+    var examsByKey = LMS.schoolExams.nextByKey(schoolExamRows, now, 60);
+    var examBrief = function (e) {
+      return {
+        exam_date: e.exam_date,
+        exam_end_date: e.exam_end_date,
+        math_exam_date: e.math_exam_date,
+        d_day: e.d_day,
+        in_progress: e.in_progress,
+        scope: LMS.clipText(e.scope, 200)
+      };
+    };
     var classPresent = 0;
     var exams = {};
     var students = roster.map(function (s, i) {
@@ -708,7 +713,7 @@ LMS.createPlanner = function (ctx) {
         }),
         signals: LMS.detectLearningSignals(own).map(function (sig) { return sig.label; }),
         counseling_last_4_weeks: counsel,
-        next_school_exam: exam ? { date: exam.exam_date, end_date: LMS.schoolExamEnd(exam), math_date: LMS.toStr(exam.math_exam_date), scope: LMS.clipText(exam.scope, 200) } : null
+        next_school_exam: exam ? examBrief(exam) : null
       };
     });
     var sessions = table('ClassSessions').filter(function (r) {
@@ -744,10 +749,11 @@ LMS.createPlanner = function (ctx) {
           attendance_rate: lessons.length ? Math.round((classPresent / lessons.length) * 100) : null,
           homework_rate: LMS.homeworkRate(homeworkCells).rate
         },
-        upcoming_school_exams: Object.keys(exams).map(function (id) {
-          var e = exams[id];
-          return { school: LMS.toStr(e.school), grade: LMS.toStr(e.grade), date: e.exam_date, end_date: LMS.schoolExamEnd(e), math_date: LMS.toStr(e.math_exam_date), scope: LMS.clipText(e.scope, 200) };
-        }).sort(function (a, b) { return a.date.localeCompare(b.date); }),
+        upcoming_school_exams: LMS.schoolExams.upcoming(schoolExamRows, now, 60).filter(function (e) {
+          return exams[e.school_exam_id];
+        }).map(function (e) {
+          return Object.assign({ school: LMS.toStr(e.school), grade: LMS.toStr(e.grade) }, examBrief(e));
+        }),
         students: students,
         basic_split: computed.proposal.days.map(function (d) { return { date: d.date, unit_ids: d.unit_ids, title: d.title }; })
       }
