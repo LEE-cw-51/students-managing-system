@@ -145,7 +145,7 @@ describe('agent write action registry: adapters', () => {
       assert.ok(t, a.name);
       assert.equal(t.inputSchema, a.parameters, a.name);
       assert.equal(t.annotations.destructiveHint, a.destructive, a.name);
-      assert.ok(t.description.includes(a.description.replace(/^\[승인 필요\]\s*/, '')), a.name);
+      assert.ok(t.description.includes(a.description), a.name);
     });
     assert.ok(listTools('read_only').every((t) => !LMS.agentActions.list().some((a) => a.name === t.name)));
   });
@@ -161,7 +161,8 @@ describe('agent write action registry: adapters', () => {
       assert.equal(anthropic.has(a.name), offered, a.name);
       if (!offered) return;
       assert.equal(openAi.get(a.name).parameters, a.parameters);
-      assert.equal(openAi.get(a.name).description, a.description);
+      assert.equal(openAi.get(a.name).description, `[승인 필요] ${a.description}`);
+      assert.equal(anthropic.get(a.name).description, `[승인 필요] ${a.description}`);
       assert.equal(anthropic.get(a.name).input_schema, a.parameters);
     });
   });

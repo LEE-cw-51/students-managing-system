@@ -20,7 +20,10 @@ const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, getAgentTool, mcpTools, toolDefinitions } = require('../lib/agent-tools.js');
 const { MCP_READ_TOOLS } = require('../lib/mcp-tools/index.js');
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
-const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
+const { listTools, handleToolCall, handleMcpRequest, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT } = require('../lib/mcp-server.js');
+const { readWriteMode } = require('../lib/write-policy.js');
+const MCP_WRITE_MODES = LMS.MCP_WRITE_MODES;
+const normalizeWriteMode = LMS.normalizeMcpWriteMode;
 const { APP_SESSION, apply, reject } = require('../lib/proposals.js');
 const { withService } = require('../lib/store.js');
 const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, validateAuthorizeParams } = require('../lib/oauth.js');
@@ -493,5 +496,31 @@ describe('/api/mcp route', () => {
 
     await withService((api) => api.saveSettings({ mcp_token_version: '1' }));
     assertUnauthorized(await POST(rpc(LIST, auth)));
+  });
+});
+
+describe('/api/oauth/register route', () => {
+  const routeP = import('../app/api/oauth/register/route.js');
+  const register = (body, ip) => new Request('https://lms.test/api/oauth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-real-ip': ip },
+    body
+  });
+
+  it('counts a request against the limit before reading its body', async () => {
+    const { POST } = await routeP;
+    const { REGISTER_IP_MAX } = await import('../lib/login-limit.js');
+    const ip = '203.0.113.7';
+    for (let i = 0; i < REGISTER_IP_MAX; i++) {
+      const res = await POST(register('not json', ip));
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).error, 'invalid_client_metadata');
+    }
+    const valid = JSON.stringify({ redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] });
+    const blocked = await POST(register(valid, ip));
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error, 'too_many_requests');
+    assert.ok(Number(blocked.headers.get('Retry-After')) >= 1);
+    assert.equal((await POST(register(valid, '203.0.113.8'))).status, 201);
   });
 });

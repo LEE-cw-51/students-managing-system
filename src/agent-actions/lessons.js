@@ -159,7 +159,7 @@ var actions = {
   update_attendance: {
     label: '출결 변경',
     progress: '출결 변경 준비 중',
-    description: '[승인 필요] 이미 기록된 수업의 출결을 바꿉니다. lesson_id는 get_attendance 또는 get_student_lessons에서 찾습니다. 그날 수업 기록이 없으면 쓸 수 없으니, 수업 기록 화면에서 먼저 기록하도록 안내합니다.',
+    description: '이미 기록된 수업의 출결을 바꿉니다. lesson_id는 get_attendance 또는 get_student_lessons에서 찾습니다. 그날 수업 기록이 없으면 쓸 수 없으니, 수업 기록 화면에서 먼저 기록하도록 안내합니다.',
     surfaces: ['assistant', 'mcp'],
     parameters: {
       type: 'object',

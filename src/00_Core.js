@@ -196,6 +196,25 @@ LMS.normalizeMcpWriteMode = function (value) {
   return LMS.MCP_WRITE_MODES.indexOf(v) === -1 ? LMS.MCP_WRITE_MODES[0] : v;
 };
 
+/**
+ * The mcp_write_mode saveSettings stores. submitted: the map passed to saveSettings; stored:
+ * the value already in Settings. Without the key a legacy value is rewritten and any other
+ * kept. A legacy value maps to its mode; blank, or an unknown value equal to the stored one
+ * (the settings page resends it), is read-only; any other unknown value throws.
+ */
+LMS.mcpWriteModeToStore = function (submitted, stored) {
+  var legacy = LMS.MCP_WRITE_MODE_LEGACY;
+  var has = function (key) { return Object.prototype.hasOwnProperty.call(legacy, key); };
+  if (!submitted || !Object.prototype.hasOwnProperty.call(submitted, 'mcp_write_mode')) {
+    return has(LMS.toStr(stored)) ? legacy[LMS.toStr(stored)] : stored;
+  }
+  var mode = LMS.toStr(submitted.mcp_write_mode);
+  if (has(mode)) mode = legacy[mode];
+  if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(stored))) mode = LMS.MCP_WRITE_MODES[0];
+  if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only), 승인 대기 제안(proposal) 중에서만 고를 수 있습니다.');
+  return mode;
+};
+
 LMS.toNum = function (v) {
   if (LMS.isBlank(v)) return null;
   var n = Number(v);
