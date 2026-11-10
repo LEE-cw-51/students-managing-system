@@ -204,6 +204,7 @@ src/04_SchoolExams.js  학교 시험 일정: 입력 검사 · 시험 view(D-day�
 src/05_Views.js 화면용 조회 API (반·학생·오늘·시험·보고서)
 src/06_Plans.js 강의 계획: 단원 분할·초안·고치기·확정·휴강
 src/07_Agent.js AI 비서: 대화·변경 제안 저장, 승인 시 실행·검증
+src/09_ExamPeriods.js  시험대비 기간: 시험대비 반 · 휴강 반 · 복귀일 · 기간 만들기·편성·마감·삭제 (서버 전용, GLOSSARY.md 용어)
 scripts/        시드 · 개발용 데모 데이터
 tests/          Node 테스트 (메모리 저장소)
 ```
