@@ -183,11 +183,11 @@ LMS.createService = function (store) {
     rows.push(row);
     saveTable('Students', rows);
     if (data && data.class_id) {
-      assignments.assign({
+      assignments.assignFirst({
         student_id: id,
         class_id: data.class_id,
         start_date: row.enrollment_date
-      }, true);
+      });
     }
     return enrichStudent(row);
   }
@@ -435,42 +435,6 @@ LMS.createService = function (store) {
   function getClassRoster(classId, date) {
     requireClass(classId);
     return assignments.members(classId, date);
-  }
-
-  function assignStudentToClass(data) {
-    return assignments.assign(data);
-  }
-
-  function previewClassStartChange(data) {
-    return assignments.previewStart(data);
-  }
-
-  function updateStudentClassStart(data) {
-    return assignments.changeStart(data);
-  }
-
-  function closeStudentClass(data) {
-    return assignments.close(data);
-  }
-
-  function removeStudentClass(data) {
-    return assignments.remove(data);
-  }
-
-  function moveStudent(data) {
-    return assignments.move(data);
-  }
-
-  function moveStudents(data) {
-    return assignments.moveMany(data);
-  }
-
-  function assignStudentsToClass(data) {
-    return assignments.assignMany(data);
-  }
-
-  function closeStudentsInClass(data) {
-    return assignments.closeMany(data);
   }
 
   /** Change the status of several students; 퇴원 ends their assignments as updateStudent does. */
@@ -2828,22 +2792,6 @@ LMS.createService = function (store) {
     return { classes: created, period: LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId) };
   }
 
-  function addTempAssignment(data) {
-    return assignments.addTemp(data);
-  }
-
-  function addTempAssignments(data) {
-    return assignments.addTempMany(data);
-  }
-
-  function endTempAssignment(relId, date) {
-    return assignments.endTemp(relId, date);
-  }
-
-  function removeTempAssignment(relId) {
-    return assignments.removeTemp(relId);
-  }
-
   function setPeriodSuspendedClasses(periodId, classIds) {
     var periods = table('ExamPeriods');
     var row = requirePeriod_(periodId);
@@ -3277,6 +3225,7 @@ LMS.createService = function (store) {
     now: now,
     today: function () { return store.today(); },
     nextIds: nextIds,
+    assignments: assignments,
     service: function () { return service; }
   }) : {};
 
@@ -3296,16 +3245,16 @@ LMS.createService = function (store) {
     deleteClass: deleteClass,
     getStudentClasses: getStudentClasses,
     getClassRoster: getClassRoster,
-    assignStudentToClass: assignStudentToClass,
-    previewClassStartChange: previewClassStartChange,
-    updateStudentClassStart: updateStudentClassStart,
-    closeStudentClass: closeStudentClass,
-    moveStudent: moveStudent,
-    moveStudents: moveStudents,
-    assignStudentsToClass: assignStudentsToClass,
-    closeStudentsInClass: closeStudentsInClass,
+    assignStudentToClass: assignments.assign,
+    previewClassStartChange: assignments.previewStart,
+    updateStudentClassStart: assignments.changeStart,
+    closeStudentClass: assignments.close,
+    moveStudent: assignments.move,
+    moveStudents: assignments.moveMany,
+    assignStudentsToClass: assignments.assignMany,
+    closeStudentsInClass: assignments.closeMany,
     setStudentsStatus: setStudentsStatus,
-    removeStudentClass: removeStudentClass,
+    removeStudentClass: assignments.remove,
     getLessons: getLessons,
     getStudentLessons: getStudentLessons,
     getLesson: getLesson,
@@ -3365,10 +3314,10 @@ LMS.createService = function (store) {
     generateMonthlyReportsBulk: generateMonthlyReportsBulk,
     saveExamPeriod: saveExamPeriod,
     applyExamGroups: applyExamGroups,
-    addTempAssignment: addTempAssignment,
-    addTempAssignments: addTempAssignments,
-    endTempAssignment: endTempAssignment,
-    removeTempAssignment: removeTempAssignment,
+    addTempAssignment: assignments.addTemp,
+    addTempAssignments: assignments.addTempMany,
+    endTempAssignment: assignments.endTemp,
+    removeTempAssignment: assignments.removeTemp,
     setPeriodSuspendedClasses: setPeriodSuspendedClasses,
     closeExamPeriod: closeExamPeriod,
     deleteExamPeriod: deleteExamPeriod,

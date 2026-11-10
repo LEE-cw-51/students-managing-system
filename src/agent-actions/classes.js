@@ -105,12 +105,6 @@ function clsMerged_(cls, changes, schedule) {
   return data;
 }
 
-function clsOpenMembers_(svc, classId) {
-  return svc.table('StudentClasses').filter(function (r) {
-    return clsStr_(r.class_id) === clsStr_(classId) && clsStr_(r.status) === '현재';
-  });
-}
-
 function clsNames_(names) {
   return names.length > 10 ? names.slice(0, 10).join(', ') + ' 외 ' + (names.length - 10) + '명' : names.join(', ');
 }
@@ -235,7 +229,7 @@ var actions = {
     preview: function (svc, args) {
       var cls = clsRow_(svc, args && args.class_id);
       if (clsStr_(cls.status) === '종료') throw new Error('반 「' + cls.class_name + '」은(는) 이미 종료되었습니다.');
-      var members = clsOpenMembers_(svc, cls.class_id);
+      var members = svc.assignments.openRegularInClass(cls.class_id);
       var names = members.map(function (r) { return LMS.agentStudentName(svc.table, r.student_id); });
       var exam = clsStr_(cls.class_type) === '시험대비';
       return {

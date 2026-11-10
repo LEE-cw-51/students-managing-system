@@ -14,7 +14,9 @@
  *   preview(svc, args)    validates without writing; returns { args, target, before, after, text }
  *   run(svc, args)        performs the change through a service function
  *   verify(svc, args, ran) reads the stored data back; returns { ok, after }
- * svc is { table, api }. Errors carry a Korean message meant for the teacher (and the model).
+ * svc is { table, api, assignments }: assignments is the class assignment module (02_Assignments.js);
+ * previews ask its check.* instead of repeating assignment rules. Errors carry a Korean message
+ * meant for the teacher (and the model).
  * A definition with a missing or inconsistent piece throws when it is defined (at load).
  *
  * The area files (src/agent-actions/) each export their definitions; lib/agent-tools.js turns
