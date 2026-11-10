@@ -272,13 +272,16 @@ describe('assignments module commands (T7)', () => {
       Lessons: []
     };
     let seq = 0;
-    const asg = LMS.createAssignments({
+    const base = {
       table: (name) => tables[name] || (tables[name] = []),
       saveTable: (name, rows) => { tables[name] = rows; },
       today: () => '2026-11-05',
       now: () => '2026-11-05T09:00:00',
       nextIds: (prefix, n) => Array.from({ length: n || 1 }, () => prefix + '_' + (++seq))
-    });
+    };
+    let periods = null;
+    const asg = LMS.createAssignments({ ...base, resumeStale: (id) => periods.recomputeResume(id) });
+    periods = LMS.createExamPeriods({ ...base, assignments: asg });
     return { tables, asg };
   }
   const temp = (tables, id) => tables.StudentClasses.find((r) => r.id === id);

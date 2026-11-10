@@ -132,25 +132,6 @@ LMS.createViews = function (ctx) {
     return null;
   }
 
-  function examContext(cls, date) {
-    var periods = ctx.examPeriods();
-    if (LMS.toStr(cls.class_type) === '시험대비') {
-      return { kind: 'exam_class', period: LMS.findById(periods, 'exam_period_id', cls.exam_period_id) };
-    }
-    var active = LMS.classSuspensionOn(cls, date, periods);
-    if (active) {
-      var last = LMS.classResumeDate(active, LMS.toStr(cls.class_id)) || active.end_date;
-      return { kind: 'suspended', period: active, resume_date: LMS.addDays(last, 1) };
-    }
-    var upcoming = periods.filter(function (p) {
-      return LMS.examPeriodActive(p) && LMS.toStr(p.start_date) > date &&
-        LMS.suspendedClassIds(p).indexOf(LMS.toStr(cls.class_id)) !== -1;
-    }).sort(function (a, b) { return LMS.toStr(a.start_date).localeCompare(LMS.toStr(b.start_date)); })[0];
-    if (!upcoming) return null;
-    var upLast = LMS.classResumeDate(upcoming, LMS.toStr(cls.class_id)) || upcoming.end_date;
-    return { kind: 'upcoming', period: upcoming, resume_date: LMS.addDays(upLast, 1) };
-  }
-
   /** Class list with today's roster size and next meeting. */
   function getClassList(filter) {
     filter = filter || {};
@@ -177,7 +158,7 @@ LMS.createViews = function (ctx) {
         schedule_label: LMS.scheduleLabel(schedule),
         student_count: roster.length,
         next: LMS.toStr(c.status) === '운영' ? nextMeeting(c, today) : null,
-        exam: examContext(c, today)
+        exam: ctx.periods.classContext(c, today)
       };
     }).sort(function (a, b) {
       if (a.status !== b.status) return a.status === '운영' ? -1 : 1;
@@ -250,7 +231,7 @@ LMS.createViews = function (ctx) {
         return { student_id: s.student_id, name: s.name, grade: s.grade, school: s.school, status: s.status };
       }),
       next: upcoming,
-      exam: examContext(cls, today),
+      exam: ctx.periods.classContext(cls, today),
       month: {
         lesson_count: Object.keys(lessons.reduce(function (m, l) { m[l.lesson_date] = 1; return m; }, {})).length,
         attendance_rate: pct(lessons.length - absent, lessons.length),
@@ -1087,14 +1068,7 @@ LMS.createViews = function (ctx) {
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
     var periods = ctx.examPeriods();
     var teaching = ctx.getTodayTeachingTasks(date);
-    var suspended = table('Classes').filter(function (c) {
-      return LMS.toStr(c.status) === '운영' && LMS.toStr(c.class_type) !== '시험대비' &&
-        LMS.classTimeOn(c, date) && LMS.classSuspensionOn(c, date, periods);
-    }).map(function (c) {
-      var p = LMS.classSuspensionOn(c, date, periods);
-      var last = LMS.classResumeDate(p, LMS.toStr(c.class_id)) || p.end_date;
-      return { class_id: c.class_id, class_name: c.class_name, period_title: p.title, resume_date: LMS.addDays(last, 1) };
-    });
+    var suspended = ctx.periods.suspendedOn(date);
     var cancelled = table('Classes').filter(function (c) {
       return LMS.toStr(c.status) === '운영' && LMS.classTimeOn(c, date) && LMS.classCancellationOn(c, date);
     }).map(function (c) {
@@ -1175,30 +1149,16 @@ LMS.createViews = function (ctx) {
 
   // ----- Exam-prep periods -----
 
-  function periodState(p, today) {
-    var st = LMS.toStr(p.status);
-    if (st === '종료' || st === '취소') return st === '종료' ? '마감' : '취소';
-    if (today < p.start_date) return '예정';
-    if (today > p.end_date) return '끝남';
-    return '진행 중';
-  }
-
-  function periodClasses(periodId) {
-    return table('Classes').filter(function (c) {
-      return LMS.toStr(c.exam_period_id) === LMS.toStr(periodId) && LMS.toStr(c.class_type) === '시험대비';
-    });
-  }
-
   function getExamPeriods() {
     var today = store.today();
     return table('ExamPeriods').map(function (p) {
-      var classes = periodClasses(p.exam_period_id);
+      var classes = ctx.periods.classes(p.exam_period_id);
       var students = {};
       ctx.assignments.tempPlacements(classes.map(function (c) { return c.class_id; })).forEach(function (r) {
         students[r.student_id] = true;
       });
       return Object.assign({}, p, {
-        state: periodState(p, today),
+        state: ctx.periods.state(p, today),
         class_count: classes.length,
         student_count: Object.keys(students).length,
         suspended_count: LMS.suspendedClassIds(p).length
@@ -1206,24 +1166,11 @@ LMS.createViews = function (ctx) {
     }).sort(function (a, b) { return LMS.toStr(b.start_date).localeCompare(LMS.toStr(a.start_date)); });
   }
 
-  function examDateFor(period, schoolKey) {
-    var hit = table('SchoolExams').filter(function (x) {
-      if (LMS.toStr(x.school_key) !== schoolKey || !x.exam_date) return false;
-      if (period.exam_year && LMS.toStr(x.school_year) !== LMS.toStr(period.exam_year)) return false;
-      if (period.exam_semester && LMS.toStr(x.semester) !== LMS.toStr(period.exam_semester)) return false;
-      if (period.exam_type && LMS.toStr(x.exam_type) !== LMS.toStr(period.exam_type)) return false;
-      var end = LMS.schoolExams.lastDay(x);
-      return (!period.end_date || x.exam_date <= period.end_date) && (!period.start_date || end >= period.start_date);
-    }).sort(function (a, b) { return LMS.toStr(a.exam_date).localeCompare(LMS.toStr(b.exam_date)); })[0];
-    return hit ? LMS.schoolExams.lastDay(hit) : '';
-  }
-
   /** Planning material for a period: unplaced active students and the exam-prep classes already in it. */
   function proposeExamGroups(periodId) {
-    var period = LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId);
-    if (!period) throw new Error('시험대비 기간을 찾을 수 없습니다.');
+    var period = ctx.periods.requirePeriod(periodId);
     var classes = table('Classes');
-    var existing = periodClasses(periodId);
+    var existing = ctx.periods.classes(periodId);
     var placed = {};
     ctx.assignments.tempPlacements(existing.map(function (c) { return c.class_id; })).forEach(function (r) { placed[r.student_id] = true; });
     var sourceUse = {};
@@ -1237,7 +1184,7 @@ LMS.createViews = function (ctx) {
       sources.forEach(function (id) { sourceUse[id] = true; });
       var src = sources.length ? LMS.findById(classes, 'class_id', sources[0]) : null;
       var key = LMS.schoolGroupKey(s.school, s.grade);
-      if (key && !(key in examDates)) examDates[key] = examDateFor(period, key);
+      if (key && !(key in examDates)) examDates[key] = ctx.periods.schoolExamLastDay(period, key);
       return {
         student_id: s.student_id, name: s.name, school: s.school, grade: s.grade,
         source_class_id: sources[0] || '', source_class_name: src ? src.class_name : '',
@@ -1263,13 +1210,16 @@ LMS.createViews = function (ctx) {
   }
 
   function getExamPeriodDetail(periodId) {
-    var period = LMS.findById(table('ExamPeriods'), 'exam_period_id', periodId);
-    if (!period) throw new Error('시험대비 기간을 찾을 수 없습니다.');
+    var period = ctx.periods.requirePeriod(periodId);
     var today = store.today();
     var students = table('Students');
     var classes = table('Classes');
     var lessons = table('Lessons');
-    var temp = periodClasses(periodId).map(function (c) {
+    var nameOf = function (sid) {
+      var st = LMS.findById(students, 'student_id', sid);
+      return (st && st.name) || sid;
+    };
+    var temp = ctx.periods.classes(periodId).map(function (c) {
       var members = ctx.assignments.tempPlacements([c.class_id]).map(function (r) {
         var st = LMS.findById(students, 'student_id', r.student_id) || {};
         var src = LMS.findById(classes, 'class_id', r.source_class_id);
@@ -1293,27 +1243,20 @@ LMS.createViews = function (ctx) {
     temp.forEach(function (c) { c.students.forEach(function (m) { placed[m.student_id] = true; }); });
     var suspended = LMS.suspendedClassIds(period).map(function (id) {
       var c = LMS.findById(classes, 'class_id', id) || { class_name: id };
-      var last = LMS.classResumeDate(period, id) || period.end_date;
       var left = ctx.assignments.recordTargets(id, period.start_date).students.filter(function (s) {
         return !placed[s.student_id];
       }).map(function (s) { return { student_id: s.student_id, name: s.name }; });
-      // Return schedule: who comes back to this class on which day.
-      var byDay = {};
-      temp.forEach(function (tc) {
-        tc.students.forEach(function (m) {
-          var sources = ctx.assignments.regularClassIdsDuring(m.student_id, period.start_date, period.end_date);
-          if (sources.indexOf(id) === -1 && m.source_class_id !== id) return;
-          var back = LMS.addDays(m.end_date || period.end_date, 1);
-          (byDay[back] = byDay[back] || []).push(m.name);
-        });
+      var returns = ctx.periods.returns(period, id).map(function (r) {
+        return { date: r.date, names: r.student_ids.map(nameOf).sort(function (a, b) { return a.localeCompare(b, 'ko'); }) };
       });
-      var returns = Object.keys(byDay).sort().map(function (d) {
-        return { date: d, names: byDay[d].sort(function (a, b) { return a.localeCompare(b, 'ko'); }) };
-      });
-      return { class_id: id, class_name: c.class_name, last_suspended: last, resume_date: LMS.addDays(last, 1), returns: returns, unplaced: left };
+      return {
+        class_id: id, class_name: c.class_name,
+        last_suspended: ctx.periods.lastSuspendedDay(period, id), resume_date: ctx.periods.resumeDate(period, id),
+        returns: returns, unplaced: left
+      };
     });
     return {
-      period: Object.assign({}, period, { state: periodState(period, today) }),
+      period: Object.assign({}, period, { state: ctx.periods.state(period, today) }),
       today: today,
       classes: temp,
       suspended: suspended,

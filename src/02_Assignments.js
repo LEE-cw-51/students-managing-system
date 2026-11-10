@@ -1,6 +1,7 @@
 /**
  * Class assignments (StudentClasses): who is in a class, which classes a student attends, and every
- * change to those rows (regular assignments, exam-prep placements, resume dates of exam periods).
+ * change to those rows (regular assignments and exam-prep placements). Resume dates of exam periods
+ * belong to the exam period module (09_ExamPeriods.js), which ctx.resumeStale tells about changes.
  * Terms follow GLOSSARY.md (다니는 반, 시작 예정 반, 열린 정규 배정, 반 구성원, 수업 기록 대상, 미배정).
  * Server-only: reads tables, so it is not imported by the browser.
  */
@@ -11,7 +12,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
 /**
  * ctx: { table(name) → rows, saveTable(name, rows), today() → 'YYYY-MM-DD', now() → timestamp,
- * nextIds(prefix, count) }. Every query reads the tables again, so results follow saveTable and
+ * nextIds(prefix, count), resumeStale(periodId)? }. resumeStale is called after a change that can move
+ * the period's resume dates (placements, or regular assignments in its dates); it may be left out
+ * when no exam period module is attached. Every query reads the tables again, so results follow saveTable and
  * in-place row edits within the same service instance. A blank date means today. Unknown ids give
  * empty query results; commands throw. Callers run commands inside the service transaction.
  * check.<command> answers whether a command would go through, with the message it would throw.
@@ -276,37 +279,9 @@ LMS.createAssignments = function (ctx) {
     })[0] || null;
   }
 
-  function examClassIds(periodId) {
-    return table('Classes').filter(function (c) {
-      return same(c.exam_period_id, periodId) && LMS.toStr(c.class_type) === '시험대비';
-    }).map(function (c) { return LMS.toStr(c.class_id); });
-  }
-
-  /**
-   * Batch start, individual return: each suspended class stays off until its first moved
-   * student is back, then meets with whoever has returned (students still away are left
-   * off its roster by members). Last suspended day = earliest end among its moved students'
-   * temporary assignments. No moved students → period end.
-   */
-  function recomputeResume(periodId) {
-    var periods = table('ExamPeriods');
-    var period = LMS.findById(periods, 'exam_period_id', periodId);
-    if (!period) return;
-    var temp = tempPlacements(examClassIds(periodId));
-    var map = {};
-    LMS.suspendedClassIds(period).forEach(function (classId) {
-      var last = '';
-      temp.forEach(function (r) {
-        var sources = regularClassIdsDuring(r.student_id, period.start_date, period.end_date);
-        if (sources.indexOf(classId) === -1 && LMS.toStr(r.source_class_id) !== classId) return;
-        var end = LMS.toStr(r.end_date) || period.end_date;
-        if (!last || end < last) last = end;
-      });
-      map[classId] = last && last < period.end_date ? last : period.end_date;
-    });
-    period.class_resume_dates = map;
-    period.updated_at = now();
-    saveTable('ExamPeriods', periods);
+  /** Students still away stay off a suspended class's roster (members); its resume date may move. */
+  function resumeStale(periodId) {
+    if (ctx.resumeStale) ctx.resumeStale(LMS.toStr(periodId));
   }
 
   function periodOfClass(classId) {
@@ -340,7 +315,7 @@ LMS.createAssignments = function (ctx) {
       });
     });
     if (changed) saveRels();
-    Object.keys(touched).forEach(recomputeResume);
+    Object.keys(touched).forEach(resumeStale);
   }
 
   /**
@@ -387,7 +362,7 @@ LMS.createAssignments = function (ctx) {
     });
     if (!changed) return;
     saveTable('StudentClasses', rels.filter(function (r) { return drop.indexOf(r) === -1; }));
-    Object.keys(touched).forEach(recomputeResume);
+    Object.keys(touched).forEach(resumeStale);
   }
 
   /**
@@ -490,7 +465,7 @@ LMS.createAssignments = function (ctx) {
     saveRels();
     // Resume dates of exam-prep periods are computed from regular assignment ranges.
     table('ExamPeriods').forEach(function (p) {
-      if (LMS.rangesOverlap(p.start_date, p.end_date, from, rel.end_date)) recomputeResume(p.exam_period_id);
+      if (LMS.rangesOverlap(p.start_date, p.end_date, from, rel.end_date)) resumeStale(p.exam_period_id);
     });
     return rel;
   }
@@ -596,7 +571,7 @@ LMS.createAssignments = function (ctx) {
     });
     if (!Object.keys(touched).length) return;
     saveTable('StudentClasses', rels);
-    Object.keys(touched).forEach(recomputeResume);
+    Object.keys(touched).forEach(resumeStale);
   }
 
   function applyMove(rel, toClassId, start) {
@@ -898,7 +873,7 @@ LMS.createAssignments = function (ctx) {
     };
     rels.push(row);
     saveTable('StudentClasses', rels);
-    recomputeResume(plan.period.exam_period_id);
+    resumeStale(plan.period.exam_period_id);
     return row;
   }
 
@@ -930,7 +905,7 @@ LMS.createAssignments = function (ctx) {
     t.rel.end_date = t.date;
     t.rel.updated_at = now();
     saveTable('StudentClasses', t.rels);
-    recomputeResume(t.period.exam_period_id);
+    resumeStale(t.period.exam_period_id);
     return t.rel;
   }
 
@@ -941,14 +916,14 @@ LMS.createAssignments = function (ctx) {
     });
     if (hasLessons) throw new Error('이미 이 반 수업 기록이 있어 뺄 수 없습니다. ‘조기 복귀’로 마지막 수업일을 정하세요.');
     saveTable('StudentClasses', t.rels.filter(function (r) { return r !== t.rel; }));
-    recomputeResume(t.period.exam_period_id);
+    resumeStale(t.period.exam_period_id);
     return true;
   }
 
-  /** Keep the period's placements inside its (new) dates, then recompute its resume dates. */
-  function clampTempToPeriod(period) {
+  /** Keep the placements in the period's exam-prep classes (classIds) inside its (new) dates. */
+  function clampTempToPeriod(period, classIds) {
     var rels = table('StudentClasses');
-    var ids = examClassIds(period.exam_period_id);
+    var ids = (classIds || []).map(LMS.toStr);
     var changed = false;
     rels.forEach(function (r) {
       if (LMS.toStr(r.status) !== '임시' || ids.indexOf(LMS.toStr(r.class_id)) === -1) return;
@@ -957,7 +932,6 @@ LMS.createAssignments = function (ctx) {
       if (r.end_date < r.start_date) { r.end_date = r.start_date; changed = true; }
     });
     if (changed) saveTable('StudentClasses', rels);
-    recomputeResume(period.exam_period_id);
   }
 
   /** Delete every assignment row in the classes (an exam period being deleted). */
@@ -1023,7 +997,6 @@ LMS.createAssignments = function (ctx) {
     removeTemp: removeTemp,
     clampTempToPeriod: clampTempToPeriod,
     dropForClasses: dropForClasses,
-    recomputeResume: recomputeResume,
     syncExamPrep: syncExamPrep,
     forEachStudent: forEachStudent,
     // Row-level helpers kept for migrateToV4_.

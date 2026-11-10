@@ -42,7 +42,7 @@ LMS.createAgent = function (ctx) {
   var saveTable = ctx.saveTable;
 
   function svc() {
-    return { table: table, api: ctx.service(), assignments: ctx.assignments };
+    return { table: table, api: ctx.service(), assignments: ctx.assignments, examPeriods: ctx.examPeriods };
   }
 
   function requireProposal(proposalId) {

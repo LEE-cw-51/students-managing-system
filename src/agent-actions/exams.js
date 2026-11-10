@@ -49,16 +49,13 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
   };
 
   function requirePeriod(svc, periodId) {
-    var row = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', periodId);
+    var row = svc.examPeriods.find(periodId);
     if (!row) throw new Error('시험대비 기간(' + (LMS.toStr(periodId) || '없음') + ')을 찾을 수 없습니다.');
     return row;
   }
 
-  /** Temporary classes of a period (same rule as the service's periodClassIds_). */
-  function periodClasses(svc, periodId) {
-    return svc.table('Classes').filter(function (c) {
-      return LMS.toStr(c.exam_period_id) === LMS.toStr(periodId) && LMS.toStr(c.class_type) === '시험대비';
-    });
+  function openClasses(svc, periodId) {
+    return svc.examPeriods.classes(periodId).filter(function (c) { return LMS.toStr(c.status) !== '종료'; });
   }
 
   function classNames(svc, ids) {
@@ -129,7 +126,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return svc.api.saveExamPeriod(args);
       },
       verify: function (svc, args, ran) {
-        var row = ran && ran.exam_period_id ? LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', ran.exam_period_id) : null;
+        var row = ran && ran.exam_period_id ? svc.examPeriods.find(ran.exam_period_id) : null;
         var ok = Boolean(row) && LMS.toStr(row.title) === args.title && LMS.toStr(row.start_date) === args.start_date && LMS.toStr(row.end_date) === args.end_date;
         return { ok: ok, after: row ? LMS.toStr(row.exam_period_id) : '' };
       }
@@ -160,14 +157,14 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
           before: LMS.toStr(period.title) + ' ' + LMS.toStr(period.start_date) + '~' + LMS.toStr(period.end_date),
           after: input.title + ' ' + input.start_date + '~' + input.end_date,
           text: '시험대비 기간 「' + LMS.toStr(period.title) + '」 수정: ' + changes.join(', ') +
-            (shrinks && periodClasses(svc, period.exam_period_id).length ? ' (기간이 줄어 시험대비 반 임시 배정도 새 기간 안으로 맞춰짐)' : '')
+            (shrinks && svc.examPeriods.classes(period.exam_period_id).length ? ' (기간이 줄어 시험대비 반 임시 배정도 새 기간 안으로 맞춰짐)' : '')
         };
       },
       run: function (svc, args) {
         return svc.api.saveExamPeriod(args);
       },
       verify: function (svc, args) {
-        var row = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', args.exam_period_id);
+        var row = svc.examPeriods.find(args.exam_period_id);
         var ok = Boolean(row) && PERIOD_FIELDS.every(function (k) { return LMS.toStr(row[k]) === LMS.toStr(args[k]); });
         return { ok: ok, after: row ? LMS.toStr(row.title) + ' ' + LMS.toStr(row.start_date) + '~' + LMS.toStr(row.end_date) : '' };
       }
@@ -181,7 +178,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
       preview: function (svc, args) {
         var period = requirePeriod(svc, LMS.toStr(args && args.exam_period_id));
         if (LMS.toStr(period.status) === '종료') throw new Error('이미 마감된 시험대비 기간입니다.');
-        var classes = periodClasses(svc, period.exam_period_id).filter(function (c) { return LMS.toStr(c.status) !== '종료'; });
+        var classes = openClasses(svc, period.exam_period_id);
         return {
           args: { exam_period_id: LMS.toStr(period.exam_period_id) },
           target: { date: LMS.toStr(period.end_date) },
@@ -195,8 +192,8 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return svc.api.closeExamPeriod(args.exam_period_id);
       },
       verify: function (svc, args) {
-        var row = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', args.exam_period_id);
-        var open = periodClasses(svc, args.exam_period_id).filter(function (c) { return LMS.toStr(c.status) !== '종료'; });
+        var row = svc.examPeriods.find(args.exam_period_id);
+        var open = openClasses(svc, args.exam_period_id);
         var after = row ? LMS.toStr(row.status) : '';
         return { ok: after === '종료' && !open.length, after: after };
       }
@@ -209,9 +206,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
       parameters: { type: 'object', properties: { exam_period_id: PERIOD_ID }, required: ['exam_period_id'] },
       preview: function (svc, args) {
         var period = requirePeriod(svc, LMS.toStr(args && args.exam_period_id));
-        var ids = periodClasses(svc, period.exam_period_id).map(function (c) { return LMS.toStr(c.class_id); });
+        var ids = svc.examPeriods.classIds(period.exam_period_id);
         var inIds = function (r) { return ids.indexOf(LMS.toStr(r.class_id)) !== -1; };
-        if (svc.table('Lessons').some(inIds)) throw new Error('수업 기록이 있는 시험대비 기간은 삭제할 수 없습니다. 마감(close_exam_period)을 쓰세요.');
+        if (svc.examPeriods.check.remove(period.exam_period_id)) throw new Error('수업 기록이 있는 시험대비 기간은 삭제할 수 없습니다. 마감(close_exam_period)을 쓰세요.');
         var assigned = svc.table('StudentClasses').filter(inIds).length;
         var plans = svc.table('ClassPlans').filter(inIds).length;
         var suspended = LMS.suspendedClassIds(period).length;
@@ -234,7 +231,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return svc.api.deleteExamPeriod(args.exam_period_id);
       },
       verify: function (svc, args) {
-        var gone = !LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', args.exam_period_id) && !periodClasses(svc, args.exam_period_id).length;
+        var gone = !svc.examPeriods.find(args.exam_period_id) && !svc.examPeriods.classes(args.exam_period_id).length;
         return { ok: gone, after: gone ? '삭제됨' : '남아 있음' };
       }
     },
@@ -278,7 +275,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return svc.api.setPeriodSuspendedClasses(args.exam_period_id, args.class_ids);
       },
       verify: function (svc, args) {
-        var row = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', args.exam_period_id);
+        var row = svc.examPeriods.find(args.exam_period_id);
         var after = row ? LMS.suspendedClassIds(row).map(LMS.toStr) : [];
         return { ok: Boolean(row) && sameIds(after, args.class_ids), after: after.join(', ') };
       }
