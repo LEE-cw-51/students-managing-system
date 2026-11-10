@@ -14,7 +14,8 @@ import PeriodForm from '@/components/domain/exam/PeriodForm';
 import { useRouter } from 'next/navigation';
 import { api, apiBatch, useApi } from '@/lib/client-api';
 import { dateRange, formatDate, shortDate } from '@/lib/format';
-import { currentTerm, examDDayLabel, mathExamLabel } from '@/lib/term';
+import { currentTerm } from '@/lib/term';
+import LMS from '../../../src/04_SchoolExams.js';
 
 const TABS = [
   { key: 'schedule', label: '학교 시험 일정' },
@@ -33,15 +34,12 @@ function defaultExamType(today) {
   return midterm ? '중간' : '기말';
 }
 
-function DDay({ d, inProgress }) {
-  if (d === null || d === undefined) return null;
-  const tone = inProgress ? 'danger' : d < 0 ? 'muted' : d <= 7 ? 'danger' : d <= 21 ? 'amber' : '';
-  return <span className={'tag ' + tone}>{examDDayLabel(d, inProgress)}</span>;
+function DDay({ x }) {
+  return x.d_day_label ? <span className={'tag ' + x.d_day_tone}>{x.d_day_label}</span> : null;
 }
 
 function MathDay({ x }) {
-  const label = mathExamLabel(x.math_exam_date, x.exam_date, x.exam_end_date);
-  return label ? <><span className="muted">{label}</span> </> : null;
+  return x.math_label ? <><span className="muted">{x.math_label}</span> </> : null;
 }
 
 const BULK_COLS = ['exam_date', 'exam_end_date', 'math_exam_date', 'textbook', 'scope'];
@@ -59,15 +57,6 @@ function onBulkKey(e) {
   if (next) next.focus();
 }
 
-/** Same date rules as LMS.validateSchoolExamInput, checked per row so the error names the school. */
-function bulkRowError(r) {
-  const { exam_date: start, exam_end_date: end, math_exam_date: math } = r;
-  if (end && !start) return '시험 시작일을 입력해 주세요.';
-  if (end && end < start) return '종료일이 시작일보다 빠릅니다.';
-  if (math && start && (math < start || math > (end || start))) return '수학 시험일은 시험 기간 안이어야 합니다.';
-  return '';
-}
-
 /** One editable row per school+grade that has no exam yet; saves all filled rows at once. */
 function BulkModal({ groups, term, examType, onClose, onSaved }) {
   const toast = useToast();
@@ -75,28 +64,27 @@ function BulkModal({ groups, term, examType, onClose, onSaved }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const dirty = useDirty(rows);
-  const mathWithin = (math, start, end) => (math && (!start || math >= start) && (!end || math <= end) ? math : '');
-  const patch = (r, key, value) => {
-    if (key === 'exam_end_date') return { ...r, exam_end_date: value, math_exam_date: mathWithin(r.math_exam_date, r.exam_date, value) };
-    if (key !== 'exam_date') return { ...r, [key]: value };
-    const end = !r.exam_end_date || (value && r.exam_end_date < value) ? value : r.exam_end_date;
-    return { ...r, exam_date: value, exam_end_date: end, math_exam_date: mathWithin(r.math_exam_date, value, end) };
-  };
-  const set = (i, key) => (e) => setRows((list) => list.map((r, j) => (j === i ? patch(r, key, e.target.value) : r)));
+  const set = (i, key) => (e) => setRows((list) => list.map((r, j) => (j === i ? LMS.schoolExams.changeDate(r, key, e.target.value) : r)));
   const filled = rows.filter((r) => r.exam_date || r.exam_end_date || r.math_exam_date || r.scope || r.textbook);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!filled.length) return setError('시험 기간이나 범위를 한 곳 이상 입력해 주세요.');
-    const bad = filled.find((r) => bulkRowError(r));
-    if (bad) return setError(`${bad.school} ${bad.grade}: ${bulkRowError(bad)}`);
+    const items = filled.map((r) => ({
+      school: r.school, grade: r.grade, school_year: term.year, semester: term.semester,
+      exam_type: examType, exam_date: r.exam_date, exam_end_date: r.exam_end_date, math_exam_date: r.math_exam_date, textbook: r.textbook, scope: r.scope
+    }));
+    for (const item of items) {
+      try {
+        LMS.schoolExams.validate(item);
+      } catch (err) {
+        return setError(`${item.school} ${item.grade}: ${err.message}`);
+      }
+    }
     setSaving(true);
     setError('');
     try {
-      await api('saveSchoolExamsBatch', filled.map((r) => ({
-        school: r.school, grade: r.grade, school_year: term.year, semester: term.semester,
-        exam_type: examType, exam_date: r.exam_date, exam_end_date: r.exam_end_date, math_exam_date: r.math_exam_date, textbook: r.textbook, scope: r.scope
-      })));
+      await api('saveSchoolExamsBatch', items);
       toast(`${filled.length}개 학교 시험 일정을 저장했습니다.`);
       onSaved();
     } catch (err) {
@@ -239,7 +227,7 @@ function ScheduleTab({ tabs }) {
                             <Fragment key={x.school_exam_id}>
                               <tr>
                                 <td><strong>{x.school}</strong> <span className="muted">{x.grade}</span>{x.exam_type === '기타' ? <div className="muted">{x.title}</div> : null}</td>
-                                <td>{x.exam_date ? <>{dateRange(x.exam_date, x.exam_end_date, formatDate)} <MathDay x={x} /><DDay d={x.d_day} inProgress={x.in_progress} /></> : <span className="tag warn">미정</span>}</td>
+                                <td>{x.exam_date ? <>{dateRange(x.exam_date, x.exam_end_date, formatDate)} <MathDay x={x} /><DDay x={x} /></> : <span className="tag warn">미정</span>}</td>
                                 <td>{x.textbook || <span className="muted">-</span>}</td>
                                 <td className="prewrap">{x.scope || <span className="muted">미입력</span>}</td>
                                 <td className="num">
@@ -261,7 +249,7 @@ function ScheduleTab({ tabs }) {
                         <li key={x.school_exam_id} className="ex-card">
                           <div className="ex-card-head">
                             <strong>{x.school} {x.grade}</strong>
-                            {x.exam_date ? <span className="ex-card-date">{dateRange(x.exam_date, x.exam_end_date, shortDate)} <MathDay x={x} /><DDay d={x.d_day} inProgress={x.in_progress} /></span> : <span className="tag warn">미정</span>}
+                            {x.exam_date ? <span className="ex-card-date">{dateRange(x.exam_date, x.exam_end_date, shortDate)} <MathDay x={x} /><DDay x={x} /></span> : <span className="tag warn">미정</span>}
                           </div>
                           {x.exam_type === '기타' && x.title ? <div className="muted">{x.title}</div> : null}
                           <div className="prewrap">

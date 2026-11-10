@@ -200,6 +200,7 @@ src/00_Core.js  도메인 상수 · 순수 계산 · 보고서 문장 (브라우
 src/01_Service.js  저장소에 의존하지 않는 업무 API
 src/02_Assignments.js  반 배정 조회: 다니는 반 · 반 구성원 · 수업 기록 대상 (서버 전용, GLOSSARY.md 용어)
 src/03_Sessions.js  반 기록(원본) → 학생 수업 기록 복사와 역방향 반영 (서버 전용)
+src/04_SchoolExams.js  학교 시험 일정: 입력 검사 · 시험 view(D-day·색·표시 문구) · 다가오는 시험 고르기 (브라우저에서도 import, GLOSSARY.md 용어)
 src/05_Views.js 화면용 조회 API (반·학생·오늘·시험·보고서)
 src/06_Plans.js 강의 계획: 단원 분할·초안·고치기·확정·휴강
 src/07_Agent.js AI 비서: 대화·변경 제안 저장, 승인 시 실행·검증

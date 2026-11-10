@@ -5,6 +5,7 @@
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
   LMS = require('../00_Core.js');
+  require('../04_SchoolExams.js');
 }
 
 (function () {
@@ -80,7 +81,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
   /** Validated input plus the stored row it will update (by id, else by school/grade/exam key). */
   function prepareSchoolExam(rows, data) {
-    var input = LMS.validateSchoolExamInput(data);
+    var input = LMS.schoolExams.validate(data);
     var row = input.school_exam_id ? LMS.findById(rows, 'school_exam_id', input.school_exam_id) : null;
     if (input.school_exam_id && !row) throw new Error('시험 일정(' + input.school_exam_id + ')을 찾을 수 없습니다.');
     var key = LMS.schoolExamKey(input);
