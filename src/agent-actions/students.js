@@ -1,6 +1,7 @@
 /**
  * AI write actions: students and class assignments. Definition shape: src/08_AgentActions.js.
- * Previews repeat the service's checks on the tables without writing; run re-checks everything.
+ * Previews ask the assignment module's checks (svc.assignments.check), so a preview refuses with
+ * the message the change itself would throw; run re-checks everything.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
@@ -62,16 +63,9 @@ function stuDate_(v, label) {
   return d;
 }
 
-function stuIsExamClass_(svc, classId) {
-  var c = LMS.findById(svc.table('Classes'), 'class_id', classId);
-  return !!c && stuStr_(c.class_type) === '시험대비';
-}
-
-/** 열린 정규 배정 (same rule as assignments.openRegular). */
-function stuOpenRegular_(svc, studentId) {
-  return svc.table('StudentClasses').filter(function (r) {
-    return stuStr_(r.student_id) === stuStr_(studentId) && stuStr_(r.status) === '현재' && !stuIsExamClass_(svc, r.class_id);
-  });
+/** Throws the assignment module's refusal ('' passes). */
+function stuRefuse_(problem) {
+  if (problem) throw new Error(problem);
 }
 
 function stuClassNames_(svc, rels) {
@@ -115,39 +109,6 @@ function stuRelLabel_(rel) {
   return stuStr_(rel.start_date) + ' ~ ' + (stuStr_(rel.end_date) || '현재');
 }
 
-function stuLessonOnOrAfter_(svc, studentId, classId, from) {
-  return svc.table('Lessons').filter(function (l) {
-    return stuStr_(l.student_id) === stuStr_(studentId) && stuStr_(l.class_id) === stuStr_(classId) && stuStr_(l.lesson_date) >= from;
-  }).map(function (l) { return stuStr_(l.lesson_date); }).sort()[0] || '';
-}
-
-/** Same rules as assignments.moveProblem. */
-function stuMoveProblem_(svc, rel, toClassId, start) {
-  if (stuStr_(rel.class_id) === stuStr_(toClassId)) return '지금 다니는 반과 같은 반입니다.';
-  var cls = LMS.findById(svc.table('Classes'), 'class_id', toClassId);
-  if (!cls) return '옮겨 갈 반을 찾을 수 없습니다.';
-  if (stuStr_(cls.status) !== '운영') return '종료된 반으로는 옮길 수 없습니다.';
-  if (stuStr_(cls.class_type) === '시험대비') return '시험대비 반은 시험 화면에서 편성해 주세요.';
-  var already = stuOpenRegular_(svc, rel.student_id).some(function (r) { return stuStr_(r.class_id) === stuStr_(toClassId); });
-  if (already) return '이미 ' + cls.class_name + '에 다니고 있습니다.';
-  if (start <= stuStr_(rel.start_date)) return '이동일은 지금 반 시작일(' + rel.start_date + ') 다음 날부터 고를 수 있습니다.';
-  var later = stuLessonOnOrAfter_(svc, rel.student_id, rel.class_id, start);
-  if (later) return '이동일 이후(' + later + ') 지금 반에 수업 기록이 있습니다. 이동일을 그 뒤로 잡아 주세요.';
-  return '';
-}
-
-/** Same checks as assignments.assign (except the overlap with an older row, left to the service). */
-function stuAssignProblem_(svc, student, cls) {
-  if (stuStr_(student.status) === '퇴원') return '퇴원한 학생은 반에 배정할 수 없습니다.';
-  if (stuStr_(cls.status) !== '운영') return '종료된 반에는 배정할 수 없습니다.';
-  if (stuStr_(cls.class_type) === '시험대비') return '시험대비 반은 add_temp_assignment로 편성해 주세요.';
-  var exists = svc.table('StudentClasses').some(function (r) {
-    return stuStr_(r.student_id) === stuStr_(student.student_id) && stuStr_(r.class_id) === stuStr_(cls.class_id) && stuStr_(r.status) === '현재';
-  });
-  if (exists) return '이미 해당 반에 소속되어 있습니다.';
-  return '';
-}
-
 function stuPickFields_(args) {
   var out = {};
   STU_FIELDS_.forEach(function (k) {
@@ -158,7 +119,7 @@ function stuPickFields_(args) {
 
 function stuWithdrawNote_(svc, studentIds) {
   var rels = [];
-  studentIds.forEach(function (sid) { rels = rels.concat(stuOpenRegular_(svc, sid)); });
+  studentIds.forEach(function (sid) { rels = rels.concat(svc.assignments.openRegular(sid)); });
   return rels.length ? ' · 반 배정 ' + rels.length + '건(' + stuNames_(stuClassNames_(svc, rels)) + ') 종료' : '';
 }
 
@@ -181,8 +142,10 @@ var actions = {
       var classPart = '';
       if (classId) {
         var cls = stuClass_(svc, classId);
-        var problem = stuAssignProblem_(svc, { student_id: '', status: input.status }, cls);
-        if (problem) throw new Error(problem);
+        stuRefuse_(svc.assignments.check.assign(
+          { class_id: cls.class_id, start_date: input.enrollment_date },
+          { student_id: '', status: input.status }
+        ));
         classPart = ' · ' + cls.class_name + ' 배정 (' + (input.enrollment_date || '오늘') + '부터)';
       }
       var same = svc.table('Students').filter(function (s) { return stuStr_(s.name) === input.name; });
@@ -204,7 +167,7 @@ var actions = {
     verify: function (svc, args, ran) {
       var row = ran && ran.student_id ? LMS.findById(svc.table('Students'), 'student_id', ran.student_id) : null;
       var ok = !!row && stuStr_(row.name) === stuStr_(args.name);
-      if (ok && args.class_id) ok = stuOpenRegular_(svc, row.student_id).some(function (r) { return stuStr_(r.class_id) === stuStr_(args.class_id); });
+      if (ok && args.class_id) ok = svc.assignments.openRegular(row.student_id).some(function (r) { return stuStr_(r.class_id) === stuStr_(args.class_id); });
       return { ok: ok, after: row ? row.student_id : '' };
     }
   },
@@ -277,7 +240,7 @@ var actions = {
     },
     verify: function (svc, args) {
       var row = LMS.findById(svc.table('Students'), 'student_id', args.student_id);
-      var ok = !!row && stuStr_(row.status) === '퇴원' && !stuOpenRegular_(svc, args.student_id).length;
+      var ok = !!row && stuStr_(row.status) === '퇴원' && !svc.assignments.openRegular(args.student_id).length;
       return { ok: ok, after: row ? stuStr_(row.status) : '' };
     }
   },
@@ -378,9 +341,8 @@ var actions = {
       var student = stuRow_(svc, args.student_id);
       var cls = stuClass_(svc, args.class_id);
       var start = stuDate_(args.start_date, '반 시작일');
-      var problem = stuAssignProblem_(svc, student, cls);
-      if (problem) throw new Error(problem);
-      var others = stuClassNames_(svc, stuOpenRegular_(svc, student.student_id));
+      stuRefuse_(svc.assignments.check.assign({ student_id: student.student_id, class_id: cls.class_id, start_date: start }));
+      var others = stuClassNames_(svc, svc.assignments.openRegular(student.student_id));
       return {
         args: { student_id: student.student_id, class_id: cls.class_id, start_date: start },
         target: { student_id: student.student_id, student_name: stuStr_(student.name), class_name: stuStr_(cls.class_name), date: start },
@@ -419,7 +381,7 @@ var actions = {
       var student = stuRow_(svc, args.student_id);
       var to = stuClass_(svc, args.class_id);
       var start = stuDate_(args.start_date, '이동일');
-      var open = stuOpenRegular_(svc, student.student_id);
+      var open = svc.assignments.openRegular(student.student_id);
       var rel;
       if (stuStr_(args.from_class_id)) {
         rel = open.filter(function (r) { return stuStr_(r.class_id) === stuStr_(args.from_class_id); })[0];
@@ -429,11 +391,11 @@ var actions = {
         if (open.length > 1) throw new Error(student.name + ' 학생은 두 반 이상(' + stuClassNames_(svc, open).join(', ') + ') 다닙니다. from_class_id로 어느 반에서 옮길지 정해 주세요.');
         rel = open[0];
       }
-      var problem = stuMoveProblem_(svc, rel, to.class_id, start);
-      if (problem) throw new Error(problem);
+      var out = { student_id: student.student_id, class_id: to.class_id, from_class_id: stuStr_(rel.class_id), start_date: start };
+      stuRefuse_(svc.assignments.check.move(out));
       var fromName = LMS.agentClassName(svc.table, rel.class_id);
       return {
-        args: { student_id: student.student_id, class_id: to.class_id, from_class_id: stuStr_(rel.class_id), start_date: start },
+        args: out,
         target: { student_id: student.student_id, student_name: stuStr_(student.name), class_name: stuStr_(to.class_name), date: start },
         before: fromName,
         after: stuStr_(to.class_name),
@@ -445,7 +407,7 @@ var actions = {
     },
     verify: function (svc, args, ran) {
       var rel = ran && ran.id ? stuRel_(svc, ran.id) : null;
-      var open = stuOpenRegular_(svc, args.student_id);
+      var open = svc.assignments.openRegular(args.student_id);
       var ok = !!rel && stuStr_(rel.status) === '현재' && stuStr_(rel.class_id) === args.class_id &&
         !open.some(function (r) { return stuStr_(r.class_id) === args.from_class_id; });
       return { ok: ok, after: rel ? LMS.agentClassName(svc.table, rel.class_id) : '' };
@@ -474,18 +436,11 @@ var actions = {
       var start = stuDate_(args.date, '이동일');
       var ids = LMS.uniqueIds(args.student_ids);
       if (!ids.length) throw new Error('옮길 학생을 골라 주세요.');
-      var names = [];
-      var problems = [];
-      ids.forEach(function (sid) {
-        var s = stuRow_(svc, sid);
-        names.push(s.name);
-        var rel = stuOpenRegular_(svc, sid).filter(function (r) { return stuStr_(r.class_id) === stuStr_(from.class_id); })[0];
-        var problem = rel ? stuMoveProblem_(svc, rel, to.class_id, start) : '이 반의 정규 배정이 아닙니다.';
-        if (problem) problems.push(s.name + ': ' + problem);
-      });
-      if (problems.length) throw new Error('옮기지 않았습니다.\n' + problems.join('\n'));
+      var names = ids.map(function (sid) { return stuRow_(svc, sid).name; });
+      var out = { from_class_id: from.class_id, to_class_id: to.class_id, student_ids: ids, date: start };
+      stuRefuse_(svc.assignments.check.moveMany(out));
       return {
-        args: { from_class_id: from.class_id, to_class_id: to.class_id, student_ids: ids, date: start },
+        args: out,
         target: { student_id: '', student_name: names.join(', '), class_name: stuStr_(to.class_name), date: start },
         before: stuStr_(from.class_name),
         after: stuStr_(to.class_name),
@@ -497,7 +452,7 @@ var actions = {
     },
     verify: function (svc, args) {
       var bad = args.student_ids.filter(function (sid) {
-        var open = stuOpenRegular_(svc, sid);
+        var open = svc.assignments.openRegular(sid);
         return !open.some(function (r) { return stuStr_(r.class_id) === args.to_class_id; }) ||
           open.some(function (r) { return stuStr_(r.class_id) === args.from_class_id; });
       });
@@ -517,11 +472,8 @@ var actions = {
     preview: function (svc, args) {
       args = args || {};
       var rel = stuPickRel_(svc, args, 'open');
-      if (stuStr_(rel.status) !== '현재') throw new Error('현재 반 배정이 아닙니다(' + stuStr_(rel.status) + ').');
       var end = stuDate_(args.end_date, '마지막 수업일');
-      if (end < stuStr_(rel.start_date)) throw new Error('마지막 수업일이 반 시작일(' + rel.start_date + ')보다 빠릅니다. 잘못 넣은 배정이면 remove_student_class를 써 주세요.');
-      var later = stuLessonOnOrAfter_(svc, rel.student_id, rel.class_id, LMS.addDays(end, 1));
-      if (later) throw new Error('마지막 수업일 뒤(' + later + ')에 이 반 수업 기록이 있습니다. 날짜를 그 뒤로 잡아 주세요.');
+      stuRefuse_(svc.assignments.check.close({ id: rel.id, end_date: end }));
       var name = LMS.agentStudentName(svc.table, rel.student_id);
       var cname = LMS.agentClassName(svc.table, rel.class_id);
       return {
@@ -553,16 +505,9 @@ var actions = {
     preview: function (svc, args) {
       args = args || {};
       var rel = stuPickRel_(svc, args, 'regular');
-      if (stuStr_(rel.status) === '임시') throw new Error('시험대비 임시 배정은 시험 화면에서 바꿔 주세요.');
+      stuRefuse_(svc.assignments.check.remove({ id: rel.id }));
       var sid = stuStr_(rel.student_id);
       var cid = stuStr_(rel.class_id);
-      var lessons = svc.table('Lessons').filter(function (l) { return stuStr_(l.student_id) === sid && stuStr_(l.class_id) === cid; }).length;
-      var items = {};
-      svc.table('HomeworkItems').forEach(function (it) { if (stuStr_(it.class_id) === cid) items[stuStr_(it.item_id)] = true; });
-      var checks = svc.table('HomeworkChecks').filter(function (c) { return stuStr_(c.student_id) === sid && items[stuStr_(c.item_id)]; }).length;
-      if (lessons || checks) {
-        throw new Error('이 반에 수업 기록 ' + lessons + '건, 숙제 체크 ' + checks + '건이 있어 배정을 삭제할 수 없습니다. close_student_class(반에서 빼기)를 써 주세요.');
-      }
       var name = LMS.agentStudentName(svc.table, sid);
       var cname = LMS.agentClassName(svc.table, cid);
       return {
@@ -637,28 +582,20 @@ var actions = {
     preview: function (svc, args) {
       args = args || {};
       var cls = stuClass_(svc, args.class_id);
-      if (stuStr_(cls.class_type) !== '시험대비') throw new Error(cls.class_name + '은(는) 시험대비 반이 아닙니다. 정규 반은 assign_student_to_class를 써 주세요.');
-      var period = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', cls.exam_period_id);
-      if (!period) throw new Error('시험대비 기간을 찾을 수 없습니다.');
       var student = stuRow_(svc, args.student_id);
-      if (stuStr_(student.status) !== '재원') throw new Error(student.name + ' 학생은 재원생이 아니라 편성할 수 없습니다.');
+      var given = [stuStr_(args.start_date), stuStr_(args.end_date)].filter(Boolean);
+      if (!given.every(LMS.isIsoDate)) throw new Error('날짜를 YYYY-MM-DD로 입력해 주세요.');
+      stuRefuse_(svc.assignments.check.addTemp({ class_id: cls.class_id, student_id: student.student_id, start_date: args.start_date, end_date: args.end_date }));
+      var period = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', cls.exam_period_id);
       var start = stuStr_(args.start_date) || stuStr_(period.start_date);
       var end = stuStr_(args.end_date) || stuStr_(period.end_date);
-      if (!LMS.isIsoDate(start) || !LMS.isIsoDate(end)) throw new Error('날짜를 YYYY-MM-DD로 입력해 주세요.');
-      if (start < period.start_date || end > period.end_date || end < start) {
-        throw new Error('날짜는 시험대비 기간(' + period.start_date + ' ~ ' + period.end_date + ') 안이어야 합니다.');
-      }
-      var clash = svc.table('StudentClasses').filter(function (r) {
-        return stuStr_(r.status) === '임시' && stuStr_(r.student_id) === stuStr_(student.student_id) && LMS.rangesOverlap(r.start_date, r.end_date, start, end);
-      })[0];
-      if (clash) throw new Error(student.name + ' 학생은 그 기간에 이미 다른 시험대비 반(' + LMS.agentClassName(svc.table, clash.class_id) + ')에 배정되어 있습니다.');
       var out = { class_id: cls.class_id, student_id: student.student_id, start_date: start, end_date: end };
       var source = '';
       if (stuStr_(args.source_class_id)) {
         out.source_class_id = stuClass_(svc, args.source_class_id).class_id;
         source = LMS.agentClassName(svc.table, out.source_class_id);
       } else {
-        source = stuClassNames_(svc, stuOpenRegular_(svc, student.student_id)).join(', ');
+        source = stuClassNames_(svc, svc.assignments.openRegular(student.student_id)).join(', ');
       }
       return {
         args: out,
@@ -690,13 +627,9 @@ var actions = {
     preview: function (svc, args) {
       args = args || {};
       var rel = stuPickRel_(svc, args, 'temp');
-      if (stuStr_(rel.status) !== '임시') throw new Error('시험대비 임시 배정이 아닙니다.');
-      var cls = stuClass_(svc, rel.class_id);
-      var period = LMS.findById(svc.table('ExamPeriods'), 'exam_period_id', cls.exam_period_id);
-      if (!period) throw new Error('시험대비 기간을 찾을 수 없습니다.');
       var d = stuDate_(args.date, '마지막 수업일');
-      if (d < stuStr_(rel.start_date)) throw new Error('마지막 수업일이 시작일(' + rel.start_date + ')보다 빠릅니다.');
-      if (d > period.end_date) throw new Error('마지막 수업일은 시험대비 기간(~' + period.end_date + ') 안이어야 합니다.');
+      stuRefuse_(svc.assignments.check.endTemp(rel.id, d));
+      var cls = stuClass_(svc, rel.class_id);
       var name = LMS.agentStudentName(svc.table, rel.student_id);
       return {
         args: { rel_id: rel.id, date: d },
