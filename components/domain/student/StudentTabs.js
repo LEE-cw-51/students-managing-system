@@ -8,7 +8,7 @@ import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { dateRange, formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
+import { dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
@@ -271,7 +271,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
       <div className="kpis sd-kpis">
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${next.class_name} · ${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회 · 결석 ${month.absent_count}`} />
-        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 확인한 숙제 중 A" />
+        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note={`이번 달 A 비율 · 숙제 평균 점수 ${pointsLabel(month.homework_average)}`} />
         <Kpi label="테스트 평균" value={month.test_average_display} note={month.test_count ? `이번 달 ${month.test_count}회 · 100점 환산` : '이번 달 테스트 없음'} />
         <Kpi label="과제 A 비율" value={percent(month.assignment_a_rate)} note="이번 달 과제 이행" />
       </div>
@@ -534,6 +534,7 @@ export function HomeworkTab({ studentId }) {
           <>
             <div className="kpis">
               <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개 중 A`} />
+              <Kpi label="숙제 평균 점수" value={pointsLabel(d.average)} note="A 100 · B 89 · C 79 · D 69 · E 59 · F 50" />
               <Kpi label="미완료" value={`${d.missing.length}개`} note="A가 아닌 숙제" tone={d.missing.length ? 'terracotta' : undefined} />
             </div>
             {d.missing.length ? (

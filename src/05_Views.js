@@ -205,7 +205,8 @@ LMS.createViews = function (ctx) {
     var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
     var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
 
-    var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: monthStart, to: today }));
+    var homeworkCells = homeworkCells_({ classId: classId, from: monthStart, to: today });
+    var homework = LMS.homeworkRate(homeworkCells);
 
     var sessionDates = {};
     table('ClassSessions').forEach(function (r) {
@@ -236,6 +237,7 @@ LMS.createViews = function (ctx) {
         lesson_count: Object.keys(lessons.reduce(function (m, l) { m[l.lesson_date] = 1; return m; }, {})).length,
         attendance_rate: LMS.attendanceRate(lessons),
         homework_rate: homework.rate,
+        homework_average: LMS.homeworkAverage(homeworkCells),
         test_average: scores.average,
         test_average_display: collected.comparable ? scores.average_display : '-'
       },
@@ -353,7 +355,8 @@ LMS.createViews = function (ctx) {
         }),
         cells: cells,
         checked: homework.checked > 0,
-        rate: homework.rate
+        rate: homework.rate,
+        average: LMS.homeworkAverage(checkedByDate[d])
       };
     });
     return {
@@ -488,7 +491,8 @@ LMS.createViews = function (ctx) {
       var lessons = classLessons(classId, range.start, range.end);
       var collected = LMS.collectRawScoresForStats(classPaperLessons_(lessons));
       var scores = LMS.computeScoreStats(collected.comparable ? collected.scores : []);
-      var homework = LMS.homeworkRate(homeworkCells_({ classId: classId, from: range.start, to: range.end }));
+      var homeworkCells = homeworkCells_({ classId: classId, from: range.start, to: range.end });
+      var homework = LMS.homeworkRate(homeworkCells);
       var assignTotal = 0;
       var assignA = 0;
       lessons.forEach(function (l) {
@@ -504,6 +508,7 @@ LMS.createViews = function (ctx) {
         lesson_days: Object.keys(lessons.reduce(function (acc, l) { acc[l.lesson_date] = 1; return acc; }, {})).length,
         attendance_rate: LMS.attendanceRate(lessons),
         homework_rate: homework.rate,
+        homework_average: LMS.homeworkAverage(homeworkCells),
         assignment_a_rate: pct(assignA, assignTotal),
         test_average: scores.average,
         test_comparable: collected.comparable
@@ -790,7 +795,8 @@ LMS.createViews = function (ctx) {
       return LMS.toStr(l.student_id) === LMS.toStr(studentId) && LMS.inRange(l.lesson_date, start, end);
     });
     var absent = lessons.filter(function (l) { return LMS.toStr(l.attendance) === '결석'; }).length;
-    var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
+    var homeworkCells = homeworkCells_({ studentId: studentId, from: start, to: end });
+    var homework = LMS.homeworkRate(homeworkCells);
     var scores = LMS.computeScoreStats(LMS.collectNormalizedScores(lessons));
     var assign = lessons.map(function (l) { return LMS.assignmentCode(l.assignment_completion); }).filter(Boolean);
     return {
@@ -798,6 +804,7 @@ LMS.createViews = function (ctx) {
       absent_count: absent,
       attendance_rate: LMS.attendanceRate(lessons),
       homework_rate: homework.rate,
+      homework_average: LMS.homeworkAverage(homeworkCells),
       test_count: scores.count,
       test_average_display: scores.average_display,
       assignment_a_rate: pct(assign.filter(function (a) { return a === 'A'; }).length, assign.length)
@@ -982,8 +989,12 @@ LMS.createViews = function (ctx) {
         }
       });
     });
-    var homework = LMS.homeworkRate(homeworkCells_({ studentId: studentId, from: start, to: end }));
-    return { start: start, end: end, rows: rows, rate: homework.rate, checked: homework.checked, missing: missing };
+    var homeworkCells = homeworkCells_({ studentId: studentId, from: start, to: end });
+    var homework = LMS.homeworkRate(homeworkCells);
+    return {
+      start: start, end: end, rows: rows, rate: homework.rate, average: LMS.homeworkAverage(homeworkCells),
+      checked: homework.checked, missing: missing
+    };
   }
 
   /** Tests the student took with the class average of the same day. */

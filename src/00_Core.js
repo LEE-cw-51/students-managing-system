@@ -705,6 +705,22 @@ LMS.homeworkRate = function (cells) {
   return { done: done, checked: checked, rate: checked ? Math.round((done / checked) * 100) : null };
 };
 
+/**
+ * 숙제 평균 점수 over the same homework check rows as LMS.homeworkRate: the rounded average
+ * of item points (LMS.ASSIGNMENT_POINTS, A 100 … F 50). null when nothing was graded.
+ */
+LMS.homeworkAverage = function (cells) {
+  var checked = 0;
+  var sum = 0;
+  (cells || []).forEach(function (c) {
+    var code = LMS.homeworkGrade(c && c.status);
+    if (!code) return;
+    checked += 1;
+    sum += LMS.ASSIGNMENT_POINTS[code];
+  });
+  return checked ? Math.round(sum / checked) : null;
+};
+
 /** 출석률 (%): lesson records that are not 결석 over all records. null when there are none. */
 LMS.attendanceRate = function (lessons) {
   var rows = lessons || [];

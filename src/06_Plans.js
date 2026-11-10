@@ -705,6 +705,7 @@ LMS.createPlanner = function (ctx) {
         grade: LMS.toStr(s.grade),
         attendance_rate: LMS.attendanceRate(own),
         homework_rate: LMS.homeworkRate(mine).rate,
+        homework_average: LMS.homeworkAverage(mine),
         recent_tests: own.filter(function (l) { return LMS.toStr(l.test_status) === '실시'; }).slice(-4).map(function (l) {
           return { date: l.lesson_date, score: LMS.toNum(l.test_score), max: LMS.toNum(l.test_max_score) };
         }),
@@ -744,7 +745,8 @@ LMS.createPlanner = function (ctx) {
         }).slice(-12),
         class_stats_last_4_weeks: {
           attendance_rate: LMS.attendanceRate(lessons),
-          homework_rate: LMS.homeworkRate(homeworkCells).rate
+          homework_rate: LMS.homeworkRate(homeworkCells).rate,
+          homework_average: LMS.homeworkAverage(homeworkCells)
         },
         upcoming_school_exams: LMS.schoolExams.upcoming(schoolExamRows, now, 60).filter(function (e) {
           return exams[e.school_exam_id];
