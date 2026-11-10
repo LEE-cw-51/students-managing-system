@@ -47,6 +47,12 @@
 - **이미 처리됨**: 반영된 제안을 다시 반영하거나 거절된 제안을 다시 거절하면 그대로 돌려줍니다. 다른 처리된 제안은 `이미 처리된 제안입니다.`로 거부합니다. 이 규칙은 `src/07_Agent.js`의 한 곳에서만 판단합니다.
 - **호출자**: 제안 interface를 부르는 쪽입니다. `APP_SESSION`(앱에 로그인한 강사)과 `MCP_CONNECTOR`(Claude 커넥터) 둘뿐입니다. 둘 다 제안을 만들 수 있고, **반영과 거절은 `APP_SESSION`만** 할 수 있습니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)).
 
+## 쓰기 모드
+
+- **쓰기 모드** (`mcp_write_mode`): Claude 커넥터가 쓰기 도구를 쓸 수 있는지입니다. `read_only`(조회만)와 `proposal`(승인 대기 제안) 둘뿐입니다. 예전 값 `direct`, `claude_approve`는 DB를 고치지 않고 읽을 때 `proposal`로 보고, 그 밖의 값은 `read_only`로 봅니다(`LMS.normalizeMcpWriteMode`). 설정을 저장할 때의 규칙은 `LMS.mcpWriteModeToStore` 한 곳에 있습니다. 어느 모드도 바로 저장하지 않고, 승인은 앱에서만 합니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)).
+- **쓰기 정책**: 화면(`assistant` AI 비서, `mcp` Claude 커넥터)과 쓰기 모드를 받아 어떤 도구를 내놓는지, 모델에게 보이는 도구 설명, 승인 대기에 올린 뒤의 상태 문구, 지시문의 쓰기 규칙을 답합니다. `lib/write-policy.js`(`writePolicy`)만 정하고, AI 비서와 MCP 서버는 이 답을 그대로 씁니다. AI 비서는 모드가 없어 늘 `proposal`입니다.
+  - 쓰기 도구 설명 앞의 `[승인 필요]`는 정책이 붙입니다. 쓰기 동작(`src/agent-actions/*`)의 설명에는 넣지 않습니다.
+
 ## AI 비서
 
 - **AI 제공자**(provider): AI 비서 한 턴의 모델 대화를 맡는 adapter입니다. 턴(`system`, `history`, `message`)을 받아 `send` → `{ text, toolCalls, model }`와 `addToolResults`를 가진 대화를 돌려줍니다. 도구 실행, 제안 모으기, 시간 예산, 진행 이벤트는 `lib/agent.js`의 도구 루프가 맡고, 제공자는 요청 형식과 오류 문구만 압니다.

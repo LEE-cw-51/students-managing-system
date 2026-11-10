@@ -4,8 +4,7 @@ import { clientIp, reserveClientRegistration } from '../../../../lib/login-limit
 export const runtime = 'nodejs';
 
 export async function POST(req) {
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== 'object') return oauthError('invalid_client_metadata', 'JSON 본문이 필요합니다.');
+  // Counted before the body is read, so malformed or oversized bodies use up the limit too.
   const gate = await reserveClientRegistration(clientIp(req.headers));
   if (!gate.ok) {
     const retryAfter = String(Math.max(1, Math.ceil(gate.retryAfterMs / 1000)));
@@ -15,6 +14,8 @@ export async function POST(req) {
       { 'Retry-After': retryAfter }
     );
   }
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== 'object') return oauthError('invalid_client_metadata', 'JSON 본문이 필요합니다.');
   const result = registerClient(body);
   if (result.error) return oauthError(result.error, result.error_description);
   return corsJson(result.client, 201);

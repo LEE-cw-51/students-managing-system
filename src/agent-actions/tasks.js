@@ -95,7 +95,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
     create_counseling: {
       label: '상담 기록',
       progress: '상담 기록 준비 중',
-      description: '[승인 필요] 학생 상담 기록을 추가합니다. 후속 조치 날짜를 넣으면 그날 할 일이 함께 생깁니다.',
+      description: '학생 상담 기록을 추가합니다. 후속 조치 날짜를 넣으면 그날 할 일이 함께 생깁니다.',
       surfaces: ['assistant', 'mcp'],
       destructive: false,
       parameters: {
@@ -147,7 +147,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
     update_task_status: {
       label: '할 일 상태',
       progress: '할 일 변경 준비 중',
-      description: '[승인 필요] 할 일의 상태를 바꿉니다(완료 처리 등). task_id는 get_student_profile 또는 get_today_board에서 찾습니다.',
+      description: '할 일의 상태를 바꿉니다(완료 처리 등). task_id는 get_student_profile 또는 get_today_board에서 찾습니다.',
       surfaces: ['assistant', 'mcp'],
       parameters: {
         type: 'object',

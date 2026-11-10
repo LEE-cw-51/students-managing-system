@@ -158,8 +158,8 @@ describe('agent tools', () => {
       assert.equal(t.parameters, a.parameters, t.name);
       assert.equal(t.description, a.description, t.name);
       assert.deepEqual(t.surfaces, a.surfaces, t.name);
-      if (t.surfaces.includes('assistant')) assert.match(t.description, /승인 필요/);
     });
+    assistantTools().filter((t) => t.kind === 'write').forEach((t) => assert.match(t.description, /^\[승인 필요\] /, t.name));
   });
 
   it('builds OpenAI-style definitions and cuts long results', () => {
