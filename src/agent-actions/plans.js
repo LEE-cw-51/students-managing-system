@@ -1,15 +1,24 @@
 /**
- * AI write actions: class plans (진도). Same shape as LMS.AGENT_WRITE_ACTIONS in 07_Agent.js
- * ({ label, preview, run, verify }); each name needs a tool in lib/mcp-tools/write-plans.js.
+ * AI write actions: class plans (진도). Definition shape: src/08_AgentActions.js.
  * cancelClassDate (06_Plans.js) belongs to the class actions.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
-  LMS = require('../07_Agent.js');
+  LMS = require('../00_Core.js');
 }
 
 (function () {
-  var PLAN_TEXT_FIELDS = ['title', 'objectives', 'content', 'materials', 'homework', 'memo'];
+  var CLASS_ID = LMS.AGENT_PARAM.classId;
+  var PLAN_ID = { type: 'string', description: '강의 계획 ID (예: PLN-0005). get_class_plans 또는 get_plan_board에서 찾습니다.' };
+  var PLAN_TEXT_PARAMS = {
+    title: { type: 'string', description: '제목' },
+    objectives: { type: 'string', description: '학습 목표' },
+    content: { type: 'string', description: '수업 내용' },
+    materials: { type: 'string', description: '교재·자료' },
+    homework: { type: 'string', description: '숙제' },
+    memo: { type: 'string', description: '메모' }
+  };
+  var PLAN_TEXT_FIELDS = Object.keys(PLAN_TEXT_PARAMS);
   var PLAN_LABELS = { title: '제목', objectives: '목표', content: '내용', materials: '자료', homework: '숙제', memo: '메모' };
 
   function requireClass(svc, classId) {
@@ -33,9 +42,23 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
     return LMS.toStr(p.title) || LMS.toStr(p.content).slice(0, 40) || LMS.toStr(p.objectives).slice(0, 40);
   }
 
-  LMS.registerAgentWriteActions({
+  var actions = {
     save_class_plan: {
       label: '강의 계획 저장',
+      progress: '강의 계획 저장 준비 중',
+      description: '반의 일간·주간·월간 강의 계획을 작성하거나 고칩니다. 같은 반·기간 계획이 이미 있으면 그 계획을 고치며, 넣지 않은 항목은 그대로 둡니다. 자동 분배된 계획을 고치면 직접 작성한 계획으로 바뀝니다.',
+      parameters: {
+        type: 'object',
+        properties: Object.assign({
+          plan_id: Object.assign({}, PLAN_ID, { description: '고칠 계획 ID (선택). 없으면 class_id·period_type·period_key로 찾거나 새로 만듭니다.' }),
+          class_id: CLASS_ID,
+          period_type: { type: 'string', enum: LMS.PLAN_PERIOD, description: '일간, 주간, 월간' },
+          period_key: { type: 'string', description: '일간: 날짜(YYYY-MM-DD), 주간: 그 주의 아무 날짜(YYYY-MM-DD), 월간: YYYY-MM' }
+        }, PLAN_TEXT_PARAMS, {
+          done_status: { type: 'string', enum: LMS.PLAN_DONE_STATUS.concat(['']), description: '일간 계획의 진행 결과 (선택)' }
+        }),
+        required: ['class_id', 'period_type', 'period_key']
+      },
       preview: function (svc, args) {
         args = args || {};
         var planId = LMS.toStr(args.plan_id);
@@ -109,6 +132,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
     delete_class_plan: {
       label: '강의 계획 삭제',
+      progress: '강의 계획 삭제 준비 중',
+      description: '강의 계획 하나를 지웁니다. 지우기 전에 어떤 반·기간의 계획인지 사용자에게 확인합니다.',
+      parameters: { type: 'object', properties: { plan_id: PLAN_ID }, required: ['plan_id'] },
       preview: function (svc, args) {
         var planId = LMS.toStr(args && args.plan_id);
         var plan = LMS.findById(svc.table('ClassPlans'), 'plan_id', planId);
@@ -132,6 +158,17 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
     set_daily_plan_done: {
       label: '진도 결과',
+      progress: '진도 결과 기록 준비 중',
+      description: '그날 일간 계획의 진행 결과(완료/일부/못 함)를 기록합니다. 빈 문자열이면 결과를 지웁니다. 그날 일간 계획이 있어야 합니다.',
+      parameters: {
+        type: 'object',
+        properties: {
+          class_id: CLASS_ID,
+          date: LMS.AGENT_PARAM.date('수업일'),
+          status: { type: 'string', enum: LMS.PLAN_DONE_STATUS.concat(['']), description: '완료, 일부, 못 함 (빈 문자열이면 지움)' }
+        },
+        required: ['class_id', 'date', 'status']
+      },
       preview: function (svc, args) {
         args = args || {};
         var classId = LMS.toStr(args.class_id);
@@ -159,9 +196,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return { ok: Boolean(plan) && after === args.status, after: after };
       }
     }
-  });
-})();
+  };
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = LMS;
-}
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = actions;
+  }
+})();

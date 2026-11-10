@@ -108,14 +108,16 @@ describe('agent tools', () => {
     assert.ok(att.days.some((d) => d.entries.some((e) => e.lesson_id)));
   });
 
-  it('every write tool has a matching approval action and no direct call', () => {
-    AGENT_TOOLS.filter((t) => t.kind === 'write').forEach((t) => {
+  it('write tools are the registered write actions, with no direct call', () => {
+    const writes = AGENT_TOOLS.filter((t) => t.kind === 'write');
+    assert.deepEqual(writes.map((t) => t.name).sort(), LMS.agentActions.list().map((a) => a.name).sort());
+    writes.forEach((t) => {
+      const a = LMS.agentActions.get(t.name);
       assert.equal(typeof t.call, 'undefined', t.name);
-      assert.ok(LMS.AGENT_WRITE_ACTIONS[t.name], t.name);
+      assert.equal(t.parameters, a.parameters, t.name);
+      assert.equal(t.description, a.description, t.name);
+      assert.deepEqual(t.surfaces, a.surfaces, t.name);
       if (t.surfaces.includes('assistant')) assert.match(t.description, /승인 필요/);
-    });
-    Object.keys(LMS.AGENT_WRITE_ACTIONS).forEach((name) => {
-      assert.ok(AGENT_TOOLS.some((t) => t.name === name && t.kind === 'write'), name);
     });
   });
 

@@ -1,14 +1,29 @@
 /**
- * AI write actions: schedule (보강). Same shape as LMS.AGENT_WRITE_ACTIONS in 07_Agent.js
- * ({ label, preview, run, verify }); each name needs a tool in lib/mcp-tools/write-schedule.js.
+ * AI write actions: schedule (보강). Definition shape: src/08_AgentActions.js.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};
 if (typeof module !== 'undefined' && module.exports && typeof require === 'function') {
-  LMS = require('../07_Agent.js');
+  LMS = require('../00_Core.js');
 }
 
 (function () {
-  var MAKEUP_FIELDS = ['makeup_date', 'start_time', 'end_time', 'class_id', 'title', 'memo', 'status'];
+  var CLASS_ID = LMS.AGENT_PARAM.classId;
+  var DATE = LMS.AGENT_PARAM.date;
+  var MAKEUP_ID = { type: 'string', description: '보강 ID (예: MKP-0002). get_calendar 또는 get_day_agenda에서 찾습니다.' };
+  function TIME(what) {
+    return { type: 'string', description: what + ' (HH:MM, 선택)' };
+  }
+
+  var MAKEUP_PARAMS = {
+    makeup_date: DATE('보강일'),
+    start_time: TIME('시작 시간'),
+    end_time: TIME('종료 시간'),
+    class_id: CLASS_ID,
+    title: { type: 'string', description: '제목' },
+    memo: { type: 'string', description: '메모' },
+    status: { type: 'string', enum: LMS.MAKEUP_STATUS, description: '예정, 완료, 취소' }
+  };
+  var MAKEUP_FIELDS = Object.keys(MAKEUP_PARAMS);
   var MAKEUP_LABELS = { makeup_date: '보강일', start_time: '시작', end_time: '종료', class_id: '반', title: '제목', memo: '메모', status: '상태' };
 
   function requireMakeup(svc, makeupId) {
@@ -40,11 +55,28 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
     return Boolean(row) && MAKEUP_FIELDS.every(function (k) { return LMS.toStr(row[k]) === LMS.toStr(args[k]); });
   }
 
-  LMS.registerAgentWriteActions({
+  var actions = {
     create_makeup: {
       label: '보강 추가',
+      progress: '보강 추가 준비 중',
+      description: '보강 일정을 추가합니다. kind가 반이면 class_id, 학생이면 student_ids가 필요합니다. 학생을 여럿 넣으면 학생마다 개인 보강이 하나씩 생깁니다.',
+      destructive: false,
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: LMS.MAKEUP_KIND, description: '반(반 전체 보강) 또는 학생(개인 보강)' },
+          makeup_date: DATE('보강일'),
+          start_time: TIME('시작 시간'),
+          end_time: TIME('종료 시간'),
+          class_id: Object.assign({}, CLASS_ID, { description: '반 ID (kind가 반이면 필수, list_classes로 찾음)' }),
+          student_ids: { type: 'array', maxItems: LMS.AGENT_BATCH_MAX, items: { type: 'string' }, description: '학생 ID 목록 (kind가 학생이면 필수, search_students로 찾음)' },
+          title: { type: 'string', description: '제목 (선택, 비우면 "반 이름 보강"/"학생 이름 보강")' },
+          memo: { type: 'string', description: '메모 (선택)' }
+        },
+        required: ['kind', 'makeup_date']
+      },
+      limits: { student_ids: '명' },
       preview: function (svc, args) {
-        LMS.assertAgentBatch(args && args.student_ids, '명');
         var input = LMS.validateMakeupSessionInput(Object.assign({}, args, { makeup_id: '' }), false);
         checkLinks(svc, input);
         delete input.makeup_id;
@@ -76,6 +108,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
     update_makeup: {
       label: '보강 수정',
+      progress: '보강 수정 준비 중',
+      description: '보강 일정의 날짜·시간·반·제목·메모·상태를 고칩니다. 넣지 않은 항목은 그대로 둡니다. 보강 대상 학생과 종류는 바꿀 수 없습니다(취소 후 새로 추가).',
+      parameters: { type: 'object', properties: Object.assign({ makeup_id: MAKEUP_ID }, MAKEUP_PARAMS), required: ['makeup_id'] },
       preview: function (svc, args) {
         var row = requireMakeup(svc, LMS.toStr(args && args.makeup_id));
         var merged = { makeup_id: LMS.toStr(row.makeup_id), kind: LMS.toStr(row.kind), student_id: LMS.toStr(row.student_id) };
@@ -111,6 +146,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 
     cancel_makeup: {
       label: '보강 취소',
+      progress: '보강 취소 준비 중',
+      description: '보강 일정을 취소합니다(기록은 남고 일정표에서 빠짐). 취소 전에 어떤 보강인지 사용자에게 확인합니다.',
+      parameters: { type: 'object', properties: { makeup_id: MAKEUP_ID }, required: ['makeup_id'] },
       preview: function (svc, args) {
         var row = requireMakeup(svc, LMS.toStr(args && args.makeup_id));
         if (LMS.toStr(row.status) === '취소') throw new Error('이미 취소된 보강입니다.');
@@ -131,9 +169,9 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
         return { ok: after === '취소', after: after };
       }
     }
-  });
-})();
+  };
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = LMS;
-}
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = actions;
+  }
+})();
