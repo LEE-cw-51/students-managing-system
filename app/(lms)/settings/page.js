@@ -21,10 +21,9 @@ const SECTIONS = [
 ];
 const MCP_MODES = [
   { value: 'read_only', label: '조회만', hint: 'Claude는 학생·반·수업·숙제·시험 등 모든 데이터를 읽기만 하고, 아무것도 바꿀 수 없습니다.' },
-  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 학생·반·수업·숙제·시험 등 모든 데이터의 추가·수정·삭제를 요청할 수 있습니다. Claude가 요청한 변경은 모두 AI 비서 패널의 승인 대기에 올라가고, 승인해야만 저장됩니다. 설정은 바꿀 수 없습니다.' },
-  { value: 'claude_approve', label: '승인 대기 + Claude에서 승인', hint: '승인 대기 제안과 같고, 여기에 더해 Claude 대화에서 "승인해" 또는 "거절해"라고 말하면 Claude가 승인 대기 중인 변경을 승인하거나 거절할 수 있습니다. 주의: claude.ai에서 승인·거절 도구를 \'항상 허용\'으로 두면 확인 창 없이 바로 반영됩니다.' }
+  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 학생·반·수업·숙제·시험 등 모든 데이터의 추가·수정·삭제를 요청할 수 있습니다. Claude가 요청한 변경은 모두 AI 비서 패널의 승인 대기에 올라가고, 앱에서 승인해야만 저장됩니다. 승인과 거절은 앱에서만 할 수 있고, Claude 대화에서는 할 수 없습니다. 설정은 바꿀 수 없습니다.' }
 ];
-const mcpModeOf = (v) => MCP_MODES.find((m) => m.value === (v === 'direct' ? 'proposal' : v)) || MCP_MODES[0];
+const mcpModeOf = (v) => MCP_MODES.find((m) => m.value === LMS.normalizeMcpWriteMode(v)) || MCP_MODES[0];
 const KEYS = SECTIONS.flatMap((s) => s.keys);
 const PLACEHOLDERS = { ...LMS.DEFAULT_SETTINGS, academy_name: '학원' };
 const PREVIEW_NAME = '○○○';
