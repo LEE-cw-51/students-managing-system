@@ -108,6 +108,7 @@ LMS.TABLES = {
   ],
   AgentUsage: ['used_at', 'kind'],
   OAuthJti: ['jti', 'exp_ms'],
+  OAuthGrants: ['grant_id', 'client_name', 'ver', 'created_at', 'last_used_at', 'exp_ms'],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };

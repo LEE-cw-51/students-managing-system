@@ -95,5 +95,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .oauth-title { margin: 0 0 10px; font-size: 17px; color: var(--ink); }
 .oauth-scope { margin: 0 0 12px; padding-left: 18px; font-size: 14px; line-height: 1.6; }
 .oauth-target { margin: 0 0 14px; }
+.oauth-warning {
+  margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--ink);
+  background: #f8e3d6; border-radius: 12px; padding: 10px 12px;
+}
 .oauth-actions { display: flex; gap: 8px; }
 .login-card .oauth-actions .btn[type="submit"] { flex: 1; margin-top: 0; }

@@ -16,8 +16,8 @@ process.env.AUTH_SECRET = 'test-secret';
 process.env.NODE_ENV = 'test';
 
 const {
-  clientIp, createMemoryCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage,
-  LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_GLOBAL_MAX
+  clientIp, createMemoryCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage, reserveClientRegistration,
+  LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX
 } = require('../lib/login-limit.js');
 const { SESSION_MAX_AGE, readSessionVersion, bumpSessionVersion, sessionValid } = require('../lib/session-version.js');
 const { guardPost } = require('../lib/request-guard.js');
@@ -81,6 +81,27 @@ describe('login attempt limit', () => {
   });
 });
 
+describe('OAuth client registration limit', () => {
+  it('caps registrations per IP and overall, in buckets apart from login attempts', async () => {
+    const counters = createMemoryCounters();
+    for (let i = 0; i < REGISTER_IP_MAX; i += 1) {
+      assert.equal((await reserveClientRegistration('1.2.3.4', { counters, now: T0 })).ok, true);
+    }
+    const blocked = await reserveClientRegistration('1.2.3.4', { counters, now: T0 + 1000 });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 1000);
+    assert.equal((await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + 1000 })).ok, true, 'login is counted apart');
+    assert.equal((await reserveClientRegistration('1.2.3.4', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
+
+    const all = createMemoryCounters();
+    for (let i = 0; i < REGISTER_GLOBAL_MAX; i += 1) {
+      assert.equal((await reserveClientRegistration(`10.0.0.${i}`, { counters: all, now: T0 })).ok, true);
+    }
+    assert.equal((await reserveClientRegistration('10.0.1.1', { counters: all, now: T0 })).ok, false);
+    assert.equal((await reserveLoginAttempt('10.0.1.1', { counters: all, now: T0 })).ok, true);
+  });
+});
+
 describe('session expiry and version', () => {
   const NOW = T0 + 1000;
   const DAY = 24 * 60 * 60 * 1000;
@@ -101,8 +122,9 @@ describe('session expiry and version', () => {
   });
 
   it('never takes an OAuth token or an unsigned payload for a session', () => {
-    const access = unsign(sign({ typ: 'access', cid: 'c', ver: '0', iat: 1, exp: 2 }));
+    const access = unsign(sign({ typ: 'access', cid: 'c', ver: '0', iat: 1, exp: 2 }, 'token'), 'token');
     assert.equal(sessionValid(access, '0', NOW), false);
+    assert.equal(unsign(sign({ ok: true, at: NOW }, 'token'), 'session'), null, 'a token-key signature is no session');
     assert.equal(sessionValid({ ok: true, at: NOW, typ: 'access' }, '0', NOW), false);
     assert.equal(sessionValid(null, '0', NOW), false);
   });
