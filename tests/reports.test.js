@@ -36,6 +36,34 @@ describe('monthly report board and bulk generation', () => {
     assert.equal(api.generateMonthlyReport(ids[0], 2026, 10).text, '직접 쓴 확정본');
   });
 
+  it('rejects saving new text over a confirmed report until it is un-confirmed', () => {
+    const { api, demo } = seeded();
+    const sid = demo.students[0].student_id;
+    const key = { student_id: sid, year: 2026, month: 10 };
+    api.saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' });
+    for (const status of ['임시', '확정']) {
+      assert.throws(() => api.saveMonthlyReport({ ...key, report_text: '덮어쓴 내용', status }),
+        { message: '확정된 월간 보고서는 고칠 수 없습니다. 확정을 취소한 뒤 고쳐 주세요.' });
+    }
+    assert.equal(api.generateMonthlyReport(sid, 2026, 10).existing.report_text, '확정본');
+    assert.equal(api.saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' }).status, '확정', 're-confirming the same text is a no-op');
+    assert.equal(api.saveMonthlyReport({ ...key, report_text: '확정본', status: '임시' }).status, '임시', '확정 취소');
+    const edited = api.saveMonthlyReport({ ...key, report_text: '고친 내용', status: '확정' });
+    assert.equal(edited.report_text, '고친 내용');
+    assert.equal(edited.status, '확정');
+  });
+
+  it('bulk generation skips a report confirmed even with overwrite, and keeps going', () => {
+    const { api, demo } = seeded();
+    const ids = api.getMonthlyReportBoard(demo.classes[0].class_id, 2026, 10).rows.map((r) => r.student_id);
+    api.generateMonthlyReportsBulk(ids, 2026, 10, {});
+    api.saveMonthlyReport({ student_id: ids[1], year: 2026, month: 10, report_text: '확정본', status: '확정' });
+    const res = api.generateMonthlyReportsBulk(ids, 2026, 10, { overwrite: true });
+    assert.deepEqual(res.map((r) => r.result), ['created', 'skipped', 'created', 'created']);
+    assert.equal(res[1].reason, '확정됨');
+    assert.equal(api.generateMonthlyReport(ids[1], 2026, 10).text, '확정본');
+  });
+
   it('skips students without lessons that month', () => {
     const { api, demo } = seeded();
     const res = api.generateMonthlyReportsBulk([demo.students[0].student_id], 2026, 5, {});
