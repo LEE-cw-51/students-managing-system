@@ -263,41 +263,41 @@ describe('same-name exam groups', () => {
   const roster = (t, classId, date) => t.api.getTodayClassSession(date, classId).students.map((s) => s.student_id).sort();
   const detailClass = (t, classId) => t.api.getExamPeriodDetail(t.period.exam_period_id).classes.find((c) => c.class_id === classId);
 
-  it('merges groups whose names differ only in spacing into one class', () => {
+  it('refuses two new groups whose names differ only in spacing, and saves nothing', () => {
     const t = setup();
-    const hanbit = pick(t, '한빛중');
-    const pureun = pick(t, '푸른중');
     const groups = [
-      { ...hanbit, class_name: '중2 연합반' },
-      { ...pureun, class_name: '  중2   연합반 ', schedule: [] }
+      { ...pick(t, '한빛중'), class_name: '중2 연합반' },
+      { ...pick(t, '푸른중'), class_name: '  중2   연합반 ' }
     ];
-    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] });
-    assert.equal(res.classes.length, 1);
-    const cls = res.classes[0];
-    assert.equal(cls.class_name, '중2 연합반');
-    assert.deepEqual(LMS.normalizeSchedule(cls.schedule), LMS.normalizeSchedule(hanbit.schedule), 'first group schedule');
-    assert.equal(cls.target_school, [hanbit.target_school, pureun.target_school].join(' · '));
-    assert.equal(cls.target_grade, '중2');
-    const all = [...hanbit.students, ...pureun.students].map((s) => s.student_id).sort();
-    assert.deepEqual(roster(t, cls.class_id, '2026-11-02'), all);
-    const ends = Object.fromEntries(detailClass(t, cls.class_id).students.map((m) => [m.student_id, m.end_date]));
-    hanbit.students.forEach((s) => assert.equal(ends[s.student_id], hanbit.end_date));
-    pureun.students.forEach((s) => assert.equal(ends[s.student_id], pureun.end_date));
-    assert.notEqual(hanbit.end_date, pureun.end_date, 'fixture has distinct exam dates');
+    assert.throws(() => t.api.applyExamGroups(t.period.exam_period_id, { groups, suspended_class_ids: [] }), /이미 있습니다/);
+    assert.equal(t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length, 0);
   });
 
-  it('adds students to an existing class with the same name instead of creating one', () => {
+  it('refuses a new group named like an existing class of the period', () => {
+    const t = setup();
+    t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...pick(t, '한빛중'), class_name: '중2 연합반' }], suspended_class_ids: [] });
+    assert.throws(() => t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...pick(t, '새솔중'), class_name: '중2  연합반' }] }), /이미 있습니다/);
+    assert.equal(t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length, 1);
+  });
+
+  it('adds students to an existing class by class_id, each with their own end date', () => {
     const t = setup();
     const hanbit = pick(t, '한빛중');
     const first = t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...hanbit, class_name: '중2 연합반' }], suspended_class_ids: [] });
     const classId = first.classes[0].class_id;
-    const countBefore = t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length;
     const saesol = pick(t, '새솔중');
-    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...saesol, class_name: '중2  연합반', schedule: [] }] });
+    const res = t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...saesol, class_id: classId, class_name: '중2 연합반', schedule: [] }] });
     assert.deepEqual(res.classes.map((c) => c.class_id), [classId]);
-    assert.equal(t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length, countBefore, 'no new class');
+    assert.equal(t.api.getExamPeriodDetail(t.period.exam_period_id).classes.length, 1, 'no new class');
     const all = [...hanbit.students, ...saesol.students].map((s) => s.student_id).sort();
     assert.deepEqual(roster(t, classId, '2026-11-02'), all);
+    const ends = Object.fromEntries(detailClass(t, classId).students.map((m) => [m.student_id, m.end_date]));
+    saesol.students.forEach((s) => assert.equal(ends[s.student_id], s.end_date || saesol.end_date));
+  });
+
+  it('refuses a class_id that is not a class of the period', () => {
+    const t = setup();
+    assert.throws(() => t.api.applyExamGroups(t.period.exam_period_id, { groups: [{ ...pick(t, '한빛중'), class_id: 'CLS_999999' }] }), /이 시험대비 기간의 반이 아닙니다/);
   });
 
   it('keeps differently named groups as separate classes', () => {

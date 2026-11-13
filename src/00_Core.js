@@ -506,7 +506,7 @@ LMS.validateExamPeriodInput = function (data) {
   };
 };
 
-/** Exam-prep groups whose names share this key become one class. */
+/** Exam-prep class names are compared by this key; a period never holds two classes with the same one. */
 LMS.examClassNameKey = function (name) {
   return LMS.toStr(name).replace(/\s+/g, ' ');
 };
