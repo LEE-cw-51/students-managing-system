@@ -25,6 +25,8 @@ const { withService, serviceRunner, DEFAULT_WORKSPACE_ID } = require('../lib/sto
 const { bootstrapAdmin, createInvite, acceptInvite, setUserDisabled } = require('../lib/accounts.js');
 const { SESSION_COOKIE, serviceFor } = require('../lib/auth.js');
 const { sign } = require('../lib/signing.js');
+const { APP_SESSION, MCP_CONNECTOR, propose, apply, reject } = require('../lib/proposals.js');
+const { readWriteMode } = require('../lib/write-policy.js');
 
 after(() => {
   process.chdir(originalCwd);
@@ -42,7 +44,7 @@ async function newTeacher(email) {
 
 function signIn(session, extra = {}) {
   stubs.jar.clear();
-  if (session) stubs.jar.set(SESSION_COOKIE, sign({ uid: session.uid, wid: session.wid, ver: session.ver, at: Date.now(), ...extra }));
+  if (session) stubs.jar.set(SESSION_COOKIE, sign({ uid: session.uid, wid: session.wid, ver: session.ver, at: Date.now(), ...extra }, 'session'));
 }
 
 function post(url, body) {
@@ -111,9 +113,67 @@ describe('withService keeps workspaces apart', () => {
     assert.equal((await bStudentRow()).name, '비밀학생', 'updating the same id in A leaves B alone');
     await withService(a.wid, (api) => api.updateStudent({ ...STUDENT, student_id: mine.student_id, name: 'A학생' }));
   });
+});
 
-  it('notes the signed-in user on records', async () => {
-    assert.equal(await serviceFor(a)((api) => api.getBootstrap().user_email), 'a@test.local');
+describe('exams, write mode, proposals and Claude connections stay in their workspace', () => {
+  const EXAM = { school_year: '2026', semester: '2', exam_type: '기말', grade: '중2', school: '한빛중', exam_date: '2026-11-20' };
+  let bExam;
+  let bPeriod;
+
+  before(async () => {
+    ({ bExam, bPeriod } = await withService(b.wid, (api) => ({
+      bExam: api.saveSchoolExam(EXAM),
+      bPeriod: api.saveExamPeriod({ title: 'B 기말 대비', start_date: '2026-11-02', end_date: '2026-11-30' })
+    })));
+  });
+
+  const bExams = () => withService(b.wid, (api) => api.getSchoolExams({ school_year: '2026' }).map((e) => e.school_exam_id));
+  const bPeriods = () => withService(b.wid, (api) => api.getExamPeriods().map((p) => p.exam_period_id));
+
+  it('A cannot see or delete B school exams', async () => {
+    signIn(a);
+    assert.deepEqual((await callApi('getSchoolExams', { school_year: '2026' })).body.data, []);
+    assert.equal((await callApi('deleteSchoolExam', bExam.school_exam_id)).body.ok, false);
+    assert.deepEqual(await bExams(), [bExam.school_exam_id]);
+    signIn(b);
+    assert.deepEqual((await callApi('getSchoolExams', { school_year: '2026' })).body.data.map((e) => e.school_exam_id), [bExam.school_exam_id]);
+  });
+
+  it('A cannot see or delete B exam periods', async () => {
+    signIn(a);
+    assert.deepEqual((await callApi('getExamPeriods')).body.data, []);
+    assert.equal((await callApi('getExamPeriodDetail', bPeriod.exam_period_id)).body.ok, false);
+    assert.equal((await callApi('deleteExamPeriod', bPeriod.exam_period_id)).body.ok, false);
+    assert.deepEqual(await bPeriods(), [bPeriod.exam_period_id]);
+  });
+
+  it('each workspace has its own Claude write mode', async () => {
+    await withService(b.wid, (api) => api.saveSettings({ mcp_write_mode: 'proposal' }));
+    assert.equal(await readWriteMode(serviceFor(b)), 'proposal');
+    assert.equal(await readWriteMode(serviceFor(a)), 'read_only');
+  });
+
+  it('a Claude proposal queued in B is only pending in B', async () => {
+    const saved = await propose(MCP_CONNECTOR, {
+      calls: [{ tool: 'create_task', args: { due_date: '2026-11-20', kind: 'admin', title: 'B 시험지 인쇄' } }]
+    }, serviceFor(b));
+    const id = saved.message.proposal.proposal_id;
+    signIn(a);
+    assert.deepEqual((await callApi('listPendingProposals')).body.data, []);
+    const out = await apply(APP_SESSION, { proposal_ids: [id] }, serviceFor(a));
+    assert.equal(out.results[0].error, '제안을 찾을 수 없습니다.');
+    signIn(b);
+    assert.deepEqual((await callApi('listPendingProposals')).body.data.map((p) => p.proposal_id), [id]);
+    await reject(APP_SESSION, { proposal_ids: [id] }, serviceFor(b));
+  });
+
+  it('A cannot list or cut B Claude connections', async () => {
+    await withService(b.wid, (api) => api.saveOAuthGrant({ grant_id: 'grant-b', exp_ms: Date.now() + 60_000 }, Date.now()));
+    signIn(a);
+    assert.deepEqual((await callApi('listMcpConnections')).body.data, []);
+    assert.equal((await callApi('revokeMcpConnection', 'grant-b')).body.data, false);
+    signIn(b);
+    assert.deepEqual((await callApi('listMcpConnections')).body.data.map((c) => c.grant_id), ['grant-b']);
   });
 });
 

@@ -6,13 +6,7 @@ import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate } from '@/lib/format';
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
+import { addDays, formatDate } from '@/lib/format';
 
 /** Pick a date and class; every student's daily report ready to copy for parents. */
 export default function DailyReports({ date, classId, onChange, head }) {

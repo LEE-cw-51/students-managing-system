@@ -11,16 +11,15 @@ import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
 import { api, useApi } from '@/lib/client-api';
-import { dateRange, formatDate, percent, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
-import { examDDayLabel, mathExamLabel } from '@/lib/term';
-
+import { addDays, dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import RangePicker, { RANGES } from '@/components/ui/RangePicker';
+import LMS from '../../../src/00_Core.js';
 function textbookLine(cls) {
-  const history = Array.isArray(cls.textbook_history) ? cls.textbook_history : [];
-  const past = history.filter((h) => h && h.to);
+  const past = (cls.textbook_timeline || []).filter((h) => !h.current);
   return (
     <>
       {cls.textbook || '-'}
-      {past.length ? <div className="muted">{past.map((h) => `${h.textbook} (${h.from || '시작일 없음'} ~ ${h.to})`).join(' · ')}</div> : null}
+      {past.length ? <div className="muted">{past.map((h) => h.label).join(' · ')}</div> : null}
     </>
   );
 }
@@ -46,7 +45,7 @@ export function OverviewTab({ data }) {
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="학생" value={`${roster.length}명`} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회`} />
-        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
+        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note={`이번 달 A 비율 · 숙제 평균 점수 ${pointsLabel(month.homework_average)}`} />
         <Kpi label="테스트 평균" value={month.test_average_display} note="이번 달 · 만점 같은 테스트만" />
       </div>
       {data.exams && data.exams.length ? <UpcomingExams exams={data.exams} /> : null}
@@ -113,7 +112,7 @@ function UpcomingExams({ exams }) {
           <li key={x.school_exam_id}>
             <strong>{x.school} {x.grade}</strong>
             <span className="muted">{x.label}</span>
-            <span>{[dateRange(x.exam_date, x.exam_end_date), mathExamLabel(x.math_exam_date, x.exam_date, x.exam_end_date)].filter(Boolean).join(' · ')} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(x.d_day, x.in_progress)}</span></span>
+            <span>{[dateRange(x.exam_date, x.exam_end_date), x.math_label].filter(Boolean).join(' · ')} <span className={'tag ' + x.d_day_tone}>{x.d_day_label}</span></span>
             <span className="sd-line-text">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</span>
             <details className="cd-exam-students">
               <summary>{x.students.length}명</summary>
@@ -143,31 +142,11 @@ function PlanLine({ label, plan }) {
   );
 }
 
-const RANGES = [
-  { key: '1m', label: '최근 1개월', days: 31 },
-  { key: '3m', label: '3개월', days: 92 },
-  { key: '6m', label: '6개월', days: 183 }
-];
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-function RangePicker({ value, onChange }) {
-  return (
-    <div className="segmented" role="group" aria-label="기간">
-      {RANGES.map((r) => <button key={r.key} type="button" aria-pressed={value === r.key} onClick={() => onChange(r.key)}>{r.label}</button>)}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- 숙제
 
 function gradeTone(letter) {
   if (!letter) return 'unchecked';
-  return letter === 'A' || letter === 'B' ? 'full' : letter === 'E' || letter === 'F' ? 'none' : 'part';
+  return LMS.isHomeworkDone(letter) ? 'full' : letter === 'E' || letter === 'F' ? 'none' : 'part';
 }
 
 function HwCell({ cell, who, open, onToggle }) {
@@ -262,7 +241,7 @@ export function HomeworkTab({ classId }) {
     <div className="stack">
       <div className="split">
         <RangePicker value={range} onChange={(v) => { setOpen(null); setRange(v); }} />
-        <span className="muted hw-legend desktop-only">A·B 완료 · C·D 일부 · E·F 안 함 · 미입력 = 아직 확인 안 함</span>
+        <span className="muted hw-legend desktop-only">A만 완료 · B–D 미완료(일부) · E·F 미완료(안 함) · 미입력 = 아직 확인 안 함</span>
       </div>
       <Async state={state}>
         {(data) => data.rows.length ? (
@@ -272,7 +251,7 @@ export function HomeworkTab({ classId }) {
                 <thead>
                   <tr>
                     <th className="sticky">숙제 (낸 날)</th>
-                    <th className="num">완료율</th>
+                    <th className="num">완료율<div className="muted">평균 점수</div></th>
                     {data.students.map((s) => <th key={s.student_id} className="student"><Link href={`/students/${s.student_id}`}>{s.name}</Link></th>)}
                     <th />
                   </tr>
@@ -284,7 +263,7 @@ export function HomeworkTab({ classId }) {
                         <strong>{shortDate(r.date)}</strong>
                         <div className="muted">{r.items.map((it) => it.title).join(' · ')}</div>
                       </td>
-                      <td className="num">{r.checked ? percent(r.rate) : <span className="muted">확인 전</span>}</td>
+                      <td className="num">{r.checked ? <>{percent(r.rate)}<div className="muted">{pointsLabel(r.average)}</div></> : <span className="muted">확인 전</span>}</td>
                       {data.students.map((s) => {
                         const key = `${r.date}|${s.student_id}`;
                         const cell = r.cells[s.student_id];
@@ -304,22 +283,22 @@ export function HomeworkTab({ classId }) {
             <ul className="hw-cards">
               {data.rows.map((r) => {
                 const cells = data.students.map((s) => ({ s, cell: r.cells[s.student_id] })).filter((x) => x.cell);
-                const missing = cells.filter((x) => !x.cell.checked || gradeTone(x.cell.letter) !== 'full');
+                const missing = cells.filter((x) => !x.cell.checked || x.cell.done < x.cell.total);
                 return (
                   <li key={r.date} className="hw-card">
-                    <div className="hw-card-head"><strong>{shortDate(r.date)} 낸 숙제</strong><span className="muted">{r.checked ? `완료율 ${percent(r.rate)}` : '확인 전'}</span></div>
+                    <div className="hw-card-head"><strong>{shortDate(r.date)} 낸 숙제</strong><span className="muted">{r.checked ? `완료율 ${percent(r.rate)} · 평균 ${pointsLabel(r.average)}` : '확인 전'}</span></div>
                     {r.items.length ? <span className="muted">{r.items.map((it) => it.title).join(' · ')}</span> : null}
                     {r.checked ? (
                       <>
                         {missing.length ? (
                           <div className="hw-card-missing">
-                            <span className="hint">안 함 · 일부 · 미입력</span>
+                            <span className="hint">미완료(A 아님) · 미입력</span>
                             {missing.map(({ s, cell }) => (
                               <Link key={s.student_id} href={`/students/${s.student_id}?tab=homework`}>{s.name} <span className={'hw-cell ' + gradeTone(cell.checked ? cell.letter : '')}>{cell.checked ? cell.letter : '미입력'}</span></Link>
                             ))}
                           </div>
                         ) : null}
-                        <span>완료(A·B) {cells.length - missing.length}명</span>
+                        <span>완료(모두 A) {cells.length - missing.length}명</span>
                         {checkLink(r.date)}
                       </>
                     ) : <span className="muted">다음 수업에서 확인합니다.</span>}
@@ -710,9 +689,10 @@ export function StatsTab({ classId, today }) {
         {() => (
           <section className="card">
             <h2>최근 6개월 추이</h2>
-            <div className="cols-3">
+            <div className="cols-2">
               <MiniBars title="출석률" points={pts('attendance_rate')} max={100} format={(v) => `${v}%`} />
-              <MiniBars title="숙제 완료율" points={pts('homework_rate')} max={100} format={(v) => `${v}%`} />
+              <MiniBars title="숙제 완료율 (A 비율)" points={pts('homework_rate')} max={100} format={(v) => `${v}%`} />
+              <MiniBars title="숙제 평균 점수" points={pts('homework_average')} max={100} format={(v) => `${v}점`} />
               <MiniBars title="테스트 평균 (원점수)" points={pts('test_average')} format={(v) => score(v)} />
             </div>
             <details style={{ marginTop: 12 }}>
@@ -723,7 +703,7 @@ export function StatsTab({ classId, today }) {
                     <strong>{p.year}년 {p.label}</strong>
                     <span>수업 {p.lesson_days}</span>
                     <span>출석 {percent(p.attendance_rate)}</span>
-                    <span>숙제 {percent(p.homework_rate)}</span>
+                    <span>숙제 {percent(p.homework_rate)} · {pointsLabel(p.homework_average)}</span>
                     <span>과제 A {percent(p.assignment_a_rate)}</span>
                     <span>테스트 {p.test_comparable ? score(p.test_average) : '만점 다름'}</span>
                   </li>
@@ -731,12 +711,12 @@ export function StatsTab({ classId, today }) {
               </ul>
               <div className="table-wrap trend-table" style={{ marginTop: 8 }}>
                 <table className="data-table">
-                  <thead><tr><th>월</th><th className="num">수업일</th><th className="num">출석률</th><th className="num">숙제 완료율</th><th className="num">과제 A 비율</th><th className="num">테스트 평균</th></tr></thead>
+                  <thead><tr><th>월</th><th className="num">수업일</th><th className="num">출석률</th><th className="num">숙제 완료율</th><th className="num">숙제 평균 점수</th><th className="num">과제 A 비율</th><th className="num">테스트 평균</th></tr></thead>
                   <tbody>
                     {points.map((p) => (
                       <tr key={p.label}>
                         <td>{p.year}년 {p.label}</td><td className="num">{p.lesson_days}</td><td className="num">{percent(p.attendance_rate)}</td>
-                        <td className="num">{percent(p.homework_rate)}</td><td className="num">{percent(p.assignment_a_rate)}</td>
+                        <td className="num">{percent(p.homework_rate)}</td><td className="num">{pointsLabel(p.homework_average)}</td><td className="num">{percent(p.assignment_a_rate)}</td>
                         <td className="num">{p.test_comparable ? score(p.test_average) : '만점 다름'}</td>
                       </tr>
                     ))}

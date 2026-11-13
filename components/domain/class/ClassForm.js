@@ -9,17 +9,10 @@ import CurriculumEditor from './CurriculumEditor';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
-import { shortDate } from '@/lib/format';
-
 const EMPTY = {
   class_name: '', grade: '', school_year: String(new Date().getFullYear()), semester: '',
   teacher: '', textbook: '', textbook_started_on: '', memo: '', status: '운영', schedule: [], curriculum: []
 };
-
-function textbookSpan(row) {
-  const from = row.from ? shortDate(row.from) : '시작일 없음';
-  return row.to ? `${row.textbook} (${from} ~ ${shortDate(row.to)})` : `${row.textbook} (${from} ~ 사용 중)`;
-}
 
 function curriculumSummary(textbook, units) {
   const named = units.filter((u) => u.title.trim());
@@ -60,8 +53,7 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
     ...EMPTY, ...(initial || {}),
     schedule: (initial && initial.schedule) || [],
     curriculum: Array.isArray(initial && initial.curriculum) ? initial.curriculum : [],
-    textbook_history: Array.isArray(initial && initial.textbook_history) ? initial.textbook_history : [],
-    textbook_started_on: boot.today
+    textbook_started_on: initial && initial.class_id ? '' : boot.today
   }));
   const [open, setOpen] = useState({ textbook: false, more: false });
   const [saving, setSaving] = useState(false);
@@ -73,9 +65,11 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
   };
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const isEdit = !!form.class_id;
+  const timeline = (initial && initial.textbook_timeline) || [];
   const storedTextbook = String((initial && initial.textbook) || '').trim();
   const textbookChanged = isEdit && form.textbook.trim() !== storedTextbook;
   const askTextbookStart = (!isEdit && !!form.textbook.trim()) || textbookChanged;
+  const clearingTextbook = textbookChanged && !form.textbook.trim();
   const closing = isEdit && form.status === '종료' && initial.status !== '종료';
 
   const scheduleProblem = form.schedule.find((s) => !s.start || !s.end || s.end <= s.start);
@@ -97,7 +91,10 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
       };
     }
     if (askTextbookStart && !form.textbook_started_on) {
-      return { key: 'textbook_started_on', section: 'textbook', message: '교재 시작일을 입력해 주세요.', target: '[name="textbook_started_on"]' };
+      return {
+        key: 'textbook_started_on', section: 'textbook', target: '[name="textbook_started_on"]',
+        message: clearingTextbook ? '이전 교재를 끝내는 날을 입력해 주세요.' : textbookChanged ? '교재를 바꿨습니다. 새 교재 시작일을 입력해 주세요.' : '교재 시작일을 입력해 주세요.'
+      };
     }
     return null;
   };
@@ -211,7 +208,8 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
                 <input id={id} value={form.textbook} onChange={set('textbook')} />
               )}</Field>
               {askTextbookStart ? (
-                <Field label={form.textbook.trim() ? '이 교재 시작일 *' : '교재를 끝내는 날 *'} error={errorFor('textbook_started_on')} hint="이전 교재는 그 전날까지로 남습니다.">
+                <Field label={clearingTextbook ? '교재를 끝내는 날 *' : '이 교재 시작일 *'} error={errorFor('textbook_started_on')}
+                  hint={clearingTextbook ? '이전 교재는 이 날까지 쓴 것으로 남습니다.' : isEdit ? '이전 교재는 그 전날까지로 남습니다.' : ''}>
                   {(id) => (
                     <input id={id} name="textbook_started_on" type="date" value={form.textbook_started_on} onChange={set('textbook_started_on')}
                       aria-invalid={errorFor('textbook_started_on') ? 'true' : undefined} />
@@ -219,11 +217,11 @@ export default function ClassForm({ initial, onClose, onSaved, section, onDelete
                 </Field>
               ) : null}
             </div>
-            {isEdit && form.textbook_history.length ? (
+            {isEdit && timeline.length ? (
               <details className="cf-history">
-                <summary>교재 기록 {form.textbook_history.length}개</summary>
+                <summary>교재 기록 {timeline.length}개</summary>
                 <ul className="stack-sm">
-                  {form.textbook_history.map((h, i) => <li key={i}>{textbookSpan(h)}</li>)}
+                  {timeline.map((h, i) => <li key={i}>{h.label}</li>)}
                 </ul>
               </details>
             ) : null}

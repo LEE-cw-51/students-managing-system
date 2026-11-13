@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
+import LMS from '../../../src/04_SchoolExams.js';
 
 /** Create / edit one school's math exam (date range, textbook, scope). */
 export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
@@ -21,17 +22,9 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
   const dirty = useDirty(form);
   const [saving, setSaving] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
-  const mathWithin = (math, start, end) => (math && (!start || math >= start) && (!end || math <= end) ? math : '');
-  const setStart = (e) => {
-    const start = e.target.value;
-    setForm((f) => {
-      const end = !f.exam_end_date || (start && f.exam_end_date < start) ? start : f.exam_end_date;
-      return { ...f, exam_date: start, exam_end_date: end, math_exam_date: mathWithin(f.math_exam_date, start, end) };
-    });
-  };
-  const setEnd = (e) => {
-    const end = e.target.value;
-    setForm((f) => ({ ...f, exam_end_date: end, math_exam_date: mathWithin(f.math_exam_date, f.exam_date, end) }));
+  const setDate = (key) => (e) => {
+    const value = e.target.value;
+    setForm((f) => LMS.schoolExams.changeDate(f, key, value));
   };
   const isEdit = !!form.school_exam_id;
 
@@ -91,9 +84,9 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
           {form.exam_type === '기타' ? (
             <Field label="시험 이름">{(id) => <input id={id} value={form.title} onChange={set('title')} placeholder="예: 수행평가" />}</Field>
           ) : null}
-          <Field label="시험 시작일">{(id) => <input id={id} type="date" value={form.exam_date} onChange={setStart} />}</Field>
+          <Field label="시험 시작일">{(id) => <input id={id} type="date" value={form.exam_date} onChange={setDate('exam_date')} />}</Field>
           <Field label="시험 종료일" hint="하루만 보면 시작일과 같게 두세요.">{(id) => (
-            <input id={id} type="date" min={form.exam_date || undefined} value={form.exam_end_date} onChange={setEnd} />
+            <input id={id} type="date" min={form.exam_date || undefined} value={form.exam_end_date} onChange={setDate('exam_end_date')} />
           )}</Field>
           <Field label="수학 시험일" hint="비우면 시작일 기준으로 D-day를 셉니다.">{(id) => (
             <input id={id} type="date" min={form.exam_date || undefined} max={form.exam_end_date || undefined} value={form.math_exam_date || ''} onChange={set('math_exam_date')} />

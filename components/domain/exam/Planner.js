@@ -10,7 +10,7 @@ import { useDirty } from '@/components/ui/useDirty';
 import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import ScrollRow from '@/components/domain/exam/ScrollRow';
 import { api, useApi } from '@/lib/client-api';
-import { OUT, classNameKey, mergeTargets, studentEndDate } from '@/lib/exam-planner';
+import { OUT, classNameKey, studentEndDate } from '@/lib/exam-planner';
 import { shortDate } from '@/lib/format';
 
 const SELECT_STYLE = { width: 'auto', minHeight: 32, padding: '4px 8px' };
@@ -200,33 +200,28 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
     });
   };
 
-  const existingIds = new Map();
-  cards.forEach((c) => {
-    const k = classNameKey(c.class_name);
-    if (c.existing && !existingIds.has(k)) existingIds.set(k, c.class_id);
-  });
-  const mergeInto = mergeTargets(cards);
-  const mergesExisting = (c) => !c.existing && existingIds.has(classNameKey(c.class_name));
   const active = cards.filter((c) => c.students.length);
   const studentCount = active.reduce((n, c) => n + c.students.length, 0);
-  // Cards sharing a name become one class, and a new card named like an existing class fills that class.
-  const targetOf = (c) => (c.existing ? c.class_id : existingIds.get(classNameKey(c.class_name)) || 'new:' + classNameKey(c.class_name));
-  const classCount = new Set(active.map(targetOf)).size;
+  const classCount = active.length;
+  // A new class may not share a name with another class of this period (existing or being made).
+  const nameTaken = (c) => !c.existing && cards.some((o) => o !== c && (o.existing || o.students.length) && classNameKey(o.class_name) === classNameKey(c.class_name));
 
   const apply = async () => {
     setError('');
     const label = (c) => classNameKey(c.class_name) || '이름 없는 반';
     const unnamed = active.find((c) => !classNameKey(c.class_name));
     if (unnamed) { showCard(unnamed, 'gn'); return setError('반 이름을 입력해 주세요.'); }
+    const dup = active.find(nameTaken);
+    if (dup) { showCard(dup, 'gn'); return setError(`‘${label(dup)}’ 이름의 반이 이미 있습니다. 반 이름을 다르게 해 주세요.`); }
     const badDate = active.find((c) => !c.existing && (!c.start_date || !c.end_date || c.end_date < c.start_date));
     if (badDate) { showCard(badDate, 'gs'); return setError(`${label(badDate)}: 시작일과 종료일을 확인해 주세요.`); }
-    const bad = cards.find((c, i) => c.students.length && !c.existing && mergeInto[i] < 0 && !mergesExisting(c)
-      && (!c.schedule.length || c.schedule.some((s) => !s.start || !s.end || s.end <= s.start)));
+    const bad = active.find((c) => !c.existing && (!c.schedule.length || c.schedule.some((s) => !s.start || !s.end || s.end <= s.start)));
     if (bad) { showCard(bad); return setError(`${label(bad)}: 수업 요일과 시간을 확인해 주세요.`); }
     setSaving(true);
     try {
       await api('applyExamGroups', periodId, {
         groups: active.map((c) => ({
+          class_id: c.existing ? c.class_id : '',
           class_name: c.class_name, schedule: c.schedule, teacher: c.teacher,
           start_date: c.start_date, end_date: c.end_date,
           students: c.students.map((id) => {
@@ -270,11 +265,11 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
           <button type="button" className="btn secondary sm" onClick={addCard}>+ 반 추가</button>
         </div>
         <details className="ex-help">
-          <summary>반 이름이 같으면?</summary>
-          <p>학생은 학교 시험 종료일까지 시험대비 반에 있다가 다음 날 원래 반으로 돌아갑니다. 반 이름이 같으면 한 반으로 편성되고, 이 기간에 이미 있는 시험대비 반과 이름이 같으면 그 반에 학생이 추가됩니다.</p>
+          <summary>학생은 언제 돌아오나요?</summary>
+          <p>학생은 학교 시험 종료일까지 시험대비 반에 있다가 다음 날 원래 반으로 돌아갑니다. 이 기간에 이미 있는 시험대비 반에 학생을 더 넣으려면 그 반(기존 반) 카드에 넣으세요. 반 이름은 기간 안에서 서로 달라야 합니다.</p>
         </details>
         <div className="pl-class-grid">
-          {cards.map((c, i) => {
+          {cards.map((c) => {
             const open = openKeys.has(c.key);
             return (
               <section key={c.key} id={`card-${c.key}`} className={'card plan-group' + (open ? ' is-open' : '')}>
@@ -286,8 +281,7 @@ function PlannerBody({ data, periodId, onApplied, firstTime, onDirty }) {
                   </button>
                   {!c.existing ? <button type="button" className="btn ghost sm danger-text" onClick={() => removeCard(c.key)}>반 삭제</button> : null}
                 </div>
-                {mergeInto[i] >= 0 && !cards[mergeInto[i]].existing ? <p className="hint" style={{ margin: '6px 0 0' }}>‘{classNameKey(cards[mergeInto[i]].class_name)}’ 반과 이름이 같아 한 반으로 편성됩니다. 요일·시간은 앞의 반 것을 씁니다.</p> : null}
-                {mergesExisting(c) ? <p className="hint" style={{ margin: '6px 0 0' }}>이 기간에 있는 ‘{classNameKey(c.class_name)}’ 반과 이름이 같아 그 반에 학생이 추가됩니다.</p> : null}
+                {c.students.length && nameTaken(c) ? <p className="hint" style={{ margin: '6px 0 0' }}>같은 이름의 반이 이미 있습니다. 반 이름을 다르게 해 주세요.</p> : null}
                 {open ? (
                   <div className="pl-card-body">
                     {c.existing ? <span className="muted">기존 반 · {c.schedule_label || '시간 미정'}</span> : (

@@ -125,8 +125,7 @@ LMS.createSessionSync = function (ctx) {
    * test, so every row of that day gets it (and a cleared scope clears them). Rows with their own
    * progress keep it; rows on their own paper keep its max score and difficulty.
    * options.prevMax: the session max before this save; options.homework: text to use when the date has
-   * no checklist; options.realign: v4 migration (homework only from a checklist, untested rows and
-   * max scores left alone).
+   * no checklist.
    */
   function copyToLessons(date, classId, options) {
     options = options || {};
@@ -136,7 +135,7 @@ LMS.createSessionSync = function (ctx) {
     var fallbackHomework = null;
     if (!hasChecklist) {
       if (options.homework !== undefined) fallbackHomework = LMS.toStr(options.homework);
-      else if (!options.realign) fallbackHomework = homeworkText(date, classId);
+      else fallbackHomework = homeworkText(date, classId);
     }
     if (!session && !hasChecklist && fallbackHomework === null) return;
     var lessons = table('Lessons');
@@ -150,11 +149,11 @@ LMS.createSessionSync = function (ctx) {
         if (tested(row) && !ownPaper(row)) {
           next.test_difficulty = LMS.toStr(session.test_difficulty);
           // Max score follows the session (a cleared one too) unless the row carries its own value.
-          if (!options.realign && (LMS.isBlank(row.test_max_score) ||
-              (!LMS.isBlank(prevMax) && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax)))) {
+          if (LMS.isBlank(row.test_max_score) ||
+              (!LMS.isBlank(prevMax) && LMS.toStr(row.test_max_score) === LMS.toStr(prevMax))) {
             next.test_max_score = session.test_max_score;
           }
-        } else if (!tested(row) && !options.realign) {
+        } else if (!tested(row)) {
           next.test_difficulty = '';
           next.test_max_score = '';
         }
@@ -287,11 +286,6 @@ LMS.createSessionSync = function (ctx) {
     if (changed) saveTable('Lessons', lessons);
   }
 
-  /** v4 migration: re-align drifted student copies with the class record, never moving max scores. */
-  function realign(date, classId) {
-    copyToLessons(date, classId, { realign: true });
-  }
-
   return {
     find: find,
     homeworkItems: homeworkItems,
@@ -300,8 +294,7 @@ LMS.createSessionSync = function (ctx) {
     saveSession: saveSession,
     saveNotice: saveNotice,
     afterLessonsSaved: afterLessonsSaved,
-    afterHomeworkChanged: afterHomeworkChanged,
-    realign: realign
+    afterHomeworkChanged: afterHomeworkChanged
   };
 };
 

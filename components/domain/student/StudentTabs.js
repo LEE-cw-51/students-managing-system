@@ -8,11 +8,12 @@ import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { dateRange, formatDate, percent, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
-import { examDDayLabel, mathExamLabel } from '@/lib/term';
+import { addDays, dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
+import RangePicker, { RANGES } from '@/components/ui/RangePicker';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
+import LMS from '../../../src/00_Core.js';
 
 /** Add a regular class to the student (추가 수강, or the first class for a 미배정 student). */
 function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
@@ -53,26 +54,6 @@ function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
         </div>
       </form>
     </Modal>
-  );
-}
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-const RANGES = [
-  { key: '1m', label: '최근 1개월', days: 31 },
-  { key: '3m', label: '최근 3개월', days: 92 },
-  { key: '6m', label: '최근 6개월', days: 183 }
-];
-
-function RangePicker({ value, onChange }) {
-  return (
-    <div className="segmented" role="group" aria-label="기간">
-      {RANGES.map((r) => <button key={r.key} type="button" aria-pressed={value === r.key} onClick={() => onChange(r.key)}>{r.label}</button>)}
-    </div>
   );
 }
 
@@ -215,13 +196,13 @@ function ClassHistory({ studentId, onChanged }) {
   );
 }
 
-function ClassCard({ data, onChanged, historyOpen }) {
+function ClassCard({ data, onChanged }) {
   const s = data.student;
   const { classes } = data;
   const upcoming = data.upcoming_classes || [];
   const [changing, setChanging] = useState(null);
   const [assigning, setAssigning] = useState(false);
-  const [history, setHistory] = useState(!!historyOpen);
+  const [history, setHistory] = useState(false);
   const done = () => { setChanging(null); setAssigning(false); onChanged(); };
   return (
     <section className="card">
@@ -263,7 +244,7 @@ function ClassCard({ data, onChanged, historyOpen }) {
   );
 }
 
-export function OverviewTab({ data, onChanged, historyOpen }) {
+export function OverviewTab({ data, onChanged }) {
   const { month, next, exams, recent_notes: notes, counseling, open_tasks: tasks, today } = data;
   const s = data.student;
   return (
@@ -271,7 +252,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
       <div className="kpis sd-kpis">
         <Kpi label="다음 수업" value={next ? relativeDay(next.date, today) : '-'} note={next ? `${next.class_name} · ${shortDate(next.date)} ${timeSpan(next.time)}` : '예정된 수업 없음'} />
         <Kpi label="이번 달 출석률" value={percent(month.attendance_rate)} note={`수업 ${month.lesson_count}회 · 결석 ${month.absent_count}`} />
-        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note="이번 달 체크 기준" />
+        <Kpi label="숙제 완료율" value={percent(month.homework_rate)} note={`이번 달 A 비율 · 숙제 평균 점수 ${pointsLabel(month.homework_average)}`} />
         <Kpi label="테스트 평균" value={month.test_average_display} note={month.test_count ? `이번 달 ${month.test_count}회 · 100점 환산` : '이번 달 테스트 없음'} />
         <Kpi label="과제 A 비율" value={percent(month.assignment_a_rate)} note="이번 달 과제 이행" />
       </div>
@@ -283,7 +264,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
               <li key={x.school_exam_id}>
                 <strong>{x.label}</strong>
                 <span className="muted">{x.school}</span>
-                <span>{[dateRange(x.exam_date, x.exam_end_date), mathExamLabel(x.math_exam_date, x.exam_date, x.exam_end_date)].filter(Boolean).join(' · ')} <span className={'tag ' + (x.d_day <= 7 ? 'danger' : x.d_day <= 21 ? 'amber' : '')}>{examDDayLabel(x.d_day, x.in_progress)}</span></span>
+                <span>{[dateRange(x.exam_date, x.exam_end_date), x.math_label].filter(Boolean).join(' · ')} <span className={'tag ' + x.d_day_tone}>{x.d_day_label}</span></span>
                 <span className="sd-line-text">{[x.textbook, x.scope].filter(Boolean).join(' · ') || <span className="muted">범위 미입력</span>}</span>
               </li>
             ))}
@@ -331,7 +312,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
         </section>
       </div>
       <div className="cols-2">
-        <ClassCard data={data} onChanged={onChanged} historyOpen={historyOpen} />
+        <ClassCard data={data} onChanged={onChanged} />
         <section className="card">
           <h2>기본 정보</h2>
           <dl className="dl">
@@ -528,17 +509,18 @@ export function HomeworkTab({ studentId }) {
 
   return (
     <div className="stack">
-      <div className="split"><span className="muted">수업일에 낸 숙제입니다. 항목마다 A–F를 고르면 평균으로 그날의 과제 등급이 계산됩니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
+      <div className="split"><span className="muted">수업일에 낸 숙제입니다. 항목마다 A–F를 고르면 평균으로 그날의 과제 등급이 계산됩니다. 숙제 완료는 A일 때만입니다.</span><RangePicker value={r.range} onChange={r.setRange} /></div>
       <Async state={state}>
         {(d) => (
           <>
             <div className="kpis">
-              <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개`} />
-              <Kpi label="E·F" value={`${d.missing.length}개`} tone={d.missing.length ? 'terracotta' : undefined} />
+              <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개 중 A`} />
+              <Kpi label="숙제 평균 점수" value={pointsLabel(d.average)} note="A 100 · B 89 · C 79 · D 69 · E 59 · F 50" />
+              <Kpi label="미완료" value={`${d.missing.length}개`} note="A가 아닌 숙제" tone={d.missing.length ? 'terracotta' : undefined} />
             </div>
             {d.missing.length ? (
               <section className="card">
-                <h3>낮은 이행 (E·F)</h3>
+                <h3>미완료 숙제 (B–F)</h3>
                 <ul className="stack-sm" style={{ margin: 0, paddingLeft: 18 }}>
                   {d.missing.map((x, i) => <li key={i}>{shortDate(x.date)} · {x.class_name} — {x.title}</li>)}
                 </ul>
@@ -556,7 +538,7 @@ export function HomeworkTab({ studentId }) {
                         <td data-label="숙제">
                           <div className="cluster" style={{ alignItems: 'center' }}>
                             {row.items.map((it) => {
-                              const tone = it.status === 'A' || it.status === 'B' ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
+                              const tone = LMS.isHomeworkDone(it.status) ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
                               const busy = savingId === it.item_id;
                               return (
                                 <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

@@ -77,10 +77,13 @@ export default async function AuthorizePage({ searchParams }) {
           <input key={k} type="hidden" name={k} value={val} />
         ))}
         <h2 className="oauth-title">{v.clientName}에 학생 관리 접근을 허용할까요?</h2>
+        <p className="oauth-warning" role="note">
+          <strong>방금 claude.ai에서 직접 커넥터 연결을 시작한 경우에만 허용하세요.</strong> 메일·메신저로 받은 링크로 이 화면이 열렸다면 거부하세요. 위 이름은 연결을 요청한 쪽이 정한 것이라 믿을 수 없습니다.
+        </p>
         <ul className="oauth-scope">
           <li>학생, 반, 출결, 성적, 숙제, 상담 기록을 조회합니다.</li>
           <li>설정 화면의 Claude 커넥터 쓰기 모드에 따라 출결·상담·할 일을 변경할 수 있습니다.</li>
-          <li>설정 화면의 &quot;연결 끊기&quot;로 언제든 접근을 해제할 수 있습니다.</li>
+          <li>설정 화면의 Claude 커넥터 카드에서 연결 목록을 보고 언제든 끊을 수 있습니다.</li>
         </ul>
         <p className="muted oauth-target">돌아갈 주소: {new URL(v.redirectUri).host}</p>
         <div className="oauth-actions">

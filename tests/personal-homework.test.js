@@ -234,13 +234,31 @@ describe('daily report individual notice', () => {
   });
 });
 
-describe('schema v5', () => {
-  it('is idempotent and fills new fields', () => {
+describe('schema version', () => {
+  it('stamps an empty database with the current version, once', () => {
     const store = createMemoryStore({ today: TODAY, now: TODAY + 'T09:00:00' });
     const api = LMS.createService(store);
     assert.equal(api.ensureSchema(), true);
     assert.equal(api.ensureSchema(), false);
     const Core = require('../src/00_Core.js');
     assert.equal(Core.SCHEMA_VERSION, 7);
+    assert.equal(store.readTable('_Meta').find((m) => m.prefix === Core.SCHEMA_META_KEY).next_seq, 7);
+  });
+
+  it('still runs the v7 step on v6 data: 완료 and 미완료 checks become A and F', () => {
+    const store = createMemoryStore({ today: TODAY, now: TODAY + 'T09:00:00' });
+    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', status: '운영' }]);
+    store.writeTable('HomeworkChecks', [{ check_id: 'HWC_1', status: '완료' }, { check_id: 'HWC_2', status: '미완료' }]);
+    store.writeTable('_Meta', [{ prefix: 'SCHEMA', next_seq: 6 }]);
+    assert.equal(LMS.createService(store).ensureSchema(), true);
+    assert.deepEqual(store.readTable('HomeworkChecks').map((c) => c.status), ['A', 'F']);
+  });
+
+  it('refuses data older than v6 instead of stamping it as current', () => {
+    const store = createMemoryStore({ today: TODAY, now: TODAY + 'T09:00:00' });
+    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', status: '운영' }]);
+    store.writeTable('_Meta', [{ prefix: 'SCHEMA', next_seq: 5 }]);
+    assert.throws(() => LMS.createService(store).ensureSchema(), /너무 오래된 구조\(v5\)/);
+    assert.equal(store.readTable('_Meta')[0].next_seq, 5);
   });
 });

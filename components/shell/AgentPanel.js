@@ -308,9 +308,7 @@ function ProposalCard({ proposal, onChange }) {
   const act = async (kind) => {
     setBusy(kind);
     try {
-      const next = kind === 'apply'
-        ? await postJson('/api/agent/apply', { proposal_id: p.proposal_id, selected })
-        : await api('rejectAgentProposal', p.proposal_id);
+      const next = await postJson(`/api/agent/${kind}`, kind === 'apply' ? { proposal_id: p.proposal_id, selected } : { proposal_id: p.proposal_id });
       onChange(next);
       if (kind === 'apply') {
         const count = Array.isArray(next.result) ? next.result.filter((r) => r && !r.skipped).length : selected.length;

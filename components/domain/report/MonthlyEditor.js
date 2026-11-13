@@ -67,6 +67,14 @@ export default function MonthlyEditor({ row, year, month, prev, next, onNavigate
     toast(nextStatus === '확정' ? '확정했습니다.' : '임시 저장했습니다.');
     onSaved();
   });
+  const unconfirm = () => run('save', async () => {
+    await api('saveMonthlyReport', { student_id: row.student_id, year, month, report_text: saved, status: '임시' });
+    setText(saved);
+    setStatus('임시');
+    toast('확정을 취소했습니다. 고친 뒤 다시 확정해 주세요.');
+    onSaved();
+  });
+  const locked = status === '확정';
   const pdf = () => run('pdf', () => downloadMonthlyPdf(row.student_id, year, month, text, row.name));
   const copy = () => navigator.clipboard.writeText(text).then(() => toast('복사했습니다.'), () => toast('복사하지 못했습니다.', 'error'));
   const dirty = text !== saved;
@@ -90,18 +98,25 @@ export default function MonthlyEditor({ row, year, month, prev, next, onNavigate
           <span className="rp-editor-buttons">
             <button type="button" className="btn secondary" onClick={copy} disabled={!text}>복사</button>
             <button type="button" className="btn secondary" onClick={pdf} disabled={!text || !!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 저장'}</button>
-            <button type="button" className="btn secondary" onClick={() => save('임시')} disabled={!text || !!busy}>임시 저장</button>
-            <button type="button" className="btn ok" onClick={() => save('확정')} disabled={!text || !!busy}>확정</button>
+            {locked ? (
+              <button type="button" className="btn secondary" onClick={unconfirm} disabled={!!busy}>확정 취소</button>
+            ) : (
+              <>
+                <button type="button" className="btn secondary" onClick={() => save('임시')} disabled={!text || !!busy}>임시 저장</button>
+                <button type="button" className="btn ok" onClick={() => save('확정')} disabled={!text || !!busy}>확정</button>
+              </>
+            )}
           </span>
         </>
       )}>
       <div className="stack">
         <div className="cluster">
-          <button type="button" className="btn secondary sm" onClick={regenerate} disabled={!!busy}>{busy === 'basic' ? '만드는 중…' : '기본 보고서로 다시 만들기'}</button>
-          <button type="button" className="btn secondary sm" onClick={regenerateAi} disabled={!!busy}>{busy === 'ai' ? 'AI 분석 중… (최대 1분)' : 'AI 분석 포함으로 다시 만들기'}</button>
+          <button type="button" className="btn secondary sm" onClick={regenerate} disabled={locked || !!busy}>{busy === 'basic' ? '만드는 중…' : '기본 보고서로 다시 만들기'}</button>
+          <button type="button" className="btn secondary sm" onClick={regenerateAi} disabled={locked || !!busy}>{busy === 'ai' ? 'AI 분석 중… (최대 1분)' : 'AI 분석 포함으로 다시 만들기'}</button>
+          {locked ? <span className="hint">확정본은 고칠 수 없습니다. 고치려면 확정을 취소하세요.</span> : null}
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={18} aria-label="보고서 내용" className="report-editor" />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} readOnly={locked} rows={18} aria-label="보고서 내용" className="report-editor" />
       </div>
     </Modal>
   );

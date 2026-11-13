@@ -348,33 +348,10 @@ describe('reports and stats', () => {
     assert.equal(saved.status, '확정');
     assert.match(saved.monthly_report_id, /^MTH_/);
   });
-
-  it('computes dashboard counts from lessons', () => {
-    const api = svc();
-    seedDemo(api);
-    const dash = api.getDashboard('2026-09-14');
-    assert.equal(dash.today_class_count, 1);
-    assert.equal(dash.today_student_count, 3);
-    assert.equal(dash.recorded_count, 3);
-    assert.equal(dash.incomplete_count, 0);
-    assert.equal(dash.date_label, '2026년 9월 14일 월요일');
-  });
 });
 
-describe('bootstrap and caching', () => {
-  it('returns dashboard, classes and students in one bootstrap payload', () => {
-    const api = svc();
-    seedDemo(api);
-    const boot = api.getBootstrap();
-    assert.equal(boot.settings.academy_name, '학생 관리 시스템');
-    assert.equal(boot.today, '2026-09-14');
-    assert.equal(boot.classes.length, 1);
-    assert.equal(boot.students.length, 3);
-    assert.equal(boot.dashboard.today_student_count, 3);
-    assert.equal(boot.grades.length, LMS.GRADE_OPTIONS.length);
-  });
-
-  it('reads each table at most once per bootstrap', () => {
+describe('caching', () => {
+  it('reads each table at most once per today board', () => {
     const store = createMemoryStore();
     seedDemo(LMS.createService(store));
     const counts = {};
@@ -383,7 +360,7 @@ describe('bootstrap and caching', () => {
       counts[name] = (counts[name] || 0) + 1;
       return orig(name);
     };
-    LMS.createService(store).getBootstrap();
+    LMS.createService(store).getTodayBoard('2026-09-14');
     Object.keys(counts).forEach((name) => {
       assert.ok(counts[name] <= 1, name + ' read ' + counts[name] + ' times');
     });
@@ -674,40 +651,13 @@ describe('teacher features', () => {
     assert.ok(signals.some((s) => s.code === 'test_score_drop'));
   });
 
-  it('returns last lesson snapshot for a class', () => {
-    const api = svc();
-    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
-    const s = api.createStudent({ name: '김철수', class_id: c.class_id });
-    api.saveLesson({
-      lesson_date: '2026-09-10',
-      student_id: s.student_id,
-      class_id: c.class_id,
-      attendance: '출석',
-      test_status: '미실시',
-      progress: '이차방정식',
-      homework: 'p.20',
-      assignment_completion: 'B'
-    });
-    const snap = api.getLastLessonSnapshot(c.class_id, '2026-09-14');
-    assert.equal(snap.lesson_date, '2026-09-10');
-    assert.equal(snap.progress, '이차방정식');
-    assert.equal(snap.homework, 'p.20');
-    assert.equal(snap.student_assignments[s.student_id], 'B');
-  });
-
-  it('builds teaching tasks and learning alerts on dashboard', () => {
+  it('builds teaching tasks and learning alerts', () => {
     const api = svc();
     seedDemo(api);
     const tasks = api.getTodayTeachingTasks('2026-09-14');
     assert.equal(tasks.regular_classes.length, 1);
     assert.equal(tasks.regular_classes[0].complete, true);
-    const dash = api.getDashboard('2026-09-14');
-    assert.ok(dash.teaching_tasks);
-    assert.ok(dash.agenda);
-    assert.ok(Array.isArray(dash.learning_alerts));
-    const ctx = api.getStudentLearningContext(api.getStudents({})[0].student_id);
-    assert.ok(ctx.summary);
-    assert.ok(Array.isArray(ctx.signals));
+    assert.ok(Array.isArray(api.getLearningAlerts(8)));
   });
 });
 
@@ -735,7 +685,7 @@ describe('agenda and tasks', () => {
     assert.equal(manual[0].student_name, '홍길동');
   });
 
-  it('includes incomplete class on agenda and removes it after lessons are recorded', () => {
+  it('marks a class complete once every student has a lesson record; the agenda lists tasks only', () => {
     const api = svc();
     const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
     const a = api.createStudent({ name: '김철수', class_id: c.class_id });
@@ -749,14 +699,10 @@ describe('agenda and tasks', () => {
       homework: 'p.20 복습'
     });
 
-    let agenda = api.getDayAgenda('2026-09-14');
-    const incomplete = agenda.items.filter((item) => item.kind === 'incomplete_class');
-    assert.equal(incomplete.length, 1);
-    assert.equal(incomplete[0].class_id, c.class_id);
-    assert.equal(incomplete[0].incomplete_count, 2);
-    const hwCheck = agenda.items.find((item) => item.kind === 'homework_check' && item.class_id === c.class_id);
-    assert.ok(hwCheck);
-    assert.equal(hwCheck.prior_lesson_date, '2026-09-07');
+    const before = api.getTodayTeachingTasks('2026-09-14').regular_classes[0];
+    assert.equal(before.complete, false);
+    assert.equal(before.incomplete_count, 2);
+    assert.deepEqual(api.getDayAgenda('2026-09-14').items, []);
 
     api.saveLesson({
       lesson_date: '2026-09-14',
@@ -773,58 +719,7 @@ describe('agenda and tasks', () => {
       test_status: '미실시'
     });
 
-    agenda = api.getDayAgenda('2026-09-14');
-    assert.equal(agenda.items.filter((item) => item.kind === 'incomplete_class').length, 0);
-    const dash = api.getDashboard('2026-09-14');
-    assert.ok(dash.agenda);
-    assert.equal(dash.teaching_tasks.regular_classes[0].complete, true);
-  });
-
-  it('skips empty-roster classes from incomplete_class agenda items', () => {
-    const api = svc();
-    const today = '2026-09-14';
-    assert.equal(LMS.weekdayName(today), '월');
-    const empty = api.createClass({ class_name: '빈 반', weekday: '월' });
-    const agenda = api.getDayAgenda(today);
-    const incompleteForEmpty = agenda.items.filter(
-      (item) => item.kind === 'incomplete_class' && item.class_id === empty.class_id
-    );
-    assert.equal(incompleteForEmpty.length, 0);
-  });
-
-  it('adds learning_alert items only on today agenda', () => {
-    const api = svc();
-    const c = api.createClass({ class_name: '중2 A반', weekday: '월' });
-    const s = api.createStudent({ name: '신호학생', class_id: c.class_id });
-    api.saveLesson({
-      lesson_date: '2026-09-12',
-      student_id: s.student_id,
-      class_id: c.class_id,
-      attendance: '출석',
-      test_status: '미실시',
-      assignment_completion: 'D',
-      concentration: 'D'
-    });
-    api.saveLesson({
-      lesson_date: '2026-09-13',
-      student_id: s.student_id,
-      class_id: c.class_id,
-      attendance: '출석',
-      test_status: '미실시',
-      assignment_completion: 'F',
-      concentration: 'D'
-    });
-    const todayAgenda = api.getDayAgenda('2026-09-14');
-    assert.ok(
-      todayAgenda.items.some(
-        (item) => item.kind === 'learning_alert' && item.student_id === s.student_id
-      )
-    );
-    const yesterdayAgenda = api.getDayAgenda('2026-09-13');
-    assert.equal(
-      yesterdayAgenda.items.filter((item) => item.kind === 'learning_alert').length,
-      0
-    );
+    assert.equal(api.getTodayTeachingTasks('2026-09-14').regular_classes[0].complete, true);
   });
 
   it('updates task status and hides cancelled tasks from agenda', () => {
@@ -1124,7 +1019,7 @@ describe('homework checklist and weekly dashboard', () => {
       '2026-09-11', '2026-09-14', '2026-09-16'
     ]);
     assert.equal(byName['화목토반'].slots[0].items[0].title, '토 숙제');
-    assert.ok(api.getDashboard('2026-09-16').weekly_homework);
+    assert.ok(api.getTodayBoard('2026-09-16').weekly_homework);
   });
 
   it('materializes legacy homework text into checklist items', () => {

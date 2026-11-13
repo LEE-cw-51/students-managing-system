@@ -26,13 +26,16 @@ const { createMemoryStore, seedDemo } = require('./memory-store.js');
 
 // Data from before accounts: the file store keeps the default workspace in dev-server/data.json.
 fs.mkdirSync(path.join(dataDir, 'dev-server'), { recursive: true });
-seedDemo(LMS.createService(createMemoryStore({ fs, file: path.join(dataDir, 'dev-server', 'data.json') })));
+const legacyApi = LMS.createService(createMemoryStore({ fs, file: path.join(dataDir, 'dev-server', 'data.json') }));
+legacyApi.ensureSchema();
+seedDemo(legacyApi);
 
 const accounts = require('../lib/accounts.js');
 const { hashPassword, verifyPassword, passwordProblem } = require('../lib/password.js');
 const auth = require('../lib/auth.js');
 const { withService, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { sign } = require('../lib/signing.js');
+const { LOGIN_IP_MAX } = require('../lib/login-limit.js');
 
 const {
   authenticate, bootstrapAdmin, createInvite, acceptInvite, peekInvite, createPasswordReset,
@@ -66,7 +69,7 @@ async function newTeacher(email, password = 'teacher-pass-1', opts = {}) {
 }
 
 function setCookie(payload) {
-  stubs.jar.set(auth.SESSION_COOKIE, sign(payload));
+  stubs.jar.set(auth.SESSION_COOKIE, sign(payload, 'session'));
 }
 
 function cookieFor(session, extra = {}) {
@@ -304,7 +307,7 @@ describe('invite form (/api/invite)', () => {
     stubs.jar.clear();
     for (const headers of [{ Origin: 'https://evil.test' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
       const res = await POST(submit(token, { headers }));
-      assert.equal(res.headers.get('Location'), '/login?error=4', JSON.stringify(headers));
+      assert.equal(res.status, 403, JSON.stringify(headers));
     }
     assert.equal(stubs.jar.size, 0);
     assert.ok(await peekInvite(token));
@@ -326,7 +329,7 @@ describe('invite form (/api/invite)', () => {
     const other = await POST(submit(token, { ip: '10.9.9.10' }));
     assert.equal(other.headers.get('Location'), '/', 'other IPs are not affected');
     const after15 = await later(t, 15 * 60 * 1000 + 1000, () => POST(submit(crypto.randomBytes(32).toString('base64url'), { ip })));
-    assert.match(after15.headers.get('Location'), /error=invalid$/, 'the window slides');
+    assert.match(after15.headers.get('Location'), /error=invalid$/, 'a new window');
   });
 });
 
@@ -460,51 +463,30 @@ describe('login', () => {
     await newTeacher('login2@test.local', 'login-pass-1');
   });
 
-  // Runs first, on an empty failure list: 5000 expired entries fill it exactly.
-  it('a flood of expired entries does not wipe a live block', () => {
-    const now = 2_000_000_000_000;
-    for (let i = 0; i < 2500; i += 1) auth.noteLoginFailure([`ip:old-${i}`, `email:old-${i}@test.local`], now - 16 * 60 * 1000);
-    const target = ['ip:3.3.3.3', 'email:target@test.local'];
-    for (let i = 0; i < 10; i += 1) auth.noteLoginFailure(target, now);
-    assert.equal(auth.loginBlocked(target, now), true);
-  });
-
-  it('a flood of over 5000 fresh keys does not lift a live block', () => {
-    const now = 2_000_000_000_000 + 1000;
-    for (let i = 0; i < 30; i += 1) auth.noteLoginFailure(['ip:4.4.4.4', 'email:blocked@test.local'], now);
-    const flood = Array.from({ length: 6000 }, (_, i) => `email:flood-${i}@test.local`);
-    flood.forEach((key, i) => auth.noteLoginFailure([key], now + 1 + i));
-    try {
-      assert.equal(auth.loginBlocked(['ip:4.4.4.4', 'email:fresh@test.local'], now + 7000), true, 'blocked IP');
-      assert.equal(auth.loginBlocked(['ip:5.5.5.5', 'email:blocked@test.local'], now + 7000), true, 'blocked email');
-      assert.equal(auth.loginBlocked(['ip:3.3.3.3', 'email:target@test.local'], now + 7000), true, 'earlier block');
-    } finally {
-      auth.clearLoginFailures(flood);
+  it('counts attempts per IP (first forwarded address) before the password is checked', async () => {
+    const { POST } = await routeP;
+    const ip = freshIp();
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) {
+      assert.equal((await POST(login(`ghost${i}@test.local`, 'wrong-pass-1', ip))).status, 401);
     }
+    stubs.jar.clear();
+    const blocked = await POST(login('login@test.local', 'login-pass-1', ip));
+    assert.equal(blocked.status, 429);
+    assert.ok(Number(blocked.headers.get('Retry-After')) >= 1);
+    assert.match((await blocked.json()).error, /분 뒤에 다시/);
+    assert.equal(stubs.jar.size, 0);
+    assert.equal((await POST(login('login@test.local', 'login-pass-1', freshIp()))).status, 200, 'another IP');
   });
 
-  it('counts failures per email and per IP over 15 minutes, and a success clears the email count', () => {
-    const now = 1_000_000_000_000;
-    const email = ['ip:1.1.1.1', 'email:limit@test.local'];
-    for (let i = 0; i < 9; i += 1) auth.noteLoginFailure(email, now);
-    assert.equal(auth.loginBlocked(email, now), false);
-    auth.noteLoginFailure(email, now);
-    assert.equal(auth.loginBlocked(email, now), true, '10 failures for one email');
-    assert.equal(auth.loginBlocked(['ip:1.1.1.1', 'email:other@test.local'], now), false, 'the IP is under its own limit');
-    assert.equal(auth.loginBlocked(email, now + 15 * 60 * 1000 + 1), false, 'the window slides');
-    auth.clearLoginFailures(email);
-    assert.equal(auth.loginBlocked(email, now), false);
-
-    for (let i = 0; i < 30; i += 1) auth.noteLoginFailure(['ip:2.2.2.2', `email:spray${i}@test.local`], now);
-    assert.equal(auth.loginBlocked(['ip:2.2.2.2', 'email:new@test.local'], now), true, '30 failures from one IP');
-    auth.clearLoginFailures(['ip:2.2.2.2', 'email:spray0@test.local']);
-    assert.equal(auth.loginBlocked(['ip:2.2.2.2', 'email:new@test.local'], now), true, 'a success does not clear the IP count');
-  });
-
-  it('keys on the first forwarded address and the normalised email', () => {
-    const req = new Request('https://lms.test/api/login', { headers: { 'x-forwarded-for': ' 9.9.9.9 , 10.0.0.1' } });
-    assert.deepEqual(auth.loginKeys(req, ' Mixed@Case.KR '), ['ip:9.9.9.9', 'email:mixed@case.kr']);
-    assert.deepEqual(auth.loginKeys(new Request('https://lms.test/'), ''), ['ip:unknown', 'email:']);
+  it('a success clears the IP count', async () => {
+    const { POST } = await routeP;
+    const ip = freshIp();
+    for (let round = 0; round < 2; round += 1) {
+      for (let i = 0; i < LOGIN_IP_MAX - 1; i += 1) {
+        assert.equal((await POST(login('login@test.local', 'wrong-pass-1', ip))).status, 401);
+      }
+      assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 200, `round ${round}`);
+    }
   });
 
   it('signs in with the right password and sets a session for the user workspace', async () => {
@@ -541,6 +523,18 @@ describe('login', () => {
     assert.equal(later15.status, 200);
   });
 
+  it('a blocked form post goes back to /login with the minutes to wait', async () => {
+    const { POST } = await routeP;
+    const ip = freshIp();
+    const form = () => new Request('https://lms.test/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-real-ip': ip },
+      body: new URLSearchParams({ email: 'login@test.local', password: 'nope-nope', next: '/students' }).toString()
+    });
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) assert.equal((await POST(form())).headers.get('Location'), '/login?error=1&next=%2Fstudents');
+    assert.equal((await POST(form())).headers.get('Location'), '/login?error=locked-15&next=%2Fstudents');
+  });
+
   it('a form post redirects back to /login with an error code and keeps a safe next', async () => {
     const { POST } = await routeP;
     const form = (fields) => new Request('https://lms.test/api/login', {
@@ -564,10 +558,10 @@ describe('login', () => {
       body: new URLSearchParams({ email: 'login@test.local', password: 'login-pass-1', next: '/students' }).toString()
     });
     stubs.jar.clear();
-    for (const headers of [{ Origin: 'https://evil.test' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
-      const res = await POST(form(headers));
-      assert.equal(res.status, 303);
-      assert.equal(res.headers.get('Location'), '/login?error=4', JSON.stringify(headers));
+    for (let round = 0; round < 2; round += 1) {
+      for (const headers of [{ Origin: 'https://evil.test' }, { Origin: 'null' }, { 'Sec-Fetch-Site': 'cross-site' }]) {
+        assert.equal((await POST(form(headers))).status, 403, JSON.stringify(headers));
+      }
     }
     const json = new Request('https://lms.test/api/login', {
       method: 'POST',
@@ -576,10 +570,9 @@ describe('login', () => {
     });
     assert.equal((await POST(json)).status, 403);
     assert.equal(stubs.jar.size, 0, 'no session for a cross-site login');
-    assert.equal(auth.loginBlocked([`ip:${ip}`, 'email:login@test.local']), false);
 
     const same = await POST(form({ Origin: 'https://lms.test', 'Sec-Fetch-Site': 'same-origin' }));
-    assert.equal(same.headers.get('Location'), '/students');
+    assert.equal(same.headers.get('Location'), '/students', 'the refused posts were not counted against the IP');
     assert.equal((await auth.getSession()).email, 'login@test.local');
   });
 });
@@ -592,7 +585,7 @@ describe('logout', () => {
     const teacher = await newTeacher('logout@test.local');
     cookieFor(teacher);
     const evil = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { Origin: 'https://evil.test' } }));
-    assert.equal(evil.headers.get('Location'), '/login?error=4');
+    assert.equal(evil.status, 403);
     assert.ok(await auth.getSession(), 'still signed in');
     const json = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' } }));
     assert.equal(json.status, 403);
@@ -601,5 +594,19 @@ describe('logout', () => {
     const ok = await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { Origin: 'https://lms.test' } }));
     assert.equal(ok.headers.get('Location'), '/login');
     assert.equal(await auth.getSession(), null);
+  });
+
+  it('ends the user\'s sessions on other devices, and only theirs', async () => {
+    const { POST } = await routeP;
+    const teacher = await newTeacher('logout-all@test.local');
+    const other = await newTeacher('logout-other@test.local');
+    cookieFor(teacher);
+    const otherDevice = stubs.jar.get(auth.SESSION_COOKIE);
+    await POST(new Request('https://lms.test/api/logout', { method: 'POST', headers: { Origin: 'https://lms.test' } }));
+    stubs.jar.set(auth.SESSION_COOKIE, otherDevice);
+    assert.equal(await auth.getSession(), null, 'the copy on another device stops working');
+    cookieFor(other);
+    assert.equal((await auth.getSession()).uid, other.uid, 'other users stay signed in');
+    assert.equal((await authenticate('logout-all@test.local', 'teacher-pass-1')).user.session_version, teacher.ver + 1);
   });
 });

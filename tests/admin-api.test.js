@@ -19,7 +19,7 @@ require('node:module').registerHooks({
   resolve: (specifier, context, next) => next(specifier === 'next/headers' ? 'next/headers.js' : specifier, context)
 });
 
-const { adminRoute, adminDenied, isSameOriginJson } = require('../lib/admin-api.js');
+const { adminRoute, adminDenied } = require('../lib/admin-api.js');
 
 after(() => {
   process.chdir(originalCwd);
@@ -59,24 +59,12 @@ describe('admin API authorization', () => {
   it('rejects cross-site or non-JSON writes even for an admin', () => {
     assert.equal(adminDenied(post('/api/admin/invites', { headers: { Origin: 'https://evil.test' } }), admin).status, 403);
     assert.equal(adminDenied(post('/api/admin/invites', { headers: { 'Sec-Fetch-Site': 'cross-site' } }), admin).status, 403);
+    assert.equal(adminDenied(post('/api/admin/invites', { headers: { Origin: 'null' } }), admin).status, 403, 'opaque origin');
     const form = new Request(ORIGIN + '/api/admin/invites', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'email=a@b.c' });
-    assert.equal(isSameOriginJson(form), false);
-    assert.equal(isSameOriginJson(post('/api/admin/invites', { headers: { 'Sec-Fetch-Site': 'same-origin' } })), true);
-    assert.equal(isSameOriginJson(new Request(ORIGIN + '/api/admin/users')), true);
-    assert.equal(isSameOriginJson(post('/api/admin/invites', { headers: { Origin: 'null' } })), false, 'opaque origin');
-  });
-
-  it('isSameOrigin checks Sec-Fetch-Site and Origin without caring about the body type', async () => {
-    const { isSameOrigin } = await import('../lib/same-origin.js');
-    const form = (headers) => new Request(ORIGIN + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body: 'a=b' });
-    assert.equal(isSameOrigin(form({ Origin: ORIGIN })), true);
-    assert.equal(isSameOrigin(form({ Origin: ORIGIN, 'Sec-Fetch-Site': 'same-origin' })), true);
-    assert.equal(isSameOrigin(form({})), true, 'no browser headers (curl, tests)');
-    assert.equal(isSameOrigin(form({ Origin: 'https://evil.test' })), false);
-    assert.equal(isSameOrigin(form({ Origin: 'null' })), false);
-    assert.equal(isSameOrigin(form({ 'Sec-Fetch-Site': 'cross-site' })), false);
-    assert.equal(isSameOrigin(form({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://sub.lms.test' })), false);
-    assert.equal(isSameOrigin(form({ Origin: 'https://app.example', 'x-forwarded-host': 'app.example' })), true, 'behind a proxy');
+    assert.equal(adminDenied(form, admin).status, 415);
+    assert.equal(adminDenied(post('/api/admin/invites', { headers: { 'Sec-Fetch-Site': 'same-origin' } }), admin), null);
+    assert.equal(adminDenied(post('/api/admin/invites', { headers: { Origin: 'https://app.example', 'x-forwarded-host': 'app.example' } }), admin), null, 'behind a proxy');
+    assert.equal(adminDenied(new Request(ORIGIN + '/api/admin/users'), admin), null);
   });
 
   it('turns account errors into 400 with their message and hides other errors', async () => {

@@ -18,10 +18,13 @@ process.env.NODE_ENV = 'test';
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
 const { AGENT_TOOLS, assistantTools, getAgentTool, mcpTools, toolDefinitions } = require('../lib/agent-tools.js');
-const { MCP_READ_TOOLS, MCP_WRITE_TOOLS, MCP_APPROVAL_TOOLS } = require('../lib/mcp-tools/index.js');
+const { MCP_READ_TOOLS } = require('../lib/mcp-tools/index.js');
 const { anthropicToolDefinitions } = require('../lib/agent-anthropic.js');
-const { listTools, handleToolCall, handleMcpRequest, normalizeWriteMode, readWriteMode, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT, MCP_WRITE_MODES } = require('../lib/mcp-server.js');
-const { applyProposal, applyProposals, rejectProposals } = require('../lib/agent.js');
+const { listTools, handleToolCall, handleMcpRequest, mcpRateLimit, MCP_RATE_LIMIT_DEFAULT } = require('../lib/mcp-server.js');
+const { readWriteMode } = require('../lib/write-policy.js');
+const MCP_WRITE_MODES = LMS.MCP_WRITE_MODES;
+const normalizeWriteMode = LMS.normalizeMcpWriteMode;
+const { APP_SESSION, apply, reject } = require('../lib/proposals.js');
 const { withService, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, tokenRunner, validateAuthorizeParams, verifyAccessToken } = require('../lib/oauth.js');
 const { bootstrapAdmin, createInvite, acceptInvite, setUserDisabled } = require('../lib/accounts.js');
@@ -34,7 +37,6 @@ after(() => {
 
 const READ_NAMES = AGENT_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name);
 const WRITE_NAMES = AGENT_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name);
-const APPROVAL_NAMES = ['list_pending_proposals', 'approve_proposals', 'reject_proposals'];
 
 function setup() {
   const store = createMemoryStore();
@@ -65,16 +67,28 @@ const LIST = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} };
 
 describe('mcp write modes', () => {
   it('normalises unknown values to read_only and reads the mode from Settings', async () => {
-    assert.deepEqual(MCP_WRITE_MODES, ['read_only', 'proposal', 'claude_approve']);
+    assert.deepEqual(MCP_WRITE_MODES, ['read_only', 'proposal']);
     assert.equal(normalizeWriteMode(' proposal '), 'proposal');
-    assert.equal(normalizeWriteMode('claude_approve'), 'claude_approve');
-    ['', null, undefined, 'DIRECT', 'write'].forEach((v) => assert.equal(normalizeWriteMode(v), 'read_only'));
+    ['', null, undefined, 'DIRECT', 'write', 'CLAUDE_APPROVE'].forEach((v) => assert.equal(normalizeWriteMode(v), 'read_only'));
     const { api, run } = setup();
     assert.equal(await readWriteMode(run), 'read_only');
     api.saveSettings({ mcp_write_mode: 'proposal' });
     assert.equal(await readWriteMode(run), 'proposal');
-    api.saveSettings({ mcp_write_mode: 'claude_approve' });
-    assert.equal(await readWriteMode(run), 'claude_approve');
+  });
+
+  it('maps the removed claude_approve mode to proposal on read and on save, without a migration', async () => {
+    assert.equal(normalizeWriteMode('claude_approve'), 'proposal');
+    assert.equal(normalizeWriteMode(' claude_approve '), 'proposal');
+    assert.deepEqual(listTools('claude_approve'), listTools('proposal'));
+    const { store, api, run } = setup();
+    store.writeTable('Settings', LMS.settingsToRows({ ...api.getSettings(), mcp_write_mode: 'claude_approve' }));
+    assert.equal(await readWriteMode(run), 'proposal');
+    assert.equal(parse(await handleToolCall('get_settings', {}, { run, mode: 'claude_approve' })).mcp_write_mode, 'proposal');
+    // The settings page resends the stored value; other saves rewrite it too.
+    assert.equal(LMS.createService(store).saveSettings({ mcp_write_mode: 'claude_approve' }).mcp_write_mode, 'proposal');
+    store.writeTable('Settings', LMS.settingsToRows({ ...api.getSettings(), mcp_write_mode: 'claude_approve' }));
+    assert.equal(LMS.createService(store).saveSettings({ contact: '010-1111-2222' }).mcp_write_mode, 'proposal');
+    assert.equal(LMS.createService(store).getSettings().mcp_write_mode, 'proposal');
   });
 
   it('maps the removed direct mode to proposal, keeping write tools but queued', async () => {
@@ -92,7 +106,7 @@ describe('mcp write modes', () => {
     const { store, api } = setup();
     api.saveSettings({ mcp_write_mode: 'proposal' });
     ['write', 'DIRECT', 'full'].forEach((v) => {
-      assert.throws(() => LMS.createService(store).saveSettings({ mcp_write_mode: v, academy_name: '바뀜' }), /조회만\(read_only\), 승인 대기 제안\(proposal\), Claude에서 승인\(claude_approve\)/);
+      assert.throws(() => LMS.createService(store).saveSettings({ mcp_write_mode: v, academy_name: '바뀜' }), /조회만\(read_only\), 승인 대기 제안\(proposal\) 중에서만/);
     });
     // Nothing was written by the rejected saves.
     assert.equal(LMS.createService(store).getSettings().mcp_write_mode, 'proposal');
@@ -153,12 +167,12 @@ describe('mcp write modes', () => {
 
 describe('mcp tool surfaces', () => {
   const MCP_ONLY_READS = MCP_READ_TOOLS.map((t) => t.name);
-  const MCP_ONLY_WRITES = MCP_WRITE_TOOLS.map((t) => t.name);
-  const MCP_ONLY = [...MCP_ONLY_READS, ...MCP_ONLY_WRITES, ...MCP_APPROVAL_TOOLS.map((t) => t.name)];
+  const MCP_ONLY_WRITES = LMS.agentActions.list().filter((a) => !a.surfaces.includes('assistant')).map((a) => a.name);
+  const MCP_ONLY = [...MCP_ONLY_READS, ...MCP_ONLY_WRITES];
 
   it('read_only lists every read tool, including the MCP-only ones, and no write tool', () => {
     const names = listTools('read_only').map((t) => t.name);
-    assert.equal(MCP_ONLY_READS.length, 24);
+    assert.equal(MCP_ONLY_READS.length, 25);
     MCP_ONLY_READS.forEach((n) => assert.ok(names.includes(n), n));
     assert.ok(names.every((n) => getAgentTool(n).kind === 'read'));
     assert.equal(names.length, READ_NAMES.length);
@@ -168,13 +182,13 @@ describe('mcp tool surfaces', () => {
     assert.equal(MCP_ONLY_WRITES.length, 46);
     const names = listTools('proposal').map((t) => t.name);
     WRITE_NAMES.forEach((n) => assert.ok(names.includes(n), n));
-    assert.deepEqual([...WRITE_NAMES].sort(), Object.keys(LMS.AGENT_WRITE_ACTIONS).sort());
+    assert.deepEqual([...WRITE_NAMES].sort(), LMS.agentActions.list().map((a) => a.name).sort());
   });
 
   it('never exposes a settings writer; get_settings hides tokens and allowed emails', async () => {
     const names = mcpTools().map((t) => t.name);
     assert.deepEqual(names.filter((n) => /setting/.test(n)), ['get_settings']);
-    assert.ok(!Object.keys(LMS.AGENT_WRITE_ACTIONS).some((n) => /setting/i.test(n)));
+    assert.ok(!LMS.agentActions.list().some((a) => /setting/i.test(a.name)));
     const { api, run } = setup();
     api.saveSettings({ mcp_token_version: '7', allowed_emails: 'a@b.c', academy_name: '테스트 학원' });
     const out = parse(await handleToolCall('get_settings', {}, { run, mode: 'proposal' }));
@@ -216,7 +230,7 @@ describe('mcp tool surfaces', () => {
     assert.match(out.status, /^승인 대기에 추가했습니다\. 아직 저장되지 않았고/);
     assert.equal(store.readTable('Tasks').filter((t) => t.title === '교재 주문').length, 0);
     assert.equal(store.readTable('AgentProposals')[0].status, 'pending');
-    const applied = await applyProposal(out.proposal_id, run);
+    const applied = await apply(APP_SESSION, { proposal_id: out.proposal_id }, run);
     assert.equal(applied.verification_status, 'verified');
     assert.equal(store.readTable('Tasks').filter((t) => t.title === '교재 주문').length, 1);
     assert.equal(store.readTable('AgentProposals')[0].status, 'applied');
@@ -286,153 +300,91 @@ describe('mcp tool calls', () => {
     assert.equal(proposals.length, 4);
     assert.ok(proposals.every((p) => p.status === 'pending'));
     const attendance = proposals.find((p) => /update_attendance/.test(JSON.stringify(p.calls)));
-    await applyProposal(attendance.proposal_id, run);
+    await apply(APP_SESSION, { proposal_id: attendance.proposal_id }, run);
     assert.equal(lessonOf(hong.student_id).attendance, '결석');
   });
 });
 
-describe('mcp approval tools (claude_approve)', () => {
-  const queueTask = async (run, title, mode = 'claude_approve') => parse(await handleToolCall(
-    'create_task', { due_date: '2026-09-20', kind: 'admin', title }, { run, mode }
+describe('mcp proposals (approval only in the app)', () => {
+  const queueTask = async (run, title) => parse(await handleToolCall(
+    'create_task', { due_date: '2026-09-20', kind: 'admin', title }, { run, mode: 'proposal' }
   ));
   const tasksTitled = (store, title) => store.readTable('Tasks').filter((t) => t.title === title).length;
+  const REMOVED = ['approve_proposals', 'reject_proposals'];
 
-  it('lists the three approval tools only in claude_approve, with approve and reject destructive', () => {
-    assert.deepEqual(MCP_APPROVAL_TOOLS.map((t) => t.name), APPROVAL_NAMES);
-    APPROVAL_NAMES.forEach((n) => assert.equal(getAgentTool(n).kind, 'approval', n));
-    ['read_only', 'proposal', 'direct', 'nonsense'].forEach((mode) => {
-      const names = listTools(mode).map((t) => t.name);
-      APPROVAL_NAMES.forEach((n) => assert.ok(!names.includes(n), `${mode} ${n}`));
-    });
-    const tools = listTools('claude_approve');
-    assert.deepEqual(tools.map((t) => t.name), [...READ_NAMES, ...WRITE_NAMES, ...APPROVAL_NAMES]);
-    const byName = (n) => tools.find((t) => t.name === n);
-    assert.equal(byName('list_pending_proposals').annotations.readOnlyHint, true);
-    assert.equal(byName('list_pending_proposals').annotations.destructiveHint, false);
-    ['approve_proposals', 'reject_proposals'].forEach((n) => {
-      assert.equal(byName(n).annotations.readOnlyHint, false, n);
-      assert.equal(byName(n).annotations.destructiveHint, true, n);
-      assert.match(byName(n).description, /직접 말했을 때만/, n);
-    });
-    tools.filter((t) => WRITE_NAMES.includes(t.name)).forEach((t) => assert.match(t.description, /^\[승인 필요\] .*Claude에게 승인하라고/, t.name));
-  });
-
-  it('read_only and proposal refuse the approval tools and change nothing', async () => {
+  it('offers no approve or reject tool in any mode, including a stored claude_approve', async () => {
     const { store, run } = setup();
-    const { proposal_id } = await queueTask(run, '교재 주문', 'proposal');
-    for (const mode of ['read_only', 'proposal']) {
-      for (const name of APPROVAL_NAMES) {
+    const { proposal_id } = await queueTask(run, '교재 주문');
+    for (const mode of ['read_only', 'proposal', 'direct', 'claude_approve', 'nonsense']) {
+      const names = listTools(mode).map((t) => t.name);
+      REMOVED.forEach((n) => assert.ok(!names.includes(n), `${mode} ${n}`));
+      for (const name of REMOVED) {
         const res = await handleToolCall(name, { proposal_ids: [proposal_id] }, { run, mode });
         assert.equal(res.isError, true, `${mode} ${name}`);
         assert.match(res.content[0].text, /없는 도구/);
       }
     }
+    assert.ok(mcpTools().every((t) => t.kind === 'read' || t.kind === 'write'));
     assert.equal(store.readTable('AgentProposals')[0].status, 'pending');
     assert.equal(tasksTitled(store, '교재 주문'), 0);
   });
 
-  it('lists a queued proposal, then approving it saves the change', async () => {
+  it('says approval happens in the app, in tool results, tool descriptions and server instructions', async () => {
+    const { run } = setup();
+    const queued = await queueTask(run, '교재 주문');
+    assert.match(queued.status, /앱의 AI 비서에서 승인하면 반영됩니다/);
+    listTools('proposal').filter((t) => WRITE_NAMES.includes(t.name)).forEach((t) => assert.doesNotMatch(t.description, /Claude에게 승인/, t.name));
+    const res = await handleMcpRequest(rpc(INIT), { run, getMode: async () => 'proposal' });
+    const init = await res.json();
+    assert.match(init.result.instructions, /승인과 거절은 강사가 앱 화면에서만/);
+    assert.doesNotMatch(init.result.instructions, /approve_proposals|reject_proposals/);
+  });
+
+  it('lists the connector\'s pending proposals read-only, in every mode', async () => {
     const { store, run } = setup();
     const queued = await queueTask(run, '교재 주문');
-    assert.match(queued.status, /승인하라고 말씀하시면 반영됩니다/);
-    const list = parse(await handleToolCall('list_pending_proposals', {}, { run, mode: 'claude_approve' }));
-    assert.equal(list.count, 1);
-    assert.equal(list.proposals[0].proposal_id, queued.proposal_id);
-    assert.ok(list.proposals[0].created_at);
-    assert.equal(list.proposals[0].change, queued.change);
-    assert.equal(tasksTitled(store, '교재 주문'), 0);
-
-    const res = await handleToolCall('approve_proposals', { proposal_ids: [queued.proposal_id] }, { run, mode: 'claude_approve' });
-    assert.equal(res.isError, undefined, res.content[0].text);
-    const [item] = parse(res).results;
-    assert.equal(item.proposal_id, queued.proposal_id);
-    assert.equal(item.status, 'applied');
-    assert.equal(item.verification_status, 'verified');
-    assert.equal(item.error, '');
-    assert.equal(tasksTitled(store, '교재 주문'), 1);
-    assert.equal(store.readTable('AgentProposals')[0].status, 'applied');
-    assert.equal(parse(await handleToolCall('list_pending_proposals', {}, { run, mode: 'claude_approve' })).count, 0);
+    LMS.createService(store).saveAgentTurn({
+      message: '비서 일 만들어 줘', reply: '확인해 주세요.',
+      calls: [{ tool: 'create_task', args: { due_date: '2026-09-20', kind: 'admin', title: '비서 일' } }]
+    });
+    for (const mode of ['read_only', 'proposal']) {
+      const tool = listTools(mode).find((t) => t.name === 'list_pending_proposals');
+      assert.equal(tool.annotations.readOnlyHint, true, mode);
+      assert.match(tool.description, /앱 화면에서만/);
+      const list = parse(await handleToolCall('list_pending_proposals', {}, { run, mode }));
+      assert.equal(list.count, 1);
+      assert.equal(list.proposals[0].proposal_id, queued.proposal_id);
+      assert.ok(list.proposals[0].created_at);
+      assert.equal(list.proposals[0].change, queued.change);
+    }
   });
 
-  it('rejects a proposal, and reports unknown ids per item', async () => {
-    const { store, run } = setup();
-    const queued = await queueTask(run, '거절할 일');
-    const res = parse(await handleToolCall('reject_proposals', { proposal_ids: [queued.proposal_id, 'AGP-9999'] }, { run, mode: 'claude_approve' }));
-    assert.equal(res.results.find((r) => r.proposal_id === queued.proposal_id).status, 'rejected');
-    assert.ok(res.results.find((r) => r.proposal_id === 'AGP-9999').error);
-    assert.equal(store.readTable('AgentProposals')[0].status, 'rejected');
-    assert.equal(tasksTitled(store, '거절할 일'), 0);
-
-    const missing = parse(await handleToolCall('approve_proposals', { proposal_ids: ['AGP-9999'] }, { run, mode: 'claude_approve' }));
-    assert.deepEqual(missing.results, [{ proposal_id: 'AGP-9999', status: '', verification_status: '', error: '제안을 찾을 수 없습니다.' }]);
-    const empty = await handleToolCall('approve_proposals', { proposal_ids: [] }, { run, mode: 'claude_approve' });
-    assert.equal(empty.isError, true);
-  });
-
-  // A proposal from the in-app assistant chat (no source passed).
-  const assistantTask = (store, title) => LMS.createService(store).saveAgentTurn({
-    message: `${title} 할 일 만들어 줘`, reply: '확인해 주세요.',
-    calls: [{ tool: 'create_task', args: { due_date: '2026-09-20', kind: 'admin', title } }]
-  }).message.proposal.proposal_id;
-  const statusOf = (store, id) => store.readTable('AgentProposals').find((p) => p.proposal_id === id).status;
-  const call = async (run, name, ids) => parse(await handleToolCall(name, ids ? { proposal_ids: ids } : {}, { run, mode: 'claude_approve' }));
-
-  it('records where a proposal came from', async () => {
+  it('records where a proposal came from; rows without source count as connector-made by title', async () => {
     const { store, run } = setup();
     const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
-    const webId = assistantTask(store, '비서 일');
+    const webId = LMS.createService(store).saveAgentTurn({
+      message: '비서 일', reply: '확인해 주세요.',
+      calls: [{ tool: 'create_task', args: { due_date: '2026-09-20', kind: 'admin', title: '비서 일' } }]
+    }).message.proposal.proposal_id;
     const rows = store.readTable('AgentProposals');
     assert.equal(rows.find((p) => p.proposal_id === mcpId).source, 'mcp');
     assert.equal(rows.find((p) => p.proposal_id === webId).source, 'assistant');
-  });
-
-  it('lists only connector proposals; assistant ones get an item error and stay pending', async () => {
-    const { store, run } = setup();
-    const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
-    const webId = assistantTask(store, '비서 일');
-
-    const list = await call(run, 'list_pending_proposals');
+    store.writeTable('AgentProposals', rows.map(({ source, ...rest }) => rest));
+    const list = parse(await handleToolCall('list_pending_proposals', {}, { run, mode: 'proposal' }));
     assert.deepEqual(list.proposals.map((p) => p.proposal_id), [mcpId]);
-
-    const approved = await call(run, 'approve_proposals', [webId, mcpId]);
-    assert.deepEqual(approved.results.find((r) => r.proposal_id === webId),
-      { proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH });
-    assert.equal(approved.results.find((r) => r.proposal_id === mcpId).status, 'applied');
-    assert.equal(statusOf(store, webId), 'pending');
-    assert.equal(tasksTitled(store, '비서 일'), 0);
-
-    const rejected = await call(run, 'reject_proposals', [webId]);
-    assert.deepEqual(rejected.results, [{ proposal_id: webId, status: '', verification_status: '', error: LMS.AGENT_SOURCE_MISMATCH }]);
-    assert.equal(statusOf(store, webId), 'pending');
   });
 
-  it('treats rows without source as connector-made only when the title has the connector prefix', async () => {
-    const { store, run } = setup();
-    const mcpId = (await queueTask(run, '예전 커넥터 일')).proposal_id;
-    const webId = assistantTask(store, '예전 비서 일');
-    store.writeTable('AgentProposals', store.readTable('AgentProposals').map((p) => {
-      const { source, ...rest } = p;
-      return rest;
-    }));
-    assert.deepEqual((await call(run, 'list_pending_proposals')).proposals.map((p) => p.proposal_id), [mcpId]);
-    assert.equal((await call(run, 'reject_proposals', [webId])).results[0].error, LMS.AGENT_SOURCE_MISMATCH);
-    assert.equal((await call(run, 'reject_proposals', [mcpId])).results[0].status, 'rejected');
-    assert.equal(statusOf(store, webId), 'pending');
-  });
-
-  it('web approval paths still handle proposals from both sources', async () => {
+  it('the app applies and rejects proposals from both sources', async () => {
     const { store, run } = setup();
     const mcpId = (await queueTask(run, '커넥터 일')).proposal_id;
-    const webId = assistantTask(store, '비서 일');
-    const webId2 = assistantTask(store, '비서 거절');
-    assert.deepEqual(LMS.createService(store).listPendingProposals().map((p) => p.proposal_id), [mcpId, webId, webId2]);
-    const applied = await applyProposals([mcpId, webId], run);
-    assert.deepEqual(applied.results.map((r) => [r.proposal_id, r.status, r.error]), [[mcpId, 'applied', ''], [webId, 'applied', '']]);
-    const rejected = await rejectProposals([webId2], run);
-    assert.equal(rejected.results[0].status, 'rejected');
+    const mcpId2 = (await queueTask(run, '커넥터 거절')).proposal_id;
+    const applied = await apply(APP_SESSION, { proposal_ids: [mcpId] }, run);
+    assert.deepEqual(applied.results.map((r) => [r.proposal_id, r.status, r.error]), [[mcpId, 'applied', '']]);
+    assert.equal(tasksTitled(store, '커넥터 일'), 1);
+    assert.equal((await reject(APP_SESSION, { proposal_id: mcpId2 }, run)).status, 'rejected');
+    assert.equal(tasksTitled(store, '커넥터 거절'), 0);
   });
 });
-
 describe('mcp rate limit', () => {
   it('reads MCP_RATE_LIMIT_PER_HOUR with a default of 300', () => {
     assert.equal(MCP_RATE_LIMIT_DEFAULT, 300);
@@ -534,9 +486,9 @@ describe('/api/mcp route', () => {
     const { POST, GET, DELETE } = await routeP;
     assertUnauthorized(await POST(rpc(LIST)));
     assertUnauthorized(await POST(rpc(LIST, { Authorization: 'Bearer nope' })));
-    const forged = sign({ typ: 'access', ver: '0', exp: Math.floor(Date.now() / 1000) + 60 }).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
+    const forged = sign({ typ: 'access', ver: '0', exp: Math.floor(Date.now() / 1000) + 60 }, 'token').replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
     assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${forged}` })));
-    const expired = sign({ typ: 'access', cid: 'c', ver: '0', exp: Math.floor(Date.now() / 1000) - 1 });
+    const expired = sign({ typ: 'access', cid: 'c', ver: '0', exp: Math.floor(Date.now() / 1000) - 1 }, 'token');
     assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${expired}` })));
     assertUnauthorized(await GET(new Request('https://lms.test/api/mcp')));
     assertUnauthorized(await DELETE(new Request('https://lms.test/api/mcp', { method: 'DELETE' })));
@@ -581,7 +533,8 @@ describe('/api/mcp route', () => {
     assert.equal(await pendingIn(DEFAULT_WORKSPACE_ID), adminBefore);
 
     const verified = await verifyAccessToken(teacherAuth.Authorization.slice('Bearer '.length));
-    assert.equal(await tokenRunner(verified)((api) => api.getBootstrap().user_email), 'teacher@test.local');
+    assert.equal(verified.user.email, 'teacher@test.local');
+    assert.equal(await tokenRunner(verified)((api) => api.listPendingProposals().length), 1);
   });
 
   it('refuses the token of a disabled user', async () => {
@@ -597,7 +550,33 @@ describe('/api/mcp route', () => {
   it('refuses a legacy token without uid/wid', async () => {
     const { POST } = await routeP;
     const ver = await withService(DEFAULT_WORKSPACE_ID, (api) => String(api.getSettings().mcp_token_version || '0'));
-    const legacy = sign({ typ: 'access', cid: 'c', ver, sc: '', exp: Math.floor(Date.now() / 1000) + 60 });
+    const legacy = sign({ typ: 'access', cid: 'c', ver, sc: '', exp: Math.floor(Date.now() / 1000) + 60 }, 'token');
     assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${legacy}` })));
+  });
+});
+
+describe('/api/oauth/register route', () => {
+  const routeP = import('../app/api/oauth/register/route.js');
+  const register = (body, ip) => new Request('https://lms.test/api/oauth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-real-ip': ip },
+    body
+  });
+
+  it('counts a request against the limit before reading its body', async () => {
+    const { POST } = await routeP;
+    const { REGISTER_IP_MAX } = await import('../lib/login-limit.js');
+    const ip = '203.0.113.7';
+    for (let i = 0; i < REGISTER_IP_MAX; i++) {
+      const res = await POST(register('not json', ip));
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).error, 'invalid_client_metadata');
+    }
+    const valid = JSON.stringify({ redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] });
+    const blocked = await POST(register(valid, ip));
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error, 'too_many_requests');
+    assert.ok(Number(blocked.headers.get('Retry-After')) >= 1);
+    assert.equal((await POST(register(valid, '203.0.113.8'))).status, 201);
   });
 });

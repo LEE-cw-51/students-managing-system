@@ -18,6 +18,7 @@ process.env.NODE_ENV = 'test';
 const oauth = require('../lib/oauth.js');
 const { sign, unsign } = require('../lib/signing.js');
 const { safeNext } = require('../lib/safe-next.js');
+const crypto = require('node:crypto');
 const { withService, LMS, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { createMemoryStore } = require('./memory-store.js');
 const { bootstrapAdmin, createInvite, acceptInvite, setUserDisabled } = require('../lib/accounts.js');
@@ -40,9 +41,11 @@ before(async () => {
   admin = sessionOf(await bootstrapAdmin({ email: 'admin@test.local', password: 'admin-pass-1' }));
 });
 
-/** Signed claims for a hand-made token of the given session. */
+/** Signed claims for a hand-made access token of the given session, on a live connection. */
 async function claimsOf(session) {
-  return { uid: session.uid, wid: session.wid, uv: session.ver, ver: await currentTokenVersion(session.wid) };
+  const { tokens } = await issueTokens(session);
+  const { uid, wid, uv, gid, ver } = unsign(tokens.access_token, 'token');
+  return { uid, wid, uv, gid, ver };
 }
 
 after(() => {
@@ -53,6 +56,12 @@ after(() => {
 const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 const VERIFIER = 'abcdefghijklmnopqrstuvwxyz0123456789-._~ABCDEFG';
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** A token as signed before keys were split per purpose: HMAC with AUTH_SECRET itself. */
+function legacySign(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${body}.${crypto.createHmac('sha256', 'test-secret').update(body).digest('base64url')}`;
+}
 
 function authorizeParams(clientId, extra = {}) {
   return {
@@ -191,9 +200,9 @@ describe('oauth token exchange', () => {
     const replay = await exchangeToken(body);
     assert.equal(replay.error, 'invalid_grant');
     assert.equal(replay.tokens, undefined);
-    const { jti, ...withoutJti } = unsign(code);
+    const { jti, ...withoutJti } = unsign(code, 'code');
     assert.ok(jti);
-    const noJti = sign(withoutJti);
+    const noJti = sign(withoutJti, 'code');
     assert.equal((await exchangeToken({ ...body, code: noJti })).error, 'invalid_grant');
   });
 
@@ -214,17 +223,16 @@ describe('oauth token exchange', () => {
     assert.equal((await exchangeToken({ grant_type: 'password' })).error, 'unsupported_grant_type');
   });
 
-  it('rotates refresh tokens: an old one is refused, the new one works', async () => {
+  it('rotates refresh tokens: each new one works once', async () => {
     const { clientId, tokens } = await issueTokens();
     const first = await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
     assert.ok(first.tokens);
-    const reuse = await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
-    assert.equal(reuse.error, 'invalid_grant');
-    assert.equal(reuse.tokens, undefined);
     const second = await exchangeToken({ grant_type: 'refresh_token', refresh_token: first.tokens.refresh_token, client_id: clientId });
     assert.ok(second.tokens);
     assert.ok(await verifyAccessToken(second.tokens.access_token));
-    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: first.tokens.refresh_token })).error, 'invalid_grant');
+    const gid = (t) => unsign(t, 'token').gid;
+    assert.ok(gid(tokens.access_token));
+    assert.equal(gid(second.tokens.refresh_token), gid(tokens.access_token), 'one connection across refreshes');
   });
 
   it('keeps used ids only until they expire', () => {
@@ -251,13 +259,13 @@ describe('oauth token expiry and revocation', () => {
     assert.equal(refresh.error, 'invalid_grant');
 
     const claims = await claimsOf(admin);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp: nowSec() - 1 })), null);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims })), null, 'no exp');
-    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp: nowSec() + 60 })));
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp: nowSec() - 1 }, 'token')), null);
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims }, 'token')), null, 'no exp');
+    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp: nowSec() + 60 }, 'token')));
   });
 
   it('rejects forged or garbled tokens', async () => {
-    const good = sign({ typ: 'access', cid: 'c', ...(await claimsOf(admin)), exp: nowSec() + 60 });
+    const good = sign({ typ: 'access', cid: 'c', ...(await claimsOf(admin)), exp: nowSec() + 60 }, 'token');
     const [body] = good.split('.');
     const otherSecret = require('node:crypto').createHmac('sha256', 'other').update(body).digest('base64url');
     for (const token of ['', 'abc', 'a.b', `${body}.${otherSecret}`, `${body}.`, null, undefined]) {
@@ -285,11 +293,11 @@ describe('oauth tokens are bound to a user and workspace', () => {
     const teacher = await newTeacher('carry@test.local');
     assert.notEqual(teacher.wid, DEFAULT_WORKSPACE_ID);
     const { clientId, code } = await issueCode(teacher);
-    const c = unsign(code);
+    const c = unsign(code, 'code');
     assert.deepEqual([c.typ, c.uid, c.wid, c.uv, c.ver], ['code', teacher.uid, teacher.wid, teacher.ver, '0']);
     const out = await exchangeToken({ grant_type: 'authorization_code', code, code_verifier: VERIFIER, client_id: clientId, redirect_uri: REDIRECT });
     for (const token of [out.tokens.access_token, out.tokens.refresh_token]) {
-      const p = unsign(token);
+      const p = unsign(token, 'token');
       assert.deepEqual([p.cid, p.uid, p.wid, p.uv, p.ver], [clientId, teacher.uid, teacher.wid, teacher.ver, '0']);
     }
     const verified = await verifyAccessToken(out.tokens.access_token);
@@ -298,7 +306,7 @@ describe('oauth tokens are bound to a user and workspace', () => {
 
     const refreshed = await exchangeToken({ grant_type: 'refresh_token', refresh_token: out.tokens.refresh_token, client_id: clientId });
     for (const token of [refreshed.tokens.access_token, refreshed.tokens.refresh_token]) {
-      const p = unsign(token);
+      const p = unsign(token, 'token');
       assert.deepEqual([p.uid, p.wid, p.uv], [teacher.uid, teacher.wid, teacher.ver]);
     }
     assert.equal((await verifyAccessToken(refreshed.tokens.access_token)).wid, teacher.wid);
@@ -322,7 +330,7 @@ describe('oauth tokens are bound to a user and workspace', () => {
     assert.equal(await verifyAccessToken(mine.tokens.access_token), null);
 
     const fresh = await issueTokens(teacher);
-    const { jti, exp } = unsign(fresh.tokens.refresh_token);
+    const { jti, exp } = unsign(fresh.tokens.refresh_token, 'token');
     assert.ok((await exchangeToken({ grant_type: 'refresh_token', refresh_token: fresh.tokens.refresh_token })).tokens);
     assert.equal(await withService(teacher.wid, (api) => api.consumeOAuthJti(jti, exp * 1000, Date.now())), false, 'used in the teacher workspace');
     assert.equal(await withService(DEFAULT_WORKSPACE_ID, (api) => api.consumeOAuthJti(jti, exp * 1000, Date.now())), true, 'unknown to the default workspace');
@@ -349,23 +357,161 @@ describe('oauth tokens are bound to a user and workspace', () => {
     const teacher = await newTeacher('outsider@test.local');
     const claims = await claimsOf(teacher);
     const exp = nowSec() + 60;
-    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp })));
+    assert.ok(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, exp }, 'token')));
     const ver = await currentTokenVersion(DEFAULT_WORKSPACE_ID);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, wid: DEFAULT_WORKSPACE_ID, ver, exp })), null);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, uv: claims.uv + 1, exp })), null, 'stale user version');
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, wid: DEFAULT_WORKSPACE_ID, ver, exp }, 'token')), null);
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...claims, uv: claims.uv + 1, exp }, 'token')), null, 'stale user version');
   });
 
   it('rejects legacy codes and tokens that carry no uid/wid', async () => {
     const ver = await currentTokenVersion(DEFAULT_WORKSPACE_ID);
     const exp = nowSec() + 60;
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp })), null);
-    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, uid: admin.uid, uv: admin.ver, exp })), null, 'no wid');
-    const legacyRefresh = sign({ typ: 'refresh', cid: 'c', ver, sc: '', exp, jti: 'legacy-refresh' });
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, exp }, 'token')), null);
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ver, uid: admin.uid, uv: admin.ver, exp }, 'token')), null, 'no wid');
+    const legacyRefresh = sign({ typ: 'refresh', cid: 'c', ver, sc: '', exp, jti: 'legacy-refresh' }, 'token');
     assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: legacyRefresh })).error, 'invalid_grant');
     const { clientId, code } = await issueCode();
-    const { uid, wid, uv, ...legacyCode } = unsign(code);
-    const out = await exchangeToken({ grant_type: 'authorization_code', code: sign(legacyCode), code_verifier: VERIFIER, client_id: clientId, redirect_uri: REDIRECT });
+    const { uid, wid, uv, ...legacyCode } = unsign(code, 'code');
+    const out = await exchangeToken({ grant_type: 'authorization_code', code: sign(legacyCode, 'code'), code_verifier: VERIFIER, client_id: clientId, redirect_uri: REDIRECT });
     assert.equal(out.error, 'invalid_grant');
+  });
+});
+
+describe('oauth replay detection', () => {
+  const refreshWith = (refresh_token) => exchangeToken({ grant_type: 'refresh_token', refresh_token });
+
+  it('a refresh token used twice cuts its connection, and only that one', async () => {
+    const mine = await issueTokens();
+    const other = await issueTokens();
+    const first = await refreshWith(mine.tokens.refresh_token);
+    assert.ok(first.tokens);
+    const reuse = await refreshWith(mine.tokens.refresh_token);
+    assert.equal(reuse.error, 'invalid_grant');
+    assert.match(reuse.error_description, /다시 연결/);
+    assert.equal(await verifyAccessToken(first.tokens.access_token), null);
+    assert.equal((await refreshWith(first.tokens.refresh_token)).error, 'invalid_grant');
+    assert.ok(await verifyAccessToken(other.tokens.access_token));
+    assert.ok((await refreshWith(other.tokens.refresh_token)).tokens);
+  });
+
+  it('a code used twice cuts the tokens it gave', async () => {
+    const { clientId, code } = await issueCode();
+    const body = { grant_type: 'authorization_code', code, code_verifier: VERIFIER, client_id: clientId, redirect_uri: REDIRECT };
+    const { tokens } = await exchangeToken(body);
+    assert.ok(await verifyAccessToken(tokens.access_token));
+    assert.equal((await exchangeToken(body)).error, 'invalid_grant');
+    assert.equal(await verifyAccessToken(tokens.access_token), null);
+    assert.equal((await refreshWith(tokens.refresh_token)).error, 'invalid_grant');
+  });
+
+  it('refuses tokens without a connection id and leaves the other connections alone', async () => {
+    const other = await issueTokens();
+    const claims = await claimsOf(admin);
+    const { gid, ...noGid } = claims;
+    const old = sign({ typ: 'refresh', cid: 'c', ...noGid, sc: '', iat: nowSec(), exp: nowSec() + 600, jti: 'no-gid' }, 'token');
+    assert.equal((await refreshWith(old)).error, 'invalid_grant');
+    assert.equal(await verifyAccessToken(sign({ typ: 'access', cid: 'c', ...noGid, iat: nowSec(), exp: nowSec() + 60 }, 'token')), null);
+    assert.equal(await currentTokenVersion(DEFAULT_WORKSPACE_ID), claims.ver);
+    assert.ok(await verifyAccessToken(other.tokens.access_token));
+  });
+});
+
+describe('connector connections', () => {
+  const gidOf = (tokens) => unsign(tokens.access_token, 'token').gid;
+  const listed = () => withService(DEFAULT_WORKSPACE_ID, (api) => api.listMcpConnections());
+
+  it('lists each approved connection and cuts one without touching the others', async () => {
+    const a = await issueTokens();
+    const b = await issueTokens();
+    const rows = await listed();
+    const rowA = rows.find((r) => r.grant_id === gidOf(a.tokens));
+    assert.ok(rowA);
+    assert.equal(rowA.client_name, 'Claude');
+    assert.ok(rowA.created_at);
+    assert.ok(rowA.last_used_at);
+    assert.deepEqual(Object.keys(rowA).sort(), ['client_name', 'created_at', 'grant_id', 'last_used_at']);
+
+    assert.equal(await withService(DEFAULT_WORKSPACE_ID, (api) => api.revokeMcpConnection(gidOf(a.tokens))), true);
+    assert.equal(await withService(DEFAULT_WORKSPACE_ID, (api) => api.revokeMcpConnection(gidOf(a.tokens))), false);
+    assert.equal(await verifyAccessToken(a.tokens.access_token), null);
+    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: a.tokens.refresh_token })).error, 'invalid_grant');
+    assert.ok(await verifyAccessToken(b.tokens.access_token));
+    const after = await listed();
+    assert.equal(after.some((r) => r.grant_id === gidOf(a.tokens)), false);
+    assert.equal(after.some((r) => r.grant_id === gidOf(b.tokens)), true);
+  });
+
+  it('"연결 끊기" empties the list', async () => {
+    await issueTokens();
+    assert.ok((await listed()).length);
+    await bumpTokenVersion();
+    assert.deepEqual(await listed(), []);
+  });
+
+  it('drops a connection once its refresh token has expired', async (t) => {
+    const { tokens } = await issueTokens();
+    const gid = gidOf(tokens);
+    assert.ok((await listed()).some((r) => r.grant_id === gid));
+    assert.equal(await later(t, REFRESH_TTL + 1, () => listed()).then((rows) => rows.some((r) => r.grant_id === gid)), false);
+  });
+
+  it('keeps each workspace\'s connections apart', async () => {
+    const teacher = await newTeacher('connections@test.local');
+    const mine = await issueTokens(teacher);
+    const gid = unsign(mine.tokens.access_token, 'token').gid;
+    const rows = (wid) => withService(wid, (api) => api.listMcpConnections().map((r) => r.grant_id));
+    assert.deepEqual(await rows(teacher.wid), [gid]);
+    assert.equal((await rows(DEFAULT_WORKSPACE_ID)).includes(gid), false);
+    assert.equal(await withService(DEFAULT_WORKSPACE_ID, (api) => api.revokeMcpConnection(gid)), false, 'another workspace cannot cut it');
+    assert.ok(await verifyAccessToken(mine.tokens.access_token));
+  });
+});
+
+describe('signing keys per purpose', () => {
+  const HKDF_SALT = 'students-managing-system/signing/v1';
+  const derivedMac = (info, body) => crypto.createHmac('sha256', Buffer.from(crypto.hkdfSync('sha256', 'test-secret', HKDF_SALT, info, 32))).update(body).digest('base64url');
+
+  it('signs new tokens with a key derived for their purpose, never AUTH_SECRET itself', async () => {
+    const { tokens } = await issueTokens();
+    const [body, mac] = tokens.access_token.split('.');
+    assert.equal(mac, derivedMac('lms/oauth-token', body));
+    assert.notEqual(mac, legacySign(JSON.parse(Buffer.from(body, 'base64url').toString())).split('.')[1]);
+    const session = sign({ ok: true, at: Date.now() }, 'session');
+    assert.equal(session.split('.')[1], derivedMac('lms/session', session.split('.')[0]));
+    const { client } = registerClient({ redirect_uris: [REDIRECT] });
+    assert.equal(client.client_id.split('.')[1], derivedMac('lms/oauth-client', client.client_id.split('.')[0]));
+  });
+
+  it('a token made for one purpose never verifies as another', async () => {
+    const { tokens } = await issueTokens();
+    assert.equal(unsign(tokens.access_token, 'session'), null);
+    assert.equal(unsign(tokens.access_token, 'client'), null);
+    assert.equal(validateAuthorizeParams(authorizeParams(tokens.access_token)).fatal, true);
+    const fakeClient = sign({ typ: 'client', ru: [REDIRECT], name: 'x', iat: nowSec() }, 'token');
+    assert.equal(validateAuthorizeParams(authorizeParams(fakeClient)).fatal, true);
+    const fakeCode = sign({ typ: 'code', cid: 'c', ru: REDIRECT, cc: pkceChallenge(VERIFIER), ver: '0', exp: nowSec() + 60, jti: 'x' }, 'token');
+    assert.equal((await exchangeToken({ grant_type: 'authorization_code', code: fakeCode, code_verifier: VERIFIER, client_id: 'c', redirect_uri: REDIRECT })).error, 'invalid_grant');
+    assert.throws(() => sign({}, 'nope'), /서명 용도/);
+  });
+
+  it('keeps accepting Claude client ids signed with the old key, but no token from before accounts', async () => {
+    const oldClient = legacySign({ typ: 'client', ru: [REDIRECT], name: '예전 Claude', iat: nowSec() - 86400 });
+    const params = validateAuthorizeParams(authorizeParams(oldClient));
+    assert.equal(params.error, undefined);
+    assert.equal(params.clientName, '예전 Claude');
+    const code = await issueAuthorizationCode(params, admin);
+    const out = await exchangeToken({ grant_type: 'authorization_code', code, code_verifier: VERIFIER, client_id: oldClient, redirect_uri: REDIRECT });
+    assert.ok(out.tokens, JSON.stringify(out));
+    const [body, mac] = out.tokens.refresh_token.split('.');
+    assert.equal(mac, derivedMac('lms/oauth-token', body), 'new tokens use the derived key');
+    const gid = unsign(out.tokens.access_token, 'token').gid;
+    const row = (await withService(DEFAULT_WORKSPACE_ID, (api) => api.listMcpConnections())).find((r) => r.grant_id === gid);
+    assert.equal(row.client_name, '예전 Claude');
+
+    const ver = await currentTokenVersion(DEFAULT_WORKSPACE_ID);
+    assert.equal(await verifyAccessToken(legacySign({ typ: 'access', cid: 'c', ver, iat: nowSec(), exp: nowSec() + 60 })), null);
+    const oldRefresh = legacySign({ typ: 'refresh', cid: oldClient, ver, sc: '', iat: nowSec(), exp: nowSec() + 600, jti: 'legacy-refresh-2' });
+    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: oldRefresh, client_id: oldClient })).error, 'invalid_grant');
   });
 });
 

@@ -108,6 +108,7 @@ LMS.TABLES = {
   ],
   AgentUsage: ['used_at', 'kind'],
   OAuthJti: ['jti', 'exp_ms'],
+  OAuthGrants: ['grant_id', 'client_name', 'ver', 'created_at', 'last_used_at', 'exp_ms'],
   Settings: ['key', 'value'],
   _Meta: ['prefix', 'next_seq']
 };
@@ -145,7 +146,6 @@ LMS.PLAN_SOURCE = ['manual', 'split', 'ai'];
 LMS.PLAN_DONE_STATUS = ['완료', '일부', '못 함'];
 LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
 LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
-LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
 LMS.CURRICULUM_MAX_SESSIONS = 20;
 LMS.HOMEWORK_CHECK_STATUS = LMS.ASSIGNMENT;
 /** Points a teacher-entered item grade contributes. The average maps back through the bands below. */
@@ -168,10 +168,12 @@ LMS.DEFAULT_SETTINGS = {
   mcp_write_mode: 'read_only'
 };
 /**
- * Claude connector write modes; the first is the default. Legacy 'direct' is stored as 'proposal'.
- * claude_approve: like proposal, plus tools that let Claude approve or reject pending proposals.
+ * Claude connector write modes; the first is the default. Claude never approves or rejects:
+ * that happens only in the app.
  */
-LMS.MCP_WRITE_MODES = ['read_only', 'proposal', 'claude_approve'];
+LMS.MCP_WRITE_MODES = ['read_only', 'proposal'];
+// Values stored by older versions and the mode they mean now.
+LMS.MCP_WRITE_MODE_LEGACY = { direct: 'proposal', claude_approve: 'proposal' };
 
 LMS.META_PREFIXES = ['STU', 'CLS', 'REL', 'LES', 'MTH', 'NTS', 'MKP', 'CSN', 'TSK', 'PLN', 'HWI', 'HWC', 'SES', 'EXP', 'SCX', 'PDR', 'UNT', 'AGC', 'AGM', 'AGP'];
 
@@ -184,6 +186,32 @@ LMS.isBlank = function (v) {
 LMS.toStr = function (v) {
   if (v === null || v === undefined) return '';
   return String(v).trim();
+};
+
+/** Stored mcp_write_mode → one of MCP_WRITE_MODES (legacy values mapped, anything else read-only). */
+LMS.normalizeMcpWriteMode = function (value) {
+  var v = LMS.toStr(value);
+  if (Object.prototype.hasOwnProperty.call(LMS.MCP_WRITE_MODE_LEGACY, v)) return LMS.MCP_WRITE_MODE_LEGACY[v];
+  return LMS.MCP_WRITE_MODES.indexOf(v) === -1 ? LMS.MCP_WRITE_MODES[0] : v;
+};
+
+/**
+ * The mcp_write_mode saveSettings stores. submitted: the map passed to saveSettings; stored:
+ * the value already in Settings. Without the key a legacy value is rewritten and any other
+ * kept. A legacy value maps to its mode; blank, or an unknown value equal to the stored one
+ * (the settings page resends it), is read-only; any other unknown value throws.
+ */
+LMS.mcpWriteModeToStore = function (submitted, stored) {
+  var legacy = LMS.MCP_WRITE_MODE_LEGACY;
+  var has = function (key) { return Object.prototype.hasOwnProperty.call(legacy, key); };
+  if (!submitted || !Object.prototype.hasOwnProperty.call(submitted, 'mcp_write_mode')) {
+    return has(LMS.toStr(stored)) ? legacy[LMS.toStr(stored)] : stored;
+  }
+  var mode = LMS.toStr(submitted.mcp_write_mode);
+  if (has(mode)) mode = legacy[mode];
+  if (!mode || (LMS.MCP_WRITE_MODES.indexOf(mode) === -1 && mode === LMS.toStr(stored))) mode = LMS.MCP_WRITE_MODES[0];
+  if (LMS.MCP_WRITE_MODES.indexOf(mode) === -1) throw new Error('Claude 쓰기 권한은 조회만(read_only), 승인 대기 제안(proposal) 중에서만 고를 수 있습니다.');
+  return mode;
 };
 
 LMS.toNum = function (v) {
@@ -477,7 +505,7 @@ LMS.validateExamPeriodInput = function (data) {
   };
 };
 
-/** Exam-prep groups whose names share this key become one class. */
+/** Exam-prep class names are compared by this key; a period never holds two classes with the same one. */
 LMS.examClassNameKey = function (name) {
   return LMS.toStr(name).replace(/\s+/g, ' ');
 };
@@ -672,25 +700,51 @@ LMS.assignmentGradeFromChecks = function (doneCount, totalCount) {
   return LMS.aggregateAssignmentGrades(grades).grade;
 };
 
+/** 숙제 완료: only grade A (legacy 완료 included). B–F, ungraded and unknown values are not done. */
+LMS.isHomeworkDone = function (grade) {
+  return LMS.homeworkGrade(grade) === 'A';
+};
+
 /**
  * 숙제 완료율 over homework check rows. Ungraded cells have no row and are left out;
  * callers pass only rows of students who were in the item's class on its lesson date.
- * rate is the rounded average of item points (A 100 … F 50). done counts items at D or better (60+).
+ * rate is the rounded share (%) of graded items that are 숙제 완료 (A).
  * Returns { done, checked, rate }; rate is null when nothing was graded.
  */
 LMS.homeworkRate = function (cells) {
   var checked = 0;
   var done = 0;
+  (cells || []).forEach(function (c) {
+    var code = LMS.homeworkGrade(c && c.status);
+    if (!code) return;
+    checked += 1;
+    if (LMS.isHomeworkDone(code)) done += 1;
+  });
+  return { done: done, checked: checked, rate: checked ? Math.round((done / checked) * 100) : null };
+};
+
+/**
+ * 숙제 평균 점수 over the same homework check rows as LMS.homeworkRate: the rounded average
+ * of item points (LMS.ASSIGNMENT_POINTS, A 100 … F 50). null when nothing was graded.
+ */
+LMS.homeworkAverage = function (cells) {
+  var checked = 0;
   var sum = 0;
   (cells || []).forEach(function (c) {
     var code = LMS.homeworkGrade(c && c.status);
     if (!code) return;
-    var points = LMS.ASSIGNMENT_POINTS[code];
     checked += 1;
-    sum += points;
-    if (points >= 60) done += 1;
+    sum += LMS.ASSIGNMENT_POINTS[code];
   });
-  return { done: done, checked: checked, rate: checked ? Math.round(sum / checked) : null };
+  return checked ? Math.round(sum / checked) : null;
+};
+
+/** 출석률 (%): lesson records that are not 결석 over all records. null when there are none. */
+LMS.attendanceRate = function (lessons) {
+  var rows = lessons || [];
+  if (!rows.length) return null;
+  var present = rows.filter(function (l) { return LMS.toStr(l.attendance) !== '결석'; }).length;
+  return Math.round((present / rows.length) * 100);
 };
 
 LMS.addDays = function (isoDate, delta) {
@@ -1078,29 +1132,6 @@ LMS.studentBadges = function (lessons, ctx) {
   return badges;
 };
 
-LMS.summarizeRecentLearning = function (lessons) {
-  var rows = (lessons || []).slice().sort(function (a, b) {
-    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
-  });
-  var scores = LMS.collectNormalizedScores(rows);
-  var stats = LMS.computeScoreStats(scores);
-  var assignment = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-  var concentration = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
-  rows.forEach(function (row) {
-    var a = LMS.toStr(row.assignment_completion).charAt(0);
-    if (assignment[a] !== undefined) assignment[a] += 1;
-    var c = LMS.toStr(row.concentration);
-    if (concentration[c] !== undefined) concentration[c] += 1;
-  });
-  return {
-    lesson_count: rows.length,
-    test_average_display: stats.average_display,
-    test_count: stats.count,
-    assignment: assignment,
-    concentration: concentration
-  };
-};
-
 LMS.computeClassSessionTestStats = LMS.computeDailyClassTestAverage;
 
 LMS.assignmentCode = function (v) {
@@ -1325,6 +1356,18 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
   lines.push(teacher + ' 드림');
   lines.push('연락처: ' + contact);
   return lines.join('\n');
+};
+
+LMS.isMonthlyReportConfirmed = function (report) {
+  return LMS.toStr(report && report.status) === '확정';
+};
+
+/** A confirmed report keeps its text; only its status may change (확정 취소 → 임시). */
+LMS.assertMonthlyReportWritable = function (existing, text) {
+  if (LMS.isMonthlyReportConfirmed(existing) && LMS.toStr(existing.report_text) !== LMS.toStr(text)) {
+    throw new Error('확정된 월간 보고서는 고칠 수 없습니다. 확정을 취소한 뒤 고쳐 주세요.');
+  }
+  return existing;
 };
 
 LMS.buildMonthlyReport = function (stats, student, settings) {
@@ -1587,105 +1630,49 @@ LMS.initialTextbookHistory = function (name, startDate) {
   return [{ textbook: textbook, from: from, to: '' }];
 };
 
+/** Error for a textbook change without a usable date, or '' when the change needs none. */
+LMS.textbookChangeDateError = function (previousName, nextName, date) {
+  var next = LMS.toStr(nextName);
+  if (LMS.toStr(previousName) === next || LMS.isIsoDate(LMS.toStr(date))) return '';
+  return next ? '교재를 바꿀 때는 시작일을 입력해 주세요.' : '교재를 비울 때는 끝내는 날을 입력해 주세요.';
+};
+
 /**
- * Keep the previous textbook when the name changes. startDate is the first day of the new
- * name (or the first day with no textbook). The previous open period ends the day before.
+ * Keep the previous textbook when the name changes. For a new name, date is its first day and
+ * the previous open period ends the day before. When the name is cleared, date is the last day
+ * of the previous textbook. An unchanged name leaves the history as it is.
  */
-LMS.applyTextbookChange = function (previousName, history, nextName, startDate) {
+LMS.applyTextbookChange = function (previousName, history, nextName, date) {
   var prev = LMS.toStr(previousName);
   var next = LMS.toStr(nextName);
   var rows = LMS.normalizeTextbookHistory(history);
-  if (prev === next) {
-    if (next && !rows.some(function (r) { return !r.to; })) {
-      rows.push({ textbook: next, from: '', to: '' });
-    }
-    return { textbook: next, textbook_history: rows };
-  }
-  var start = LMS.toStr(startDate);
-  if (!LMS.isIsoDate(start)) throw new Error('교재를 바꿀 때는 시작일을 입력해 주세요.');
+  if (prev === next) return { textbook: next, textbook_history: rows };
+  var problem = LMS.textbookChangeDateError(prev, next, date);
+  if (problem) throw new Error(problem);
+  var day = LMS.toStr(date);
   if (!rows.length && prev) rows.push({ textbook: prev, from: '', to: '' });
-  var end = LMS.addDays(start, -1);
+  var end = next ? LMS.addDays(day, -1) : day;
   rows.forEach(function (r) {
     if (r.to) return;
     if (r.from && end < r.from) {
-      throw new Error('새 교재 시작일은 이전 교재가 시작된 다음 날부터 고를 수 있습니다.');
+      throw new Error(next ? '새 교재 시작일은 이전 교재가 시작된 다음 날부터 고를 수 있습니다.'
+        : '교재를 끝내는 날은 이전 교재 시작일부터 고를 수 있습니다.');
     }
     r.to = end;
   });
-  if (next) rows.push({ textbook: next, from: start, to: '' });
+  if (next) rows.push({ textbook: next, from: day, to: '' });
   return { textbook: next, textbook_history: rows };
 };
 
-LMS.validateSchoolExamInput = function (data) {
-  data = data || {};
-  var school = LMS.toStr(data.school).replace(/\s+/g, ' ');
-  if (!school) throw new Error('학교를 입력해 주세요.');
-  var grade = LMS.toStr(data.grade);
-  if (!grade) throw new Error('학년을 선택해 주세요.');
-  var year = LMS.toStr(data.school_year);
-  if (!/^\d{4}$/.test(year)) throw new Error('학년도를 4자리 숫자로 입력해 주세요.');
-  var semester = LMS.toStr(data.semester);
-  if (['1', '2'].indexOf(semester) === -1) throw new Error('학기는 1 또는 2여야 합니다.');
-  var type = LMS.assertEnum(data.exam_type, LMS.SCHOOL_EXAM_TYPES, '시험 종류');
-  var title = LMS.toStr(data.title);
-  if (type === '기타' && !title) throw new Error('기타 시험은 시험 이름을 입력해 주세요.');
-  var date = LMS.toStr(data.exam_date);
-  if (date && !LMS.isIsoDate(date)) throw new Error('시험 시작일 형식이 올바르지 않습니다.');
-  var end = LMS.toStr(data.exam_end_date);
-  if (end && !LMS.isIsoDate(end)) throw new Error('시험 종료일 형식이 올바르지 않습니다.');
-  if (end && !date) throw new Error('시험 시작일을 입력해 주세요.');
-  if (end && end < date) throw new Error('종료일이 시작일보다 빠릅니다.');
-  var math = LMS.toStr(data.math_exam_date);
-  if (math && !LMS.isIsoDate(math)) throw new Error('수학 시험일 형식이 올바르지 않습니다.');
-  if (math && !date && !end) {
-    date = math;
-    end = math;
-  }
-  if (math && (math < date || math > (end || date))) {
-    throw new Error('수학 시험일은 시험 기간 안이어야 합니다.');
-  }
-  return {
-    school_exam_id: LMS.toStr(data.school_exam_id),
-    school_year: year,
-    semester: semester,
-    exam_type: type,
-    title: type === '기타' ? title : '',
-    school: school,
-    school_key: LMS.schoolGroupKey(school, grade),
-    grade: grade,
-    exam_date: date,
-    exam_end_date: end || date,
-    math_exam_date: math,
-    textbook: LMS.toStr(data.textbook),
-    scope: LMS.toStr(data.scope),
-    memo: LMS.toStr(data.memo)
-  };
-};
-
-/** Last day of a school exam; rows saved before ranges existed have only `exam_date`. */
-LMS.schoolExamEnd = function (row) {
-  var start = LMS.toStr(row && row.exam_date);
-  var end = LMS.toStr(row && row.exam_end_date);
-  return end && end >= start ? end : start;
-};
-
-/** Date the D-day counts toward: the math exam day when known, otherwise the first exam day. */
-LMS.schoolExamDDayDate = function (row) {
-  return LMS.toStr(row && row.math_exam_date) || LMS.toStr(row && row.exam_date);
-};
-
-/** Soonest D-day date first; ties by first exam day, then school and id so the order is stable. */
-LMS.compareSchoolExamsByDDay = function (a, b) {
-  return LMS.schoolExamDDayDate(a).localeCompare(LMS.schoolExamDDayDate(b)) ||
-    LMS.toStr(a && a.exam_date).localeCompare(LMS.toStr(b && b.exam_date)) ||
-    LMS.toStr(a && a.school).localeCompare(LMS.toStr(b && b.school), 'ko') ||
-    LMS.toStr(a && a.school_exam_id).localeCompare(LMS.toStr(b && b.school_exam_id));
-};
-
-/** Not over by `today` and either in progress or its D-day date falls on or before `until`. */
-LMS.schoolExamDueBy = function (row, today, until) {
-  if (!row || !row.exam_date || LMS.schoolExamEnd(row) < today) return false;
-  return row.exam_date <= today || LMS.schoolExamDDayDate(row) <= until;
+/**
+ * 교재 이력 shaped for the class screens, oldest first: { textbook, from, to, current, label }.
+ * current is the open period; label is e.g. "개념원리 (2026-03-01 ~ 2026-05-31)" or "… ~ 사용 중)".
+ */
+LMS.textbookTimeline = function (history) {
+  return LMS.normalizeTextbookHistory(history).map(function (r) {
+    var span = (r.from || '시작일 없음') + ' ~ ' + (r.to || '사용 중');
+    return { textbook: r.textbook, from: r.from, to: r.to, current: !r.to, label: r.textbook + ' (' + span + ')' };
+  });
 };
 
 /** Identity of a school exam: same year/semester/type/school+grade (and title for 기타). */
@@ -1772,6 +1759,49 @@ LMS.validateTaskInput = function (data, isUpdate) {
     class_id: LMS.toStr(data.class_id),
     status: status,
     source: 'manual'
+  };
+};
+
+/** Tasks stored without a source were made by hand. */
+LMS.taskSource = function (task) {
+  return LMS.toStr(task && task.source) || 'manual';
+};
+
+/** A counseling follow-up belongs to its note: it is changed or removed there, never as a task. */
+LMS.isTaskEditable = function (task) {
+  return LMS.taskSource(task) !== 'counseling';
+};
+
+LMS.assertTaskEditable = function (task, message) {
+  if (!LMS.isTaskEditable(task)) throw new Error(message || '상담일지에서 수정해 주세요.');
+  return task;
+};
+
+/** Still open (예정) with a due date before `date`. */
+LMS.isTaskOverdue = function (task, date) {
+  return LMS.toStr(task && task.status) === '예정' && LMS.toStr(task.due_date) < LMS.toStr(date);
+};
+
+/** One stored task as the day agenda and today board list it, with what the screen may do to it on `date`. */
+LMS.taskItem = function (row, students, classes, date) {
+  var student = row.student_id ? LMS.findById(students || [], 'student_id', row.student_id) : null;
+  var cls = row.class_id ? LMS.findById(classes || [], 'class_id', row.class_id) : null;
+  return {
+    id: row.task_id,
+    task_id: row.task_id,
+    source: LMS.taskSource(row),
+    kind: row.kind,
+    title: row.title,
+    status: row.status,
+    due_date: row.due_date,
+    student_id: row.student_id || '',
+    student_name: student ? student.name : '',
+    class_id: row.class_id || '',
+    class_name: cls ? cls.class_name : '',
+    memo: row.memo || '',
+    action: 'edit_task',
+    editable: LMS.isTaskEditable(row),
+    overdue: LMS.isTaskOverdue(row, date)
   };
 };
 

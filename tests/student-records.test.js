@@ -53,20 +53,66 @@ describe('textbook history', () => {
       () => api.updateClass(Object.assign({}, next, { textbook: '블랙라벨', textbook_started_on: '2026-07-01' })),
       /다음 날/
     );
+    assert.throws(() => api.updateClass(Object.assign({}, next, { textbook: '' })), /끝내는 날/);
+    assert.throws(
+      () => api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-06-30' })),
+      /끝내는 날/
+    );
     const cleared = api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-09-01' }));
     assert.equal(cleared.textbook, '');
-    assert.equal(cleared.textbook_history.length, 2);
-    assert.equal(cleared.textbook_history[1].to, '2026-08-31');
+    assert.deepEqual(cleared.textbook_history, [
+      { textbook: '개념원리', from: '2026-03-01', to: '2026-06-30' },
+      { textbook: '쎈', from: '2026-07-01', to: '2026-09-01' }
+    ]);
   });
 
-  it('backfills an open period for classes that already have a textbook', () => {
+  it('leaves the history alone when the textbook is unchanged', () => {
     const store = createMemoryStore({ today: '2026-09-14' });
-    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', textbook: '개념원리', status: '운영' }]);
-    store.writeTable('_Meta', [{ prefix: 'SCHEMA', next_seq: 5 }]);
+    const closed = [{ textbook: '개념원리', from: '2026-03-01', to: '2026-06-30' }];
+    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', textbook: '개념원리', textbook_history: closed, status: '운영' }]);
     const api = LMS.createService(store);
-    assert.equal(api.ensureSchema(), true);
-    assert.deepEqual(api.getClass('CLS_1').textbook_history, [{ textbook: '개념원리', from: '', to: '' }]);
-    assert.equal(api.ensureSchema(), false);
+    const once = api.updateClass(Object.assign({}, api.getClass('CLS_1'), { memo: '한 번' }));
+    const twice = api.updateClass(Object.assign({}, once, { memo: '두 번' }));
+    assert.deepEqual(once.textbook_history, closed);
+    assert.deepEqual(twice.textbook_history, closed);
+  });
+
+  it('update_class preview needs a date when the textbook changes', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반', textbook: '개념원리', textbook_started_on: '2026-03-01' });
+    assert.throws(() => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '쎈' }), /시작일을 입력/);
+    assert.throws(() => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '' }), /끝내는 날을 입력/);
+    assert.throws(
+      () => api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '쎈', textbook_started_on: '2026-03-01' }),
+      /다음 날/
+    );
+    const preview = api.previewAgentAction('update_class', { class_id: c.class_id, textbook: '', textbook_started_on: '2026-08-31' });
+    assert.equal(preview.args.textbook_started_on, '2026-08-31');
+    const same = api.previewAgentAction('update_class', { class_id: c.class_id, textbook: ' 개념원리 ', memo: '메모' });
+    assert.equal(same.args.textbook, undefined);
+  });
+
+  it('gives the class screens one timeline with labels for switched and cleared textbooks', () => {
+    const api = svc();
+    const c = api.createClass({ class_name: 'A반', textbook: '개념원리', textbook_started_on: '2026-03-01' });
+    const next = api.updateClass(Object.assign({}, c, { textbook: '쎈', textbook_started_on: '2026-07-01' }));
+    assert.deepEqual(api.getClassOverview(c.class_id).class.textbook_timeline, [
+      { textbook: '개념원리', from: '2026-03-01', to: '2026-06-30', current: false, label: '개념원리 (2026-03-01 ~ 2026-06-30)' },
+      { textbook: '쎈', from: '2026-07-01', to: '', current: true, label: '쎈 (2026-07-01 ~ 사용 중)' }
+    ]);
+    api.updateClass(Object.assign({}, next, { textbook: '', textbook_started_on: '2026-09-01' }));
+    const labels = api.getClassOverview(c.class_id).class.textbook_timeline.map((r) => [r.label, r.current]);
+    assert.deepEqual(labels, [
+      ['개념원리 (2026-03-01 ~ 2026-06-30)', false],
+      ['쎈 (2026-07-01 ~ 2026-09-01)', false]
+    ]);
+  });
+
+  it('labels a backfilled period without a start date and skips broken rows', () => {
+    assert.deepEqual(LMS.textbookTimeline([{ textbook: '개념원리', from: '', to: '' }, { textbook: '', from: '', to: '' }, null]), [
+      { textbook: '개념원리', from: '', to: '', current: true, label: '개념원리 (시작일 없음 ~ 사용 중)' }
+    ]);
+    assert.deepEqual(LMS.textbookTimeline(undefined), []);
   });
 });
 

@@ -21,10 +21,9 @@ const SECTIONS = [
 ];
 const MCP_MODES = [
   { value: 'read_only', label: '조회만', hint: 'Claude는 학생·반·수업·숙제·시험 등 모든 데이터를 읽기만 하고, 아무것도 바꿀 수 없습니다.' },
-  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 학생·반·수업·숙제·시험 등 모든 데이터의 추가·수정·삭제를 요청할 수 있습니다. Claude가 요청한 변경은 모두 AI 비서 패널의 승인 대기에 올라가고, 승인해야만 저장됩니다. 설정은 바꿀 수 없습니다.' },
-  { value: 'claude_approve', label: '승인 대기 + Claude에서 승인', hint: '승인 대기 제안과 같고, 여기에 더해 Claude 대화에서 "승인해" 또는 "거절해"라고 말하면 Claude가 승인 대기 중인 변경을 승인하거나 거절할 수 있습니다. 주의: claude.ai에서 승인·거절 도구를 \'항상 허용\'으로 두면 확인 창 없이 바로 반영됩니다.' }
+  { value: 'proposal', label: '승인 대기 제안', hint: 'Claude가 학생·반·수업·숙제·시험 등 모든 데이터의 추가·수정·삭제를 요청할 수 있습니다. Claude가 요청한 변경은 모두 AI 비서 패널의 승인 대기에 올라가고, 앱에서 승인해야만 저장됩니다. 승인과 거절은 앱에서만 할 수 있고, Claude 대화에서는 할 수 없습니다. 설정은 바꿀 수 없습니다.' }
 ];
-const mcpModeOf = (v) => MCP_MODES.find((m) => m.value === (v === 'direct' ? 'proposal' : v)) || MCP_MODES[0];
+const mcpModeOf = (v) => MCP_MODES.find((m) => m.value === LMS.normalizeMcpWriteMode(v)) || MCP_MODES[0];
 const KEYS = SECTIONS.flatMap((s) => s.keys);
 const PLACEHOLDERS = { ...LMS.DEFAULT_SETTINGS, academy_name: '학원' };
 const PREVIEW_NAME = '○○○';
@@ -152,6 +151,65 @@ function PromotionModal({ onClose, onDone }) {
   );
 }
 
+const stamp = (v) => String(v || '').slice(0, 16).replace('T', ' ');
+
+function McpConnections({ tokenVersion }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const state = useApi(() => api('listMcpConnections'), [tokenVersion]);
+  const [busyId, setBusyId] = useState('');
+  const headId = useId();
+  const revoke = async (c) => {
+    const ok = await confirm({
+      title: '이 연결 끊기',
+      message: `${c.client_name} 연결(${stamp(c.created_at)} 허용)의 접근 권한이 무효가 됩니다. 다른 연결은 그대로입니다.`,
+      confirmLabel: '끊기',
+      danger: true
+    });
+    if (!ok) return;
+    setBusyId(c.grant_id);
+    try {
+      await api('revokeMcpConnection', c.grant_id);
+      toast('연결을 끊었습니다.');
+      state.reload();
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setBusyId('');
+    }
+  };
+  return (
+    <div className="field">
+      <span id={headId} style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>연결된 커넥터</span>
+      <div aria-labelledby={headId} role="group">
+        <Async state={state}>
+          {(list) => (list.length ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr><th>이름</th><th>허용한 때</th><th>마지막 갱신</th><th aria-label="끊기" /></tr></thead>
+                <tbody>
+                  {list.map((c) => (
+                    <tr key={c.grant_id}>
+                      <td>{c.client_name}</td>
+                      <td>{stamp(c.created_at)}</td>
+                      <td>{stamp(c.last_used_at)}</td>
+                      <td className="num">
+                        <button type="button" className="btn secondary sm" disabled={busyId === c.grant_id} onClick={() => revoke(c)}>
+                          {busyId === c.grant_id ? '처리 중…' : '끊기'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="st-hint" style={{ margin: 0 }}>연결된 커넥터가 없습니다.</p>)}
+        </Async>
+      </div>
+    </div>
+  );
+}
+
 function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) {
   const toast = useToast();
   const confirm = useConfirm();
@@ -201,6 +259,7 @@ function McpConnectorCard({ form, set, changed, tokenVersion, onDisconnected }) 
             </div>
           )}
         </Field>
+        <McpConnections tokenVersion={tokenVersion} />
         <div className="st-promote">
           <span className="st-hint" style={{ margin: 0, flex: '1 1 260px' }}>연결 끊기는 지금까지 발급된 Claude 접근 권한을 모두 무효로 만듭니다. 설정 저장과 별개로 바로 적용됩니다.</span>
           <button type="button" className="btn secondary" disabled={busy} onClick={disconnect}>{busy ? '처리 중…' : '연결 끊기…'}</button>

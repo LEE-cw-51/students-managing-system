@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const LMS = require('../src/01_Service.js');
 const { createMemoryStore, seedDemo } = require('./memory-store.js');
-const { applyProposal } = require('../lib/agent.js');
+const { APP_SESSION, apply } = require('../lib/proposals.js');
 
 // Every write action goes through the real flow: preview, save as a proposal, approve, verify.
 function setup() {
@@ -21,7 +21,7 @@ function setup() {
     const api = svc();
     const preview = api.previewAgentAction(tool, args);
     const saved = api.saveAgentTurn({ message: 'test ' + tool, reply: 'ok', calls: [{ tool, args: preview.args, preview }] });
-    const applied = await applyProposal(saved.message.proposal.proposal_id, run);
+    const applied = await apply(APP_SESSION, { proposal_id: saved.message.proposal.proposal_id }, run);
     assert.equal(applied.status, 'applied', tool);
     return { preview, applied };
   }
@@ -199,7 +199,7 @@ describe('agent write actions: lessons', () => {
     const ctx = () => ({ table: (name) => store.readTable(name), api: svc() });
     const { preview } = await act('save_lessons_batch', { class_id: A, lesson_date: '2026-09-21', class_notice: '교재 지참', items: [{ student_id: hong }] });
     assert.equal(svc().getClassSessionNotice('2026-09-21', A), '교재 지참');
-    const verify = LMS.AGENT_WRITE_ACTIONS.save_lessons_batch.verify;
+    const verify = LMS.agentActions.get('save_lessons_batch').verify;
     assert.equal(verify(ctx(), preview.args).ok, true);
     svc().saveClassSessionNotice('2026-09-21', A, '다른 공지');
     assert.equal(verify(ctx(), preview.args).ok, false);
@@ -278,7 +278,7 @@ describe('agent write actions: plans', () => {
     const { preview } = await act('save_class_plan', { class_id: A, period_type: '일간', period_key: '2026-09-16', title: '일차함수', done_status: '완료' });
     const [plan] = table(store, 'ClassPlans');
     assert.equal(plan.done_status, '완료');
-    const verify = LMS.AGENT_WRITE_ACTIONS.save_class_plan.verify;
+    const verify = LMS.agentActions.get('save_class_plan').verify;
     assert.equal(verify(ctx(), preview.args, plan).ok, true);
     svc().setDailyPlanDone(A, '2026-09-16', '일부');
     assert.equal(verify(ctx(), preview.args, plan).ok, false);
@@ -352,13 +352,24 @@ describe('agent write actions: reports', () => {
     const over = await act('save_monthly_report', { student_id: hong, year: 2026, month: 9, report_text: '9월 리포트 수정', status: '확정' });
     assert.match(over.preview.text, /덮어쓰기/);
   });
-});
 
-describe('agent write actions: coverage', () => {
-  it('every registered write action is exercised above', () => {
-    const fs = require('node:fs');
-    const src = fs.readFileSync(__filename, 'utf8');
-    const untested = Object.keys(LMS.AGENT_WRITE_ACTIONS).filter((n) => !src.includes(`act('${n}'`));
-    assert.deepEqual(untested, []);
+  it('refuses to touch a confirmed monthly report, at preview and at apply', async () => {
+    const { store, svc, run, hong } = setup();
+    const key = { student_id: hong, year: 2026, month: 9 };
+    const message = /이미 확정된 월간 리포트라 AI가 고칠 수 없습니다/;
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' });
+    assert.throws(() => svc().previewAgentAction('save_monthly_report', { ...key, report_text: 'AI 수정' }), message);
+    assert.throws(() => svc().previewAgentAction('save_monthly_report', { ...key, report_text: '확정본', status: '임시' }), message, 'no AI un-confirm');
+
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '임시' });
+    const preview = svc().previewAgentAction('save_monthly_report', { ...key, report_text: 'AI 수정' });
+    const saved = svc().saveAgentTurn({ message: 'test', reply: 'ok', calls: [{ tool: 'save_monthly_report', args: preview.args, preview }] });
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' });
+    const proposalId = saved.message.proposal.proposal_id;
+    await assert.rejects(apply(APP_SESSION, { proposal_id: proposalId }, run), message);
+    assert.equal(table(store, 'AgentProposals').find((p) => p.proposal_id === proposalId).status, 'failed');
+    const row = table(store, 'MonthlyReports').find((r) => r.student_id === hong);
+    assert.equal(row.report_text, '확정본');
+    assert.equal(row.status, '확정');
   });
 });

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { acceptInvite, passwordProblem } from '../../../lib/accounts.js';
-import { inviteBlocked, inviteKeys, noteInviteAttempt, setSession } from '../../../lib/auth.js';
-import { isSameOrigin } from '../../../lib/same-origin.js';
+import { setSession } from '../../../lib/auth.js';
+import { clientIp, reserveInviteAttempt } from '../../../lib/login-limit.js';
+import { guardPost } from '../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
 
@@ -12,7 +13,8 @@ function back(token, error) {
 
 /** Form POST from /invite/[token]: sets the password, then signs in. */
 export async function POST(req) {
-  if (!isSameOrigin(req)) return new NextResponse(null, { status: 303, headers: { Location: '/login?error=4' } });
+  const refused = guardPost(req, { json: false });
+  if (refused) return refused;
   const form = await req.formData().catch(() => null);
   const token = String(form?.get('token') || '');
   const password = String(form?.get('password') || '');
@@ -21,11 +23,9 @@ export async function POST(req) {
   if (!token) return new NextResponse(null, { status: 303, headers: { Location: '/login' } });
   if (password !== password2) return back(token, 'mismatch');
   if (passwordProblem(password)) return back(token, 'weak');
-  const keys = inviteKeys(req);
-  if (inviteBlocked(keys)) return back(token, 'limited');
-  noteInviteAttempt(keys);
   let result;
   try {
+    if (!(await reserveInviteAttempt(clientIp(req.headers))).ok) return back(token, 'limited');
     result = await acceptInvite(token, { password, name });
   } catch (e) {
     if (!e.expose) {

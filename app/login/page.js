@@ -5,14 +5,18 @@ export const dynamic = 'force-dynamic';
 
 const ERRORS = {
   1: '이메일 또는 비밀번호가 올바르지 않습니다.',
-  2: '로그인 시도가 너무 많습니다. 15분 뒤에 다시 시도해 주세요.',
-  3: '로그인 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.',
-  4: '허용되지 않은 요청입니다.'
+  3: '로그인 중 오류가 발생했습니다. 잠시 뒤에 다시 시도해 주세요.'
 };
+
+function errorMessage(code) {
+  const lockedMinutes = /^locked-(\d{1,3})$/.exec(String(code || ''))?.[1];
+  if (lockedMinutes) return `로그인 시도가 너무 많습니다. 약 ${lockedMinutes}분 뒤에 다시 시도해 주세요.`;
+  return ERRORS[code] || '';
+}
 
 export default async function LoginPage({ searchParams }) {
   const params = await searchParams;
-  const error = ERRORS[params?.error] || '';
+  const error = errorMessage(params?.error);
   const next = safeNext(params?.next);
   return (
     <div className="login-wrap">

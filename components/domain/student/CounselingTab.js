@@ -9,13 +9,7 @@ import Field, { focusInvalid } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, shortDate } from '@/lib/format';
-
-export function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
+import { addDays, formatDate, shortDate } from '@/lib/format';
 
 export const FOLLOW_QUICK = [[7, '1주 뒤'], [14, '2주 뒤'], [30, '한 달 뒤']];
 export const followDefault = (kind) => (kind === '학부모' ? '학부모 후속 연락' : '학생 후속 상담');
