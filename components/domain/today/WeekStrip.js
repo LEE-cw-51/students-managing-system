@@ -1,12 +1,8 @@
 'use client';
 
-const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+import { addDays } from '@/lib/format';
 
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
+const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
 /**
  * Mon–Sun strip of the selected week with class/makeup/open-task counts; the page's only date navigation.

@@ -5,8 +5,8 @@ import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { formatDate, shortDate } from '@/lib/format';
-import { NoteForm, QuickCounsel, addDays, useNoteDelete } from './CounselingTab';
+import { addDays, formatDate, shortDate } from '@/lib/format';
+import { NoteForm, QuickCounsel, useNoteDelete } from './CounselingTab';
 
 const PERIODS = [30, 90];
 const clip = (text) => (text.length > 120 ? text.slice(0, 120) + '…' : text);

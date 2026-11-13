@@ -8,7 +8,8 @@ import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
-import { dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
+import { addDays, dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, telHref, timeSpan } from '@/lib/format';
+import RangePicker, { RANGES } from '@/components/ui/RangePicker';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
@@ -53,26 +54,6 @@ function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
         </div>
       </form>
     </Modal>
-  );
-}
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-const RANGES = [
-  { key: '1m', label: '최근 1개월', days: 31 },
-  { key: '3m', label: '최근 3개월', days: 92 },
-  { key: '6m', label: '최근 6개월', days: 183 }
-];
-
-function RangePicker({ value, onChange }) {
-  return (
-    <div className="segmented" role="group" aria-label="기간">
-      {RANGES.map((r) => <button key={r.key} type="button" aria-pressed={value === r.key} onClick={() => onChange(r.key)}>{r.label}</button>)}
-    </div>
   );
 }
 

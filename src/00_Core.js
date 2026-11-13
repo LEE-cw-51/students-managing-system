@@ -1133,29 +1133,6 @@ LMS.studentBadges = function (lessons, ctx) {
   return badges;
 };
 
-LMS.summarizeRecentLearning = function (lessons) {
-  var rows = (lessons || []).slice().sort(function (a, b) {
-    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
-  });
-  var scores = LMS.collectNormalizedScores(rows);
-  var stats = LMS.computeScoreStats(scores);
-  var assignment = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-  var concentration = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
-  rows.forEach(function (row) {
-    var a = LMS.toStr(row.assignment_completion).charAt(0);
-    if (assignment[a] !== undefined) assignment[a] += 1;
-    var c = LMS.toStr(row.concentration);
-    if (concentration[c] !== undefined) concentration[c] += 1;
-  });
-  return {
-    lesson_count: rows.length,
-    test_average_display: stats.average_display,
-    test_count: stats.count,
-    assignment: assignment,
-    concentration: concentration
-  };
-};
-
 LMS.computeClassSessionTestStats = LMS.computeDailyClassTestAverage;
 
 LMS.assignmentCode = function (v) {

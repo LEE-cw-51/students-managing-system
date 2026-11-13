@@ -6,14 +6,8 @@ import Field from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import { api } from '@/lib/client-api';
-import { formatDate } from '@/lib/format';
+import { addDays, formatDate } from '@/lib/format';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
 
 /** Regular classes that are running, for "어느 반으로" pickers. */
 export function openRegularClasses(boot, exceptIds = []) {
