@@ -279,20 +279,6 @@ describe('edit the draft, then confirm', () => {
   });
 });
 
-describe('schema migration v3', () => {
-  it('marks existing plans as hand-written and is idempotent', () => {
-    const store = createMemoryStore();
-    const tables = emptyTables();
-    tables._Meta = tables._Meta.concat([{ prefix: LMS.SCHEMA_META_KEY, next_seq: 2 }]);
-    tables.ClassPlans = [{ plan_id: 'PLN_000001', class_id: 'CLS_000001', period_type: '주간', period_key: '2026-09-14', title: '옛 계획' }];
-    Object.keys(tables).forEach((name) => store.writeTable(name, tables[name]));
-    assert.equal(LMS.createService(store).ensureSchema(), true);
-    assert.equal(store.readTable('ClassPlans')[0].source, 'manual');
-    assert.deepEqual(store.readTable('ClassPlans')[0].unit_ids, []);
-    assert.equal(LMS.createService(store).ensureSchema(), false);
-  });
-});
-
 describe('plan AI client', () => {
   const { requestPlanAi } = require('../lib/plan-ai.js');
   const config = { key: 'k', baseUrl: 'https://ai.test/v1', model: 'm' };

@@ -291,8 +291,8 @@ LMS.createAssignments = function (ctx) {
 
   /**
    * After regular assignments change ([{ student_id, start, end }] = the ranges they covered): placements
-   * whose source class the student no longer attends in that range point at one they do (as in
-   * migrateToV4_; kept when there is none), and resume dates of overlapping periods are recomputed.
+   * whose source class the student no longer attends in that range point at one they do (kept when
+   * there is none), and resume dates of overlapping periods are recomputed.
    */
   function syncExamPrep(changes) {
     var rels = table('StudentClasses');
@@ -998,10 +998,7 @@ LMS.createAssignments = function (ctx) {
     clampTempToPeriod: clampTempToPeriod,
     dropForClasses: dropForClasses,
     syncExamPrep: syncExamPrep,
-    forEachStudent: forEachStudent,
-    // Row-level helpers kept for migrateToV4_.
-    endForClosing: endForClosing,
-    lastLessonIn: lastLessonIn
+    forEachStudent: forEachStudent
   };
 };
 
