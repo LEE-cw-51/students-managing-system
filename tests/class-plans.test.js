@@ -171,8 +171,8 @@ describe('basic split', () => {
 });
 
 describe('AI draft validation', () => {
-  it('drops invented dates, units and students, and fills gaps from the split', () => {
-    const { api, demo, cls } = setup();
+  it('drops invented dates and units, ignores student items, and fills gaps from the split', () => {
+    const { store, api, demo, cls } = setup();
     const board = api.saveAiPlanDraft(cls.class_id, '2026-09', {
       month: { title: '삼각형과 사각형', objectives: '성질 이해' },
       days: [
@@ -180,11 +180,7 @@ describe('AI draft validation', () => {
         { date: '2026-09-16', title: '이등변삼각형', unit_ids: ['UNT_000001', 'U99'], homework: 'p.10-12' },
         { date: '2026-09-16', title: '중복' }
       ],
-      students: [
-        { student_id: demo.students[0].student_id, kind: '보충과제', title: '오답 노트', reason: '숙제 C 연속' },
-        { student_id: 'STU_999999', kind: '상담', title: '없는 학생' },
-        { student_id: demo.students[1].student_id, kind: '아무거나', title: '형식 오류' }
-      ],
+      students: [{ student_id: demo.students[0].student_id, kind: '보충과제', title: '오답 노트', reason: '숙제 C 연속' }],
       rationale: '시험 대비'
     }, { model: 'test-model' });
     const items = itemsByKey(board);
@@ -194,8 +190,10 @@ describe('AI draft validation', () => {
     assert.equal(items['월간|2026-09'].proposed.title, '삼각형과 사각형');
     assert.equal(board.draft.mode, 'ai');
     assert.equal(board.draft.rationale, '시험 대비');
-    assert.equal(board.draft.warnings.length, 3);
-    assert.deepEqual(board.draft.students.map((s) => s.title), ['오답 노트']);
+    assert.equal(board.draft.warnings.length, 2);
+    assert.equal(board.draft.students, undefined, 'a reply with student items makes no suggestions');
+    confirmAll(api, board);
+    assert.equal(store.readTable('Tasks').length, 0, 'confirming a draft makes no tasks');
   });
 
   it('sends aliases instead of names in the AI context', () => {
@@ -204,7 +202,7 @@ describe('AI draft validation', () => {
     const text = JSON.stringify(ctx.input);
     demo.students.forEach((s) => assert.equal(text.includes(s.name), false));
     assert.equal(text.includes('010-'), false);
-    assert.deepEqual(Object.keys(ctx.aliases), ['S1', 'S2', 'S3']);
+    assert.deepEqual(ctx.input.students.map((s) => s.ref), ['S1', 'S2', 'S3']);
     assert.deepEqual(ctx.input.plannable_dates.map((d) => d.date), ['2026-09-16', '2026-09-21', '2026-09-23', '2026-09-28', '2026-09-30']);
   });
 
@@ -218,16 +216,12 @@ describe('AI draft validation', () => {
 describe('edit the draft, then confirm', () => {
   function aiDraft(api, demo, cls) {
     return api.saveAiPlanDraft(cls.class_id, '2026-09', {
-      days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }],
-      students: [
-        { student_id: demo.students[1].student_id, kind: '상담', title: '학습 습관 상담', reason: '결석 2회' },
-        { student_id: demo.students[2].student_id, kind: '보강', title: '결석분 보충', reason: '' }
-      ]
+      days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }]
     }, {});
   }
 
-  it('stores edited items as the teacher\'s own plans and confirmed suggestions as tasks', () => {
-    const { store, api, demo, cls } = setup();
+  it('stores edited items as the teacher\'s own plans', () => {
+    const { api, demo, cls } = setup();
     let board = aiDraft(api, demo, cls);
     board = api.updatePlanDraftItem({
       draft_id: board.draft.draft_id, key: '일간|2026-09-16',
@@ -237,21 +231,14 @@ describe('edit the draft, then confirm', () => {
     assert.equal(edited.edited, true);
     assert.equal(edited.selected, true);
     assert.deepEqual(edited.proposed.unit_ids, ['UNT_000001'], 'unknown unit dropped');
-    board = api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { kind: '클리닉', title: '클리닉 1회', reason: '결석' } });
-    assert.equal(board.draft.students[0].kind, '클리닉');
     const applied = api.applyPlanDraft({
       draft_id: board.draft.draft_id, seen_version: board.base_version,
-      keys: board.draft.items.filter((it) => it.selected).map((it) => it.key),
-      student_keys: ['student|0', 'student|1']
+      keys: board.draft.items.filter((it) => it.selected).map((it) => it.key)
     });
-    assert.equal(applied.task_count, 2);
     const day = applied.days.find((d) => d.date === '2026-09-16').plan;
     assert.equal(day.title, '내가 고친 계획');
     assert.equal(day.source, 'manual');
     assert.equal(applied.days.find((d) => d.date === '2026-09-21').plan.source, 'ai');
-    const tasks = store.readTable('Tasks');
-    assert.deepEqual(tasks.map((t) => t.title), ['[클리닉] 클리닉 1회', '보강 일정 잡기: 결석분 보충']);
-    assert.equal(tasks[0].due_date, '2026-09-16', 'next meeting day');
     assert.throws(() => api.applyPlanDraft({ draft_id: board.draft.draft_id, seen_version: applied.base_version, keys: ['일간|2026-09-21'] }), /이미 처리된 초안/);
     // The next draft keeps the teacher's version unless they pick the new one.
     const next = itemsByKey(api.createSplitDraft(cls.class_id, '2026-09'));
@@ -265,17 +252,16 @@ describe('edit the draft, then confirm', () => {
     assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: '일간|2026-09-14', fields: { title: 'x' } }), /찾을 수 없습니다/);
     store.today = () => '2026-09-17';
     assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: '일간|2026-09-16', fields: { title: 'x' } }), /지난 수업/);
-    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { title: 'x', kind: '아무거나' } }), /제안 종류/);
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { title: 'x' } }), /찾을 수 없습니다/);
     api.discardPlanDraft(board.draft.draft_id);
-    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: 'student|0', fields: { title: 'x' } }), /이미 처리된 초안/);
+    assert.throws(() => api.updatePlanDraftItem({ draft_id: board.draft.draft_id, key: '일간|2026-09-16', fields: { title: 'x' } }), /이미 처리된 초안/);
   });
 
-  it('drops suggestions with a discarded draft and prunes old finished drafts', () => {
+  it('clears a discarded draft and prunes old finished drafts', () => {
     const { store, api, demo, cls } = setup();
     const board = aiDraft(api, demo, cls);
     api.discardPlanDraft(board.draft.draft_id);
     assert.equal(api.getPlanBoard(cls.class_id, '2026-09').draft, null);
-    assert.equal(store.readTable('Tasks').length, 0);
     store.today = () => '2026-11-01';
     store.now = () => '2026-11-01T10:00:00';
     api.createSplitDraft(cls.class_id, '2026-11');
@@ -308,7 +294,7 @@ describe('schema migration v3', () => {
 });
 
 describe('plan AI client', () => {
-  const { requestPlanAi, mapStudentRefs } = require('../lib/plan-ai.js');
+  const { requestPlanAi } = require('../lib/plan-ai.js');
   const config = { key: 'k', baseUrl: 'https://ai.test/v1', model: 'm' };
   const reply = (content, status = 200) => ({
     ok: status < 400, status, json: async () => (status < 400 ? { model: 'used-model', choices: [{ message: { content } }] } : { error: { message: 'busy' } })
@@ -334,11 +320,6 @@ describe('plan AI client', () => {
   it('turns rate limits and missing keys into teacher-facing messages', async () => {
     await assert.rejects(requestPlanAi({}, { config, fetch: async () => reply('', 429) }), /사용량/);
     await assert.rejects(requestPlanAi({}, { config: { ...config, key: '' } }), /AI_API_KEY/);
-  });
-
-  it('maps student refs back to ids and blanks unknown ones', () => {
-    const out = mapStudentRefs({ students: [{ ref: 's1', kind: '상담' }, { ref: 'S9' }] }, { S1: 'STU_000001' });
-    assert.deepEqual(out.students.map((s) => s.student_id), ['STU_000001', '']);
   });
 });
 
@@ -379,15 +360,14 @@ describe('one draft button', () => {
     assert.match(board.draft.warnings[0], /사용량/);
   });
 
-  it('saves an AI draft with students mapped back from aliases', async () => {
-    const { api, demo, cls } = setup();
-    const reply = { days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }], students: [{ ref: 'S1', kind: '상담', title: '면담' }] };
+  it('saves the AI reply as the draft', async () => {
+    const { api, cls } = setup();
+    const reply = { days: [{ date: '2026-09-16', title: 'AI 계획', unit_ids: ['UNT_000001'] }] };
     const fetch = async () => ({ ok: true, status: 200, json: async () => ({ model: 'mock', choices: [{ message: { content: JSON.stringify(reply) } }] }) });
     const board = await draftClassPlan(cls.class_id, '2026-09', runner(api), { configured: true, config, fetch });
     assert.equal(board.draft.mode, 'ai');
     assert.equal(board.draft.model, 'mock');
-    const sorted = demo.students.map((s) => s.student_id).sort();
-    assert.equal(board.draft.students[0].student_id, sorted[0]);
+    assert.equal(itemsByKey(board)['일간|2026-09-16'].proposed.title, 'AI 계획');
   });
 
   it('still reports class problems instead of hiding them behind the split', async () => {

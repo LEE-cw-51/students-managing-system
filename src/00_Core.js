@@ -146,7 +146,6 @@ LMS.PLAN_SOURCE = ['manual', 'split', 'ai'];
 LMS.PLAN_DONE_STATUS = ['완료', '일부', '못 함'];
 LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
 LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
-LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
 LMS.CURRICULUM_MAX_SESSIONS = 20;
 LMS.HOMEWORK_CHECK_STATUS = LMS.ASSIGNMENT;
 /** Points a teacher-entered item grade contributes. The average maps back through the bands below. */

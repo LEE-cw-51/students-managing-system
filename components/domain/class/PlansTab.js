@@ -18,7 +18,6 @@ const ACTION_TONE = { add: 'ok', change: 'amber', remove: 'danger' };
 const SOURCE_LABEL = { ai: 'AI', split: '자동' };
 const DONE_TONE = { 완료: 'ok', 일부: 'amber', '못 함': 'danger' };
 const STATUS_LABEL = { cancelled: '휴강', suspended: '시험대비 휴강', none: '수업 없음', makeup: '보강' };
-const SUGGESTION_KINDS = ['보충과제', '클리닉', '상담', '보강'];
 
 function shiftMonth(month, delta) {
   const [y, m] = month.split('-').map(Number);
@@ -154,43 +153,6 @@ function PlanForm({ classId, target, curriculum, draft, readOnly, onClose, onSav
   );
 }
 
-function SuggestionForm({ draft, item, onClose, onSaved }) {
-  const toast = useToast();
-  const [form, setForm] = useState({ kind: item.kind, title: item.title, reason: item.reason || '' });
-  const [error, setError] = useState('');
-  const dirty = useDirty(form);
-  const submit = async (e) => {
-    e.preventDefault();
-    try {
-      const board = await api('updatePlanDraftItem', { draft_id: draft.draft_id, key: item.key, fields: form });
-      toast('제안을 고쳤습니다.');
-      onSaved(board);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  return (
-    <Modal title={`${item.student_name} 제안 고치기`} onClose={onClose} dirty={dirty}>
-      <form className="stack" onSubmit={submit}>
-        <div className="form-grid">
-          <Field label="종류">{(id) => (
-            <select id={id} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-              {SUGGESTION_KINDS.map((k) => <option key={k}>{k}</option>)}
-            </select>
-          )}</Field>
-          <Field label="할 일" wide>{(id) => <input id={id} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />}</Field>
-          <Field label="이유" wide>{(id) => <input id={id} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />}</Field>
-        </div>
-        {error ? <div className="error-box" role="alert">{error}</div> : null}
-        <div className="form-actions">
-          <ModalCancel />
-          <button type="submit" className="btn">초안에 반영</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 function UnitProgress({ units, currentId }) {
   if (!units.length) return null;
   return (
@@ -206,14 +168,11 @@ function UnitProgress({ units, currentId }) {
   );
 }
 
-/** The draft: every changed plan and every student suggestion in one list, each editable. */
-function DraftReview({ board, busy, onEdit, onEditStudent, onApply, onDiscard }) {
+/** The draft: every changed plan in one list, each editable. */
+function DraftReview({ board, busy, onEdit, onApply, onDiscard }) {
   const draft = board.draft;
   const items = draft.items.filter((it) => ACTION_LABEL[it.action]);
-  const initial = () => new Set([
-    ...draft.items.filter((it) => it.selected).map((it) => it.key),
-    ...draft.students.map((s) => s.key)
-  ]);
+  const initial = () => new Set(draft.items.filter((it) => it.selected).map((it) => it.key));
   const [picked, setPicked] = useState(initial);
   // Only a new draft resets the choices; editing an item keeps them (and picks the edited one).
   useEffect(() => { setPicked(initial()); }, [draft.draft_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -246,7 +205,7 @@ function DraftReview({ board, busy, onEdit, onEditStudent, onApply, onDiscard })
         </details>
       ) : null}
       {draft.carry_over.length ? <p className="muted" style={{ margin: '0 0 12px' }}>다음 달로 넘어가는 단원: {draft.carry_over.join(', ')}</p> : null}
-      {items.length || draft.students.length ? (
+      {items.length ? (
         <ul className="diff-list">
           {items.map((it) => (
             <li key={it.key}>
@@ -271,29 +230,11 @@ function DraftReview({ board, busy, onEdit, onEditStudent, onApply, onDiscard })
               {it.action !== 'remove' ? <button type="button" className="link-btn diff-edit" onClick={() => onEdit(it)}>고치기</button> : <span />}
             </li>
           ))}
-          {draft.students.map((s) => (
-            <li key={s.key}>
-              <label className="check-label">
-                <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
-                <span className="diff-when">{s.student_name || '학생'}</span>
-              </label>
-              <span className="tag muted">{s.kind}</span>
-              <span className="diff-text">
-                <strong>{s.title}</strong>{s.edited ? <span className="tag" style={{ marginLeft: 6 }}>수정함</span> : null}
-                {s.reason ? <span className="muted"> — {s.reason}</span> : null}
-                <span className="hint" style={{ display: 'block' }}>확정하면 다음 수업일 할 일로 등록됩니다</span>
-              </span>
-              <button type="button" className="link-btn diff-edit" onClick={() => onEditStudent(s)}>고치기</button>
-            </li>
-          ))}
         </ul>
       ) : <EmptyState>지금 계획과 달라지는 것이 없습니다.</EmptyState>}
       <div className="form-actions" style={{ marginTop: 12 }}>
         <button type="button" className="btn ghost danger-text" style={{ marginRight: 'auto' }} onClick={onDiscard} disabled={!!busy}>초안 버리기</button>
-        <button type="button" className="btn" disabled={!!busy || !picked.size} onClick={() => {
-          const keys = [...picked];
-          onApply(keys.filter((k) => !k.startsWith('student|')), keys.filter((k) => k.startsWith('student|')));
-        }}>
+        <button type="button" className="btn" disabled={!!busy || !picked.size} onClick={() => onApply([...picked])}>
           {busy === 'apply' ? '확정 중…' : `선택한 ${picked.size}개 최종 확정`}
         </button>
       </div>
@@ -395,7 +336,6 @@ export default function PlansTab({ classId, version, onEditCurriculum }) {
   const schedule = useDelayed();
   const [month, setMonth] = useState(() => (boot.today || '').slice(0, 7));
   const [editing, setEditing] = useState(null);
-  const [editingStudent, setEditingStudent] = useState(null);
   const [cancelling, setCancelling] = useState(null);
   const [busy, setBusy] = useState('');
   const [hiddenPlans, setHiddenPlans] = useState([]);
@@ -489,9 +429,8 @@ export default function PlansTab({ classId, version, onEditCurriculum }) {
               {draft ? (
                 <DraftReview board={b} busy={busy}
                   onEdit={(it) => setEditing({ period_type: it.period_type, period_key: it.period_key, plan: it.proposed, draft })}
-                  onEditStudent={(s) => setEditingStudent(s)}
-                  onApply={(keys, studentKeys) => run('apply', () => api('applyPlanDraft', { draft_id: draft.draft_id, seen_version: b.base_version, keys, student_keys: studentKeys }),
-                    (nb) => `계획 ${nb.applied_count}개${nb.task_count ? `, 할 일 ${nb.task_count}개` : ''}를 확정했습니다.`)}
+                  onApply={(keys) => run('apply', () => api('applyPlanDraft', { draft_id: draft.draft_id, seen_version: b.base_version, keys }),
+                    (nb) => `계획 ${nb.applied_count}개를 확정했습니다.`)}
                   onDiscard={() => discardDraft(draft)} />
               ) : null}
 
@@ -527,10 +466,6 @@ export default function PlansTab({ classId, version, onEditCurriculum }) {
                 <PlanForm classId={classId} target={editing} curriculum={b.curriculum} draft={editing.draft} readOnly={!editing.draft && editing.readOnly}
                   onClose={() => setEditing(null)} onDelete={removePlan}
                   onSaved={(board) => { setEditing(null); if (board && board.days) state.setData(board); else state.reload(); }} />
-              ) : null}
-              {editingStudent ? (
-                <SuggestionForm draft={b.draft} item={editingStudent} onClose={() => setEditingStudent(null)}
-                  onSaved={(board) => { setEditingStudent(null); state.setData(board); }} />
               ) : null}
               {cancelling ? (
                 <CancelDayDialog classId={classId} className={b.class.class_name} date={cancelling.date}

@@ -2810,7 +2810,6 @@ LMS.createService = function (store) {
     requireClass: requireClass,
     assignments: assignments,
     examPeriods: examPeriods_,
-    saveTask: saveTask,
     homeworkCells: views.homeworkCells_
   }) : {};
 

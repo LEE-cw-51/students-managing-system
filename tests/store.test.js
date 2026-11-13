@@ -39,16 +39,16 @@ describe('store transactions', () => {
     const api = LMS.createService(store);
     const demo = seedDemo(api);
     const cls = demo.class;
-    const board = api.saveAiPlanDraft(cls.class_id, '2026-09', {
-      days: [],
-      students: [{ student_id: demo.students[1].student_id, kind: '상담', title: '학습 습관 상담', reason: '' }]
-    }, {});
+    const board = api.saveAiPlanDraft(cls.class_id, '2026-09', { days: [{ date: '2026-09-16', title: '처음 제목' }] }, {});
+    const key = '일간|2026-09-16';
+    const titleOf = (b) => b.draft.items.find((it) => it.key === key).proposed.title;
+    assert.equal(titleOf(board), '처음 제목');
     assert.throws(() => api.updatePlanDraftItem({
-      draft_id: board.draft.draft_id, key: 'student|0', fields: { title: '바뀐 제목', kind: '아무거나' }
-    }), /제안 종류/);
+      draft_id: board.draft.draft_id, key, fields: { homework: '바뀐 숙제' }
+    }), /한 곳 이상/);
     const draft = store.readTable('PlanDrafts').find((d) => d.draft_id === board.draft.draft_id);
-    assert.equal(JSON.stringify(draft).indexOf('바뀐 제목'), -1);
-    assert.equal(api.getPlanBoard(cls.class_id, '2026-09').draft.students[0].title, '학습 습관 상담');
+    assert.equal(JSON.stringify(draft).indexOf('바뀐 숙제'), -1);
+    assert.equal(titleOf(api.getPlanBoard(cls.class_id, '2026-09')), '처음 제목');
   });
 
   it('nested values read from the store are copies', () => {
