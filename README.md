@@ -18,19 +18,59 @@ Node.js 22+ 와 `.env.local`이 필요합니다.
 
 ```bash
 cp .env.example .env.local
-# DATABASE_URL, AUTH_SECRET, LMS_PASSWORD 를 채웁니다.
+# DATABASE_URL, AUTH_SECRET, ADMIN_EMAIL, LMS_PASSWORD 를 채웁니다.
 
 npm test
 npm run dev
 ```
 
-브라우저에서 `http://127.0.0.1:8787` 로 접속합니다. 로그인 비밀번호는 `LMS_PASSWORD`입니다. 샘플 데이터가 필요하면 `npm run seed` 를 한 번 실행하세요.
-
-Postgres 없이 화면만 확인하려면 개발 전용 파일 저장소를 씁니다(운영 빌드에서는 꺼집니다). 처음 실행할 때 데모 반·학생·수업 기록이 자동으로 들어갑니다.
+계정 마이그레이션을 실제 Postgres에서 검사하려면(임시 DB를 만들고 지웁니다):
 
 ```bash
-LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-server/data.json
+docker run --rm -d -e POSTGRES_PASSWORD=pg -p 54329:5432 postgres:17
+TEST_DATABASE_URL=postgres://postgres:pg@localhost:54329/postgres npm run test:pg
+# PowerShell: $env:TEST_DATABASE_URL="postgres://postgres:pg@localhost:54329/postgres"; npm run test:pg
 ```
+
+브라우저에서 `http://127.0.0.1:8787` 로 접속해 이메일과 비밀번호로 로그인합니다. 처음에는 `ADMIN_EMAIL` + `LMS_PASSWORD`로 로그인하면 관리자 계정이 만들어집니다(아래 [계정과 작업공간](#계정과-작업공간)). 샘플 데이터가 필요하면 `npm run seed` 를 한 번 실행하세요.
+
+Postgres 없이 화면만 확인하려면 개발 전용 파일 저장소를 씁니다(운영 빌드에서는 꺼집니다). 처음 실행할 때 기본 작업공간에 데모 반·학생·수업 기록이 자동으로 들어갑니다.
+
+```bash
+LMS_STORE=file AUTH_SECRET=dev ADMIN_EMAIL=admin@local.test LMS_PASSWORD=dev-admin-pass npm run dev
+# 데이터: dev-server/data.json(기본 작업공간), data-<작업공간 id>.json, 계정: dev-server/accounts.json
+```
+
+## 계정과 작업공간
+
+강사마다 이메일 + 비밀번호 계정이 있고, 데이터는 **작업공간** 단위로 나뉩니다. 처음에는 강사 한 명에 작업공간 하나입니다.
+
+- **첫 관리자**: 계정이 하나도 없을 때 `ADMIN_EMAIL` + `LMS_PASSWORD`로 로그인하면 관리자 계정이 만들어지고(`LMS_PASSWORD`가 8자 미만이면 만들지 않고 로그인이 실패하며 서버 로그에 이유가 남습니다), 계정 도입 전 데이터가 들어 있는 **기본 작업공간**의 주인이 됩니다. 이후 비밀번호는 계정에 저장된 해시(scrypt)로 확인하므로 두 환경 변수는 지워도 됩니다. 터미널에서 만들려면 `npm run create-admin -- admin@example.com "이름"`(비밀번호는 `ADMIN_PASSWORD` 또는 입력 창).
+- **강사 초대**: 관리자가 초대 링크(`/invite/<토큰>`, 72시간, 한 번만 사용)를 만들어 전달하면, 강사가 그 링크에서 비밀번호를 정하고 자기 작업공간이 새로 만들어집니다. 비밀번호 재설정도 같은 방식의 링크(24시간)입니다. 토큰은 해시만 저장합니다. 헬퍼는 `lib/accounts.js`.
+- **세션**: 쿠키에 `uid`·`wid`·버전을 서명해 담고(30일), 요청마다 DB에서 계정 비활성화·버전·작업공간 멤버 여부를 확인합니다. 비밀번호를 바꾸거나 계정을 비활성화하거나 로그아웃하면 그 사람의 버전이 올라가 다른 기기의 세션과 Claude 커넥터 토큰도 바로 끊깁니다.
+- **로그인 시도 제한**: 비밀번호를 확인하기 전에 15분 동안 IP별 5회, 이메일별 10회, 전체 50회까지 셉니다. 횟수는 DB(`lms.login_attempts`, `supabase/migrations/20261110000000_login_attempts.sql`)에 남겨 서버 인스턴스가 여럿이어도 함께 셉니다. 로그인에 성공하면 그 IP와 이메일의 횟수를 지웁니다. 이메일은 해시로만 남깁니다.
+- **다른 사이트 요청 거부**: 로그인·초대·로그아웃 폼과 로그인이 필요한 API는 다른 사이트에서 보낸 요청(`Origin`, `Sec-Fetch-Site`)을 거부합니다(`lib/request-guard.js`).
+- **초대 링크 제출**: 15분 동안 IP별 20회, 전체 100회로 제한합니다(`lms.login_attempts`의 `invite:` 칸). 토큰 형식과 열린 초대인지 먼저 확인하고, 그다음에만 비밀번호를 해시합니다.
+- **Claude 커넥터**: 강사마다 자기 계정으로 연결하고, 연결한 사람의 작업공간 데이터만 다룹니다.
+
+### 계정 마이그레이션 적용 순서
+
+계정 도입은 두 단계로 나눠 적용합니다. 1단계 동안은 예전 코드와 새 코드가 모두 저장할 수 있으므로, 배포 중 두 버전이 함께 떠 있어도 안전합니다. 운영 DB의 마이그레이션 기록이 로컬 파일과 어긋나 있으므로 `supabase db push` 대신 SQL Editor(또는 psql)에서 파일 내용을 실행합니다. 새 코드는 로그인 시도 횟수를 `lms.login_attempts`에 세므로, `supabase/migrations/20261110000000_login_attempts.sql`이 아직 없다면 1단계 전에 먼저 실행합니다.
+
+1. **1단계(expand)**: `supabase/migrations/20261114000000_accounts.sql`을 실행합니다. 계정 표가 만들어지고, 기존 `lms.kv` 행은 기본값으로 기본 작업공간에 들어갑니다. 예전 키 `kv_pkey (name)`는 그대로 남고, 새 코드용 유일 인덱스 `(workspace_id, name)`이 추가됩니다.
+2. **새 코드 배포**: 새 코드는 기본 작업공간에 저장할 때 예전 코드와 같은 잠금도 잡으므로, 두 버전이 동시에 저장해도 한쪽 저장이 사라지지 않습니다.
+3. **확인**: 몇 분 기다린 뒤 Vercel 로그에서 예전 배포로 가는 요청이 없는지 확인합니다.
+4. **2단계(contract)**: `supabase/rollout/20261114_accounts_contract.sql`을 실행합니다. 기본 키가 `(workspace_id, name)`으로 바뀝니다. 이후 예전 코드는 저장할 수 없습니다.
+5. **강사 초대 시작**: 2단계 전에 초대하면 초대 수락(`acceptInvite`)은 성공해 링크가 소모되지만, 새 작업공간의 첫 `_Meta` 저장부터 `kv_pkey (name)` 위반으로 실패합니다. 반드시 2단계 뒤에 초대하세요.
+
+복구:
+
+- **1단계만 적용한 상태**: SQL 없이 예전 코드만 다시 배포합니다.
+- **2단계까지 적용한 상태**: `supabase/rollout/20261114_accounts_rollback.sql`을 실행해 1단계 상태(두 버전 모두 동작)로 되돌린 뒤 예전 코드를 다시 배포합니다. 필요하면 그다음 `supabase/rollout/20261114_accounts_rollback_cleanup.sql`로 `workspace_id` 컬럼을 지웁니다(계정 표는 남습니다).
+- 두 복구 파일은 기본 작업공간이 아닌 데이터가 있으면 아무것도 바꾸지 않고 멈춥니다.
+- cleanup 뒤 다시 앞으로 가려면 1단계 SQL을 다시 실행합니다.
+
+실제 Postgres에서 이 순서를 검사하는 테스트는 `npm run test:pg`입니다(`TEST_DATABASE_URL` 필요, 위 [로컬 실행](#로컬-실행) 참고).
 
 ## 화면 구성
 
@@ -49,7 +89,7 @@ LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-s
 
 ## 데이터베이스
 
-테이블은 `lms.kv` 한 곳에 JSON으로 저장합니다. 학원 규모에서는 이 구조가 단순하고, Apps Script 시트 읽기보다 훨씬 빠릅니다.
+테이블은 `lms.kv` 한 곳에 작업공간별(`workspace_id`, `name`)로 JSON을 저장합니다. 계정은 `lms.users`, `lms.workspaces`, `lms.workspace_members`, `lms.invites`에 있습니다. 학원 규모에서는 이 구조가 단순하고, Apps Script 시트 읽기보다 훨씬 빠릅니다.
 
 - `Students`, `Classes`, `StudentClasses`, `Lessons`, `ClassPlans`, `PlanDrafts`, `HomeworkItems`, `HomeworkChecks`, `MonthlyReports`, `Settings`, `_Meta`
 - 수업 기록 고유 키는 `lesson_date + student_id + class_id`
@@ -70,7 +110,7 @@ LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-s
 ## 배포 (Vercel)
 
 1. 이 저장소를 Vercel 프로젝트에 연결합니다.
-2. 환경 변수 `DATABASE_URL`, `AUTH_SECRET`, `LMS_PASSWORD`를 넣습니다.
+2. 환경 변수 `DATABASE_URL`, `AUTH_SECRET`를 넣고, 첫 관리자 계정을 만들 때까지 `ADMIN_EMAIL`, `LMS_PASSWORD`도 넣습니다.
    `DATABASE_URL`은 Supabase **Session pooler**(6543) 주소를 씁니다.
    월간 보고서 **AI 분석**은 OpenRouter를 사용합니다. [openrouter.ai/keys](https://openrouter.ai/keys)에서 발급한 키를 `AI_API_KEY`에 넣습니다. 모델을 지정하지 않으면 `openrouter/free`가 그 요청에 쓸 수 있는 무료 모델 중 하나를 고릅니다. 특정 모델로 고정하려면 `AI_MODEL`을 추가합니다.
 3. 함수는 `icn1`(서울)에서 실행되어 서울 Postgres와 가깝습니다.
@@ -79,7 +119,7 @@ LMS_STORE=file AUTH_SECRET=dev LMS_PASSWORD=dev npm run dev   # 데이터: dev-s
 
 ## 보안
 
-- 웹앱은 비밀번호 세션으로 막습니다. 비밀번호는 서버 환경 변수에만 둡니다.
+- 웹앱은 강사별 계정 세션으로 막고, 각 요청은 세션의 작업공간 데이터만 읽고 씁니다. 비밀번호는 scrypt 해시로만 저장합니다.
 - 브라우저에 데이터베이스 키를 넣지 않습니다. 모든 읽기/쓰기는 서버 API를 통과합니다.
 - `/api/[name]`은 `lib/public-api.js` 허용 목록(화면이 실제로 부르는 업무 함수)만 호출합니다. 화면에서 새 함수를 부르면 목록에 추가해야 하며, `tests/public-api.test.js`가 빠진 이름을 잡습니다.
 - AI API 키는 서버 환경 변수에만 두며, 월간 보고서 생성 시 수업·성적·상담 요약 JSON이 OpenRouter로 전송됩니다.
@@ -155,16 +195,16 @@ claude.ai에서 이 앱을 **커스텀 커넥터**(원격 MCP)로 연결하면, 
    - **승인과 거절은 앱에서만** 합니다. Claude에는 승인·거절 도구가 없고, 코드(`lib/proposals.js`)도 로그인한 앱 화면이 아닌 호출자의 승인·거절을 거부합니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)). Claude는 `list_pending_proposals`로 이 커넥터가 올린 대기 제안을 보여 줄 수만 있습니다(앱의 AI 비서 대화에서 올린 제안은 보이지 않음. `AgentProposals.source`, 이 값이 없는 예전 제안은 `[Claude 커넥터]` 대화 제목으로 구분).
    - Claude가 바로 저장하는 경로는 없습니다. 추가·수정·삭제 모두 승인 대기를 거칩니다. 예전에 저장된 `direct`, `claude_approve`(승인 대기 + Claude에서 승인, 없어짐) 값은 DB를 고치지 않아도 **승인 대기 제안**으로 처리되고, 설정을 다음에 저장할 때 `proposal`로 바뀝니다.
    - 모드는 요청마다 설정에서 읽으므로, 바꾸면 다시 연결하지 않아도 바로 반영됩니다.
-   - 도구 호출은 한 시간에 `MCP_RATE_LIMIT_PER_HOUR`번(기본 300, `0`이면 제한 없음)까지입니다. AI 비서 대화 횟수와 따로 `AgentUsage`에 셉니다.
+   - 도구 호출은 작업공간마다 한 시간에 `MCP_RATE_LIMIT_PER_HOUR`번(기본 300, `0`이면 제한 없음)까지입니다. AI 비서 대화 횟수와 따로 그 작업공간의 `AgentUsage`에 셉니다.
 3. claude.ai의 설정 → 커넥터 → **커스텀 커넥터 추가**에 `https://<도메인>/api/mcp`를 넣습니다.
-4. 로그인 창이 열리면 `LMS_PASSWORD`로 로그인하고 **허용**을 누릅니다.
+4. 로그인 창이 열리면 자기 계정으로 로그인하고 **허용**을 누릅니다. 커넥터는 로그인한 작업공간에 연결됩니다.
 
-- **연결 목록**: 설정 카드의 `연결된 커넥터`에 동의 화면에서 허용한 연결마다 이름, 허용한 때, 마지막 갱신이 나옵니다(`OAuthGrants`). `끊기`는 그 연결의 토큰만 무효로 합니다. 이 목록이 생기기 전에 연결한 커넥터는 다음 토큰 갱신(1시간 안) 뒤에 나타납니다.
-- **연결 끊기**: 설정 카드의 `연결 끊기`는 지금까지 Claude에 발급된 접근·갱신 토큰을 모두 무효로 만듭니다(설정 `mcp_token_version`을 올림). 다시 쓰려면 claude.ai에서 다시 연결합니다.
+- **연결 목록**: 설정 카드의 `연결된 커넥터`에 그 작업공간에서 동의 화면으로 허용한 연결마다 이름, 허용한 때, 마지막 갱신이 나옵니다(작업공간의 `OAuthGrants`). `끊기`는 그 연결의 토큰만 무효로 합니다.
+- **연결 끊기**: 설정 카드의 `연결 끊기`는 그 작업공간에서 Claude에 발급된 접근·갱신 토큰을 모두 무효로 만듭니다(작업공간 설정 `mcp_token_version`을 올림). 계정을 비활성화하거나 비밀번호를 바꾸거나 그 사람이 로그아웃해도 그 사람의 커넥터 토큰은 바로 끊깁니다(계정 버전이 바뀜). 다시 쓰려면 claude.ai에서 다시 연결합니다(계정 도입 전에 연결한 커넥터도 다시 연결해야 합니다).
 - **재사용 감지**: 이미 쓴 인가 코드나 갱신 토큰이 다시 오면 그 연결을 끊습니다. Claude에서 다시 연결해야 합니다.
 - **동의 화면**: 직접 시작한 연결이 아니면 거부하라는 경고가 나옵니다. 클라이언트 등록(`/api/oauth/register`)은 15분에 IP당 10번, 전체 30번까지입니다(`lms.login_attempts`의 `register:` 칸).
 - **도구**: 조회는 학생 찾기, 학생 개요, 출결 달력, 수업 기록, 성적, 숙제 이행, 상담 기록, 하루 현황, 반 목록·명단. 변경(조회만이 아닐 때)은 출결 변경, 상담 기록 추가, 할 일 상태 변경. 읽기 도구는 읽기 전용, 쓰기 도구는 되돌릴 수 없는 작업으로 표시되어 Claude가 실행 전에 확인을 받습니다.
-- **인증**: OAuth 2.1(PKCE S256, 동적 클라이언트 등록). 토큰은 `AUTH_SECRET`에서 용도(로그인 쿠키, 클라이언트 ID, 인가 코드, 토큰)마다 HKDF로 만든 키로 서명하며 따로 저장하지 않습니다(`lib/signing.js`, 예전에 `AUTH_SECRET` 자체로 서명한 값도 만료 때까지 통과). 인가 코드와 갱신 토큰은 한 번만 쓸 수 있도록 쓴 것의 ID만 만료 때까지 DB(`OAuthJti`)에 남기고, 갱신할 때마다 새 갱신 토큰을 줍니다. 인가 코드 5분, 액세스 토큰 1시간, 갱신 토큰 30일. 돌려보낼 주소는 claude.ai·claude.com의 커넥터 콜백만 허용합니다.
+- **인증**: OAuth 2.1(PKCE S256, 동적 클라이언트 등록). 토큰은 `AUTH_SECRET`에서 용도(로그인 쿠키, 클라이언트 ID, 인가 코드, 토큰)마다 HKDF로 만든 키로 서명하며 따로 저장하지 않습니다(`lib/signing.js`). 인가 코드와 토큰에는 사용자(`uid`)·작업공간(`wid`)·계정 버전(`uv`)·연결(`gid`)·연결 버전(`ver`)이 들어 있고, 요청마다 계정이 살아 있는지와 작업공간 멤버인지 확인합니다. 인가 코드와 갱신 토큰은 한 번만 쓸 수 있도록 쓴 것의 ID만 만료 때까지 그 작업공간의 `OAuthJti`에 남기고, 갱신할 때마다 새 갱신 토큰을 줍니다. 인가 코드 5분, 액세스 토큰 1시간, 갱신 토큰 30일. 돌려보낼 주소는 claude.ai·claude.com의 커넥터 콜백만 허용합니다.
 - 구조: `/api/mcp`(`app/api/mcp/route.js` → `lib/mcp-server.js`, 무상태 Streamable HTTP) · OAuth `lib/oauth.js`, `/.well-known/oauth-*`, `/api/oauth/register`, `/api/oauth/token`, 동의 화면 `/oauth/authorize`.
 
 ## 숙제 체크리스트

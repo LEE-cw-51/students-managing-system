@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { isAuthed } from '../../../lib/auth.js';
+import { getSession } from '../../../lib/auth.js';
 import { issueAuthorizationCode, redirectWithParams, validateAuthorizeParams } from '../../../lib/oauth.js';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,8 @@ async function decide(formData) {
   'use server';
   const params = pick(formData);
   const next = `/oauth/authorize?${new URLSearchParams(params).toString()}`;
-  if (!(await isAuthed())) redirect(`/login?next=${encodeURIComponent(next)}`);
+  const session = await getSession();
+  if (!session) redirect(`/login?next=${encodeURIComponent(next)}`);
   const v = validateAuthorizeParams(params);
   if (v.fatal) redirect(next);
   if (v.error) {
@@ -29,7 +30,7 @@ async function decide(formData) {
   if (formData.get('decision') !== 'allow') {
     redirect(redirectWithParams(v.redirectUri, { error: 'access_denied', state: v.state }));
   }
-  const code = await issueAuthorizationCode(v);
+  const code = await issueAuthorizationCode(v, session);
   redirect(redirectWithParams(v.redirectUri, { code, state: v.state }));
 }
 
@@ -53,7 +54,8 @@ function Shell({ children }) {
 export default async function AuthorizePage({ searchParams }) {
   const params = pick((await searchParams) || {});
   const query = new URLSearchParams(params).toString();
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     redirect(`/login?next=${encodeURIComponent(`/oauth/authorize${query ? `?${query}` : ''}`)}`);
   }
   const v = validateAuthorizeParams(params);

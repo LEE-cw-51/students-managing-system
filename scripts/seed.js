@@ -24,10 +24,13 @@ function loadEnv() {
 
 loadEnv();
 
+// Default workspace from the accounts migration.
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001';
+
 async function main() {
   const sql = postgres(process.env.DATABASE_URL, { ssl: 'require', max: 1, prepare: false });
   const loaded = {};
-  const rows = await sql`select name, rows from lms.kv`;
+  const rows = await sql`select name, rows from lms.kv where workspace_id = ${WORKSPACE_ID}`;
   rows.forEach((row) => { loaded[row.name] = row.rows || []; });
   Object.keys(LMS.TABLES).forEach((name) => {
     if (!loaded[name]) loaded[name] = [];
@@ -48,9 +51,9 @@ async function main() {
   seedDemo(LMS.createService(store));
   for (const name of Object.keys(LMS.TABLES)) {
     await sql`
-      insert into lms.kv (name, rows, updated_at)
-      values (${name}, ${sql.json(store.readTable(name))}, now())
-      on conflict (name) do update
+      insert into lms.kv (workspace_id, name, rows, updated_at)
+      values (${WORKSPACE_ID}, ${name}, ${sql.json(store.readTable(name))}, now())
+      on conflict (workspace_id, name) do update
       set rows = excluded.rows, updated_at = now()
     `;
   }
