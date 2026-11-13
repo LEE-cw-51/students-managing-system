@@ -1831,6 +1831,7 @@ LMS.createService = function (store) {
     })[0];
     var ts = now();
     if (existing) {
+      LMS.assertMonthlyReportWritable(existing, text);
       existing.report_text = text;
       existing.status = status;
       existing.updated_at = ts;
@@ -1865,7 +1866,7 @@ LMS.createService = function (store) {
       try {
         var gen = generateMonthlyReport(sid, y, m);
         var existing = gen.existing;
-        if (existing && LMS.toStr(existing.status) === '확정') return { student_id: sid, result: 'skipped', reason: '확정됨' };
+        if (LMS.isMonthlyReportConfirmed(existing)) return { student_id: sid, result: 'skipped', reason: '확정됨' };
         if (existing && !options.overwrite) return { student_id: sid, result: 'skipped', reason: '이미 있음' };
         if (!gen.stats.total_lessons) return { student_id: sid, result: 'skipped', reason: '이 달 수업 기록 없음' };
         var row = saveMonthlyReport({ student_id: sid, year: y, month: m, report_text: gen.generated_text, status: '임시' });

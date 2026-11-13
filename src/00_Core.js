@@ -1382,6 +1382,18 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
   return lines.join('\n');
 };
 
+LMS.isMonthlyReportConfirmed = function (report) {
+  return LMS.toStr(report && report.status) === '확정';
+};
+
+/** A confirmed report keeps its text; only its status may change (확정 취소 → 임시). */
+LMS.assertMonthlyReportWritable = function (existing, text) {
+  if (LMS.isMonthlyReportConfirmed(existing) && LMS.toStr(existing.report_text) !== LMS.toStr(text)) {
+    throw new Error('확정된 월간 보고서는 고칠 수 없습니다. 확정을 취소한 뒤 고쳐 주세요.');
+  }
+  return existing;
+};
+
 LMS.buildMonthlyReport = function (stats, student, settings) {
   student = student || {};
   stats = stats || {};

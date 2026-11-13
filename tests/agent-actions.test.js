@@ -352,4 +352,24 @@ describe('agent write actions: reports', () => {
     const over = await act('save_monthly_report', { student_id: hong, year: 2026, month: 9, report_text: '9월 리포트 수정', status: '확정' });
     assert.match(over.preview.text, /덮어쓰기/);
   });
+
+  it('refuses to touch a confirmed monthly report, at preview and at apply', async () => {
+    const { store, svc, run, hong } = setup();
+    const key = { student_id: hong, year: 2026, month: 9 };
+    const message = /이미 확정된 월간 리포트라 AI가 고칠 수 없습니다/;
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' });
+    assert.throws(() => svc().previewAgentAction('save_monthly_report', { ...key, report_text: 'AI 수정' }), message);
+    assert.throws(() => svc().previewAgentAction('save_monthly_report', { ...key, report_text: '확정본', status: '임시' }), message, 'no AI un-confirm');
+
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '임시' });
+    const preview = svc().previewAgentAction('save_monthly_report', { ...key, report_text: 'AI 수정' });
+    const saved = svc().saveAgentTurn({ message: 'test', reply: 'ok', calls: [{ tool: 'save_monthly_report', args: preview.args, preview }] });
+    svc().saveMonthlyReport({ ...key, report_text: '확정본', status: '확정' });
+    const proposalId = saved.message.proposal.proposal_id;
+    await assert.rejects(apply(APP_SESSION, { proposal_id: proposalId }, run), message);
+    assert.equal(table(store, 'AgentProposals').find((p) => p.proposal_id === proposalId).status, 'failed');
+    const row = table(store, 'MonthlyReports').find((r) => r.student_id === hong);
+    assert.equal(row.report_text, '확정본');
+    assert.equal(row.status, '확정');
+  });
 });
