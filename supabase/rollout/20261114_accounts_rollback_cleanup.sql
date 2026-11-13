@@ -1,7 +1,7 @@
--- Accounts rollout, optional last rollback step: run by hand after 20261108_accounts_rollback.sql and after
+-- Accounts rollout, optional last rollback step: run by hand after 20261114_accounts_rollback.sql and after
 -- the pre-account code is deployed again. Removes workspace_id from lms.kv; the account tables stay
 -- (the old code never reads them). To move forward again, rerun
--- supabase/migrations/20261108120000_accounts.sql by hand.
+-- supabase/migrations/20261114000000_accounts.sql by hand.
 
 begin;
 
@@ -29,7 +29,7 @@ begin
   where i.indrelid = 'lms.kv'::regclass and i.indisprimary;
 
   if pk_cols is distinct from array['name'] then
-    raise exception 'lms.kv primary key is not (name): run 20261108_accounts_rollback.sql first';
+    raise exception 'lms.kv primary key is not (name): run 20261114_accounts_rollback.sql first';
   end if;
 
   alter table lms.kv drop constraint if exists kv_workspace_fk;

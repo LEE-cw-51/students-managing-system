@@ -1,6 +1,6 @@
 -- Accounts rollout, rollback to the step-1 (expand) state, where both the pre-account code and the new
 -- code can read and write lms.kv. Run by hand, then redeploy the old code if needed; drop the leftover
--- column afterwards with 20261108_accounts_rollback_cleanup.sql.
+-- column afterwards with 20261114_accounts_rollback_cleanup.sql.
 -- Refuses while any lms.kv row belongs to a workspace other than the default one (that data would be
 -- unreachable for the old code). Does nothing right after step 1.
 

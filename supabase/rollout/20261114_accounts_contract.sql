@@ -1,8 +1,8 @@
 -- Accounts rollout, step 2 (contract). Run by hand (SQL Editor or psql) only after
--- supabase/migrations/20261108120000_accounts.sql is applied, the new code is deployed and the logs show
+-- supabase/migrations/20261114000000_accounts.sql is applied, the new code is deployed and the logs show
 -- no more requests from the pre-account code. Afterwards each workspace can store its own tables.
 -- Safe to run again: does nothing once the primary key is (workspace_id, name).
--- Undo: supabase/rollout/20261108_accounts_rollback.sql.
+-- Undo: supabase/rollout/20261114_accounts_rollback.sql.
 
 begin;
 
@@ -22,7 +22,7 @@ begin
     return;
   end if;
   if to_regclass('lms.kv_workspace_name_key') is null then
-    raise exception 'lms.kv_workspace_name_key is missing: apply supabase/migrations/20261108120000_accounts.sql first';
+    raise exception 'lms.kv_workspace_name_key is missing: apply supabase/migrations/20261114000000_accounts.sql first';
   end if;
 
   alter table lms.kv drop constraint kv_pkey;

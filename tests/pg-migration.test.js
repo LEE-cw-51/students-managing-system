@@ -16,10 +16,10 @@ const BASE_URL = process.env.TEST_DATABASE_URL;
 const root = path.join(__dirname, '..');
 const sqlFile = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const SCHEMA = 'supabase/migrations/20260914120000_lms_schema.sql';
-const EXPAND = 'supabase/migrations/20261108120000_accounts.sql';
-const CONTRACT = 'supabase/rollout/20261108_accounts_contract.sql';
-const ROLLBACK = 'supabase/rollout/20261108_accounts_rollback.sql';
-const CLEANUP = 'supabase/rollout/20261108_accounts_rollback_cleanup.sql';
+const EXPAND = 'supabase/migrations/20261114000000_accounts.sql';
+const CONTRACT = 'supabase/rollout/20261114_accounts_contract.sql';
+const ROLLBACK = 'supabase/rollout/20261114_accounts_rollback.sql';
+const CLEANUP = 'supabase/rollout/20261114_accounts_rollback_cleanup.sql';
 const DEFAULT_ID = '00000000-0000-0000-0000-000000000001';
 const OTHER_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -262,7 +262,7 @@ describe('accounts rollout on Postgres', { skip: !BASE_URL && 'TEST_DATABASE_URL
     const sql = await freshDb();
     await run(sql, EXPAND);
     await run(sql, CONTRACT);
-    await assert.rejects(run(sql, CLEANUP), /run 20261108_accounts_rollback\.sql first/);
+    await assert.rejects(run(sql, CLEANUP), /run 20261114_accounts_rollback\.sql first/);
     assert.equal((await shape(sql)).has_col, true);
   });
 });

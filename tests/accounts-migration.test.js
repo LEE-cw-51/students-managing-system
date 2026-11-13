@@ -10,7 +10,7 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const MIGRATION = 'supabase/migrations/20261108120000_accounts.sql';
+const MIGRATION = 'supabase/migrations/20261114000000_accounts.sql';
 const sql = read(MIGRATION).replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
 const DEFAULT_ID = '00000000-0000-0000-0000-000000000001';
 const NEW_TABLES = ['users', 'workspaces', 'workspace_members', 'invites'];
@@ -54,10 +54,10 @@ describe('accounts migration', () => {
 
   it('keeps the contract and rollback steps out of supabase/migrations', () => {
     const rollout = fs.readdirSync(path.join(root, 'supabase/rollout')).sort();
-    assert.deepEqual(rollout, ['20261108_accounts_contract.sql', '20261108_accounts_rollback.sql', '20261108_accounts_rollback_cleanup.sql']);
+    assert.deepEqual(rollout, ['20261114_accounts_contract.sql', '20261114_accounts_rollback.sql', '20261114_accounts_rollback_cleanup.sql']);
     const flat = (rel) => read(rel).replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').toLowerCase();
-    assert.match(flat('supabase/rollout/20261108_accounts_contract.sql'), /add constraint kv_pkey primary key using index kv_workspace_name_key/);
-    for (const file of ['20261108_accounts_rollback.sql', '20261108_accounts_rollback_cleanup.sql']) {
+    assert.match(flat('supabase/rollout/20261114_accounts_contract.sql'), /add constraint kv_pkey primary key using index kv_workspace_name_key/);
+    for (const file of ['20261114_accounts_rollback.sql', '20261114_accounts_rollback_cleanup.sql']) {
       const body = flat(`supabase/rollout/${file}`);
       assert.match(body, /lock table lms\.kv in access exclusive mode/, file);
       assert.match(body, new RegExp(`workspace_id <> '${DEFAULT_ID}'`), file);

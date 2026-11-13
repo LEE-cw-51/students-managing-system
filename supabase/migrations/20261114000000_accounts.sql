@@ -52,7 +52,7 @@ on conflict (id) do nothing;
 
 -- Expand step: code from before accounts keeps working (its rows land in the default workspace through
 -- the column default, and its `on conflict (name)` still has kv_pkey (name)), while the new code upserts
--- on (workspace_id, name). Until supabase/rollout/20261108_accounts_contract.sql swaps the primary key,
+-- on (workspace_id, name). Until supabase/rollout/20261114_accounts_contract.sql swaps the primary key,
 -- only the default workspace can store data, so invite teachers after that step.
 alter table lms.kv add column if not exists workspace_id uuid not null
   default '00000000-0000-0000-0000-000000000001';

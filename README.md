@@ -57,16 +57,16 @@ LMS_STORE=file AUTH_SECRET=dev ADMIN_EMAIL=admin@local.test LMS_PASSWORD=dev-adm
 
 계정 도입은 두 단계로 나눠 적용합니다. 1단계 동안은 예전 코드와 새 코드가 모두 저장할 수 있으므로, 배포 중 두 버전이 함께 떠 있어도 안전합니다. 운영 DB의 마이그레이션 기록이 로컬 파일과 어긋나 있으므로 `supabase db push` 대신 SQL Editor(또는 psql)에서 파일 내용을 실행합니다. 새 코드는 로그인 시도 횟수를 `lms.login_attempts`에 세므로, `supabase/migrations/20261110000000_login_attempts.sql`이 아직 없다면 1단계 전에 먼저 실행합니다.
 
-1. **1단계(expand)**: `supabase/migrations/20261108120000_accounts.sql`을 실행합니다. 계정 표가 만들어지고, 기존 `lms.kv` 행은 기본값으로 기본 작업공간에 들어갑니다. 예전 키 `kv_pkey (name)`는 그대로 남고, 새 코드용 유일 인덱스 `(workspace_id, name)`이 추가됩니다.
+1. **1단계(expand)**: `supabase/migrations/20261114000000_accounts.sql`을 실행합니다. 계정 표가 만들어지고, 기존 `lms.kv` 행은 기본값으로 기본 작업공간에 들어갑니다. 예전 키 `kv_pkey (name)`는 그대로 남고, 새 코드용 유일 인덱스 `(workspace_id, name)`이 추가됩니다.
 2. **새 코드 배포**: 새 코드는 기본 작업공간에 저장할 때 예전 코드와 같은 잠금도 잡으므로, 두 버전이 동시에 저장해도 한쪽 저장이 사라지지 않습니다.
 3. **확인**: 몇 분 기다린 뒤 Vercel 로그에서 예전 배포로 가는 요청이 없는지 확인합니다.
-4. **2단계(contract)**: `supabase/rollout/20261108_accounts_contract.sql`을 실행합니다. 기본 키가 `(workspace_id, name)`으로 바뀝니다. 이후 예전 코드는 저장할 수 없습니다.
+4. **2단계(contract)**: `supabase/rollout/20261114_accounts_contract.sql`을 실행합니다. 기본 키가 `(workspace_id, name)`으로 바뀝니다. 이후 예전 코드는 저장할 수 없습니다.
 5. **강사 초대 시작**: 2단계 전에 초대하면 초대 수락(`acceptInvite`)은 성공해 링크가 소모되지만, 새 작업공간의 첫 `_Meta` 저장부터 `kv_pkey (name)` 위반으로 실패합니다. 반드시 2단계 뒤에 초대하세요.
 
 복구:
 
 - **1단계만 적용한 상태**: SQL 없이 예전 코드만 다시 배포합니다.
-- **2단계까지 적용한 상태**: `supabase/rollout/20261108_accounts_rollback.sql`을 실행해 1단계 상태(두 버전 모두 동작)로 되돌린 뒤 예전 코드를 다시 배포합니다. 필요하면 그다음 `supabase/rollout/20261108_accounts_rollback_cleanup.sql`로 `workspace_id` 컬럼을 지웁니다(계정 표는 남습니다).
+- **2단계까지 적용한 상태**: `supabase/rollout/20261114_accounts_rollback.sql`을 실행해 1단계 상태(두 버전 모두 동작)로 되돌린 뒤 예전 코드를 다시 배포합니다. 필요하면 그다음 `supabase/rollout/20261114_accounts_rollback_cleanup.sql`로 `workspace_id` 컬럼을 지웁니다(계정 표는 남습니다).
 - 두 복구 파일은 기본 작업공간이 아닌 데이터가 있으면 아무것도 바꾸지 않고 멈춥니다.
 - cleanup 뒤 다시 앞으로 가려면 1단계 SQL을 다시 실행합니다.
 
