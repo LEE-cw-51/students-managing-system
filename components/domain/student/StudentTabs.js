@@ -196,13 +196,13 @@ function ClassHistory({ studentId, onChanged }) {
   );
 }
 
-function ClassCard({ data, onChanged, historyOpen }) {
+function ClassCard({ data, onChanged }) {
   const s = data.student;
   const { classes } = data;
   const upcoming = data.upcoming_classes || [];
   const [changing, setChanging] = useState(null);
   const [assigning, setAssigning] = useState(false);
-  const [history, setHistory] = useState(!!historyOpen);
+  const [history, setHistory] = useState(false);
   const done = () => { setChanging(null); setAssigning(false); onChanged(); };
   return (
     <section className="card">
@@ -244,7 +244,7 @@ function ClassCard({ data, onChanged, historyOpen }) {
   );
 }
 
-export function OverviewTab({ data, onChanged, historyOpen }) {
+export function OverviewTab({ data, onChanged }) {
   const { month, next, exams, recent_notes: notes, counseling, open_tasks: tasks, today } = data;
   const s = data.student;
   return (
@@ -312,7 +312,7 @@ export function OverviewTab({ data, onChanged, historyOpen }) {
         </section>
       </div>
       <div className="cols-2">
-        <ClassCard data={data} onChanged={onChanged} historyOpen={historyOpen} />
+        <ClassCard data={data} onChanged={onChanged} />
         <section className="card">
           <h2>기본 정보</h2>
           <dl className="dl">

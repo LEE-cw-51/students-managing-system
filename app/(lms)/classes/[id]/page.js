@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import { Async } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
@@ -55,29 +55,16 @@ const TABS = [
   { key: 'stats', label: '통계' }
 ];
 
-const LEGACY_TABS = { progress: 'lessons', plans: 'lessons' };
-
 function Workspace() {
   const confirm = useConfirm();
   const { id } = useParams();
   const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const legacy = LEGACY_TABS[params.get('tab')];
-  const current = useTab(TABS);
-  const tab = legacy || current;
+  const tab = useTab(TABS);
   const boot = useBoot();
   const toast = useToast();
   const [editing, setEditing] = useState('');
   const [planVersion, setPlanVersion] = useState(0);
   const overview = useApi(() => api('getClassOverview', id), [id]);
-
-  useEffect(() => {
-    if (!legacy) return;
-    const next = new URLSearchParams(params.toString());
-    next.set('tab', legacy);
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  }, [legacy, params, pathname, router]);
 
   const remove = async () => {
     if (!(await confirm({ message: '이 반과 배정·강의 계획을 모두 삭제할까요? 되돌릴 수 없습니다.', confirmLabel: '삭제', danger: true }))) return;
