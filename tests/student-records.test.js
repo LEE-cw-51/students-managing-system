@@ -92,16 +92,6 @@ describe('textbook history', () => {
     assert.equal(same.args.textbook, undefined);
   });
 
-  it('backfills an open period for classes that already have a textbook', () => {
-    const store = createMemoryStore({ today: '2026-09-14' });
-    store.writeTable('Classes', [{ class_id: 'CLS_1', class_name: 'A반', textbook: '개념원리', status: '운영' }]);
-    store.writeTable('_Meta', [{ prefix: 'SCHEMA', next_seq: 5 }]);
-    const api = LMS.createService(store);
-    assert.equal(api.ensureSchema(), true);
-    assert.deepEqual(api.getClass('CLS_1').textbook_history, [{ textbook: '개념원리', from: '', to: '' }]);
-    assert.equal(api.ensureSchema(), false);
-  });
-
   it('gives the class screens one timeline with labels for switched and cleared textbooks', () => {
     const api = svc();
     const c = api.createClass({ class_name: 'A반', textbook: '개념원리', textbook_started_on: '2026-03-01' });

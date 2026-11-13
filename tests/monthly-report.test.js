@@ -33,7 +33,6 @@ describe('monthly report AI helpers', () => {
     const data = buildGenerateMonthlyReportAiData(pack, aiSections);
     assert.equal(data.text, mergeMonthlyReportText(pack.base_text, aiSections));
     assert.notEqual(data.text, pack.existing_report.report_text);
-    assert.equal(data.generated_text, data.text);
     assert.equal(data.existing.report_text, '이전에 저장한 확정본');
   });
 

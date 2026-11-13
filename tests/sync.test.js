@@ -260,32 +260,3 @@ describe('assignments follow student and class status', () => {
   });
 });
 
-describe('schema migration v4', () => {
-  function driftedStore() {
-    const { store, api, demo, classId } = seeded();
-    api.saveSessionHomework({ lesson_date: '2026-09-14', class_id: classId, items: [{ title: '반 숙제' }] });
-    const lessons = store.readTable('Lessons');
-    lessons[0].progress = '어긋난 진도';
-    lessons[1].homework = '어긋난 숙제';
-    store.writeTable('Lessons', lessons);
-    const students = store.readTable('Students');
-    students[0].status = '퇴원';
-    store.writeTable('Students', students);
-    const meta = store.readTable('_Meta');
-    meta.find((m) => m.prefix === LMS.SCHEMA_META_KEY).next_seq = 3;
-    store.writeTable('_Meta', meta);
-    return { store, demo, classId };
-  }
-
-  it('re-aligns drifted lessons and closes leftover assignments, once', () => {
-    const { store, demo, classId } = driftedStore();
-    const api = LMS.createService(store);
-    assert.equal(api.ensureSchema(), true);
-    assert.equal(new Set(field(api, '2026-09-14', classId, 'progress')).size, 1);
-    assert.deepEqual(field(api, '2026-09-14', classId, 'homework'), ['반 숙제', '반 숙제', '반 숙제']);
-    const rel = store.readTable('StudentClasses').find((r) => r.student_id === demo.students[0].student_id);
-    assert.equal(rel.status, '종료');
-    assert.equal(rel.end_date, '2026-09-14', 'ends on the last lesson');
-    assert.equal(LMS.createService(store).ensureSchema(), false);
-  });
-});

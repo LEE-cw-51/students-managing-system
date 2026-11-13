@@ -1068,8 +1068,6 @@ LMS.createViews = function (ctx) {
 
   // ----- Today board -----
 
-  var BOARD_HIDDEN_AGENDA = { incomplete_class: true, makeup: true, learning_alert: true, homework_check: true };
-
   /** Everything the today screen shows above the lesson editor, for one date. */
   function getTodayBoard(date) {
     var today = store.today();
@@ -1121,7 +1119,7 @@ LMS.createViews = function (ctx) {
       suspended: suspended,
       cancelled: cancelled,
       makeups: teaching.makeup_sessions,
-      tasks: (agenda.items || []).filter(function (i) { return !(i.source === 'auto' && BOARD_HIDDEN_AGENDA[i.kind]); }),
+      tasks: agenda.items,
       overdue_tasks: date !== today ? [] : table('Tasks').filter(function (t) {
         return LMS.isTaskOverdue(t, today);
       }).sort(function (a, b) { return LMS.toStr(a.due_date).localeCompare(LMS.toStr(b.due_date)); }).map(function (t) {

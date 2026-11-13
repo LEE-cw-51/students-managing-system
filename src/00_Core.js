@@ -146,7 +146,6 @@ LMS.PLAN_SOURCE = ['manual', 'split', 'ai'];
 LMS.PLAN_DONE_STATUS = ['완료', '일부', '못 함'];
 LMS.PLAN_DRAFT_STATUS = ['대기', '적용', '폐기'];
 LMS.PLAN_DRAFT_MODE = ['split', 'ai'];
-LMS.SUGGESTION_KIND = ['보충과제', '클리닉', '상담', '보강'];
 LMS.CURRICULUM_MAX_SESSIONS = 20;
 LMS.HOMEWORK_CHECK_STATUS = LMS.ASSIGNMENT;
 /** Points a teacher-entered item grade contributes. The average maps back through the bands below. */
@@ -506,7 +505,7 @@ LMS.validateExamPeriodInput = function (data) {
   };
 };
 
-/** Exam-prep groups whose names share this key become one class. */
+/** Exam-prep class names are compared by this key; a period never holds two classes with the same one. */
 LMS.examClassNameKey = function (name) {
   return LMS.toStr(name).replace(/\s+/g, ' ');
 };
@@ -1133,29 +1132,6 @@ LMS.studentBadges = function (lessons, ctx) {
   return badges;
 };
 
-LMS.summarizeRecentLearning = function (lessons) {
-  var rows = (lessons || []).slice().sort(function (a, b) {
-    return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date));
-  });
-  var scores = LMS.collectNormalizedScores(rows);
-  var stats = LMS.computeScoreStats(scores);
-  var assignment = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-  var concentration = { A: 0, B: 0, C: 0, D: 0, ABSENT: 0 };
-  rows.forEach(function (row) {
-    var a = LMS.toStr(row.assignment_completion).charAt(0);
-    if (assignment[a] !== undefined) assignment[a] += 1;
-    var c = LMS.toStr(row.concentration);
-    if (concentration[c] !== undefined) concentration[c] += 1;
-  });
-  return {
-    lesson_count: rows.length,
-    test_average_display: stats.average_display,
-    test_count: stats.count,
-    assignment: assignment,
-    concentration: concentration
-  };
-};
-
 LMS.computeClassSessionTestStats = LMS.computeDailyClassTestAverage;
 
 LMS.assignmentCode = function (v) {
@@ -1380,6 +1356,18 @@ LMS.buildDailyReport = function (lesson, student, settings, classStats, classNot
   lines.push(teacher + ' 드림');
   lines.push('연락처: ' + contact);
   return lines.join('\n');
+};
+
+LMS.isMonthlyReportConfirmed = function (report) {
+  return LMS.toStr(report && report.status) === '확정';
+};
+
+/** A confirmed report keeps its text; only its status may change (확정 취소 → 임시). */
+LMS.assertMonthlyReportWritable = function (existing, text) {
+  if (LMS.isMonthlyReportConfirmed(existing) && LMS.toStr(existing.report_text) !== LMS.toStr(text)) {
+    throw new Error('확정된 월간 보고서는 고칠 수 없습니다. 확정을 취소한 뒤 고쳐 주세요.');
+  }
+  return existing;
 };
 
 LMS.buildMonthlyReport = function (stats, student, settings) {

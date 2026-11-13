@@ -36,9 +36,9 @@ export async function POST(req) {
   }
 
   try {
-    const ctx = await withService((api) => api.getMonthlyReportContext(studentId, year, month));
+    const ctx = await withService((api) => ({ student: api.getStudent(studentId), settings: api.getSettings() }));
     const set = ctx.settings || {};
-    const studentName = ctx.student && ctx.student.name ? ctx.student.name : '학생';
+    const studentName = ctx.student.name || '학생';
     const academy = set.academy_name || '학원';
     const teacher = set.teacher_name || '';
     const contact = set.contact || '';

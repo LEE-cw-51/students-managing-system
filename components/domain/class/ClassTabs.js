@@ -11,7 +11,8 @@ import { SelectAllCheckbox, useSelection } from '@/components/ui/useSelection';
 import { useBoot } from '@/components/shell/AppShell';
 import ClassChangeDialog, { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
 import { api, useApi } from '@/lib/client-api';
-import { dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import { addDays, dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
+import RangePicker, { RANGES } from '@/components/ui/RangePicker';
 import LMS from '../../../src/00_Core.js';
 function textbookLine(cls) {
   const past = (cls.textbook_timeline || []).filter((h) => !h.current);
@@ -137,26 +138,6 @@ function PlanLine({ label, plan }) {
           </>
         ) : <span className="muted">작성된 계획이 없습니다.</span>}
       </div>
-    </div>
-  );
-}
-
-const RANGES = [
-  { key: '1m', label: '최근 1개월', days: 31 },
-  { key: '3m', label: '3개월', days: 92 },
-  { key: '6m', label: '6개월', days: 183 }
-];
-
-function addDays(iso, delta) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-function RangePicker({ value, onChange }) {
-  return (
-    <div className="segmented" role="group" aria-label="기간">
-      {RANGES.map((r) => <button key={r.key} type="button" aria-pressed={value === r.key} onClick={() => onChange(r.key)}>{r.label}</button>)}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const planner = require('../lib/exam-planner.js');
-const { OUT, classNameKey, mergeTargets, studentEndDate } = planner;
+const { OUT, classNameKey, studentEndDate } = planner;
 
 describe('exports', () => {
   it('keeps the out marker and drops the group toggles', () => {
@@ -40,31 +40,5 @@ describe('classNameKey', () => {
     assert.equal(classNameKey('  중2   연합반 '), '중2 연합반');
     assert.equal(classNameKey('중2\t연합반'), '중2 연합반');
     assert.equal(classNameKey(null), '');
-  });
-});
-
-describe('mergeTargets', () => {
-  const g = (class_name, extra = {}) => ({ include: true, class_name, students: [{ student_id: class_name }], ...extra });
-
-  it('points later same-name groups at the first one', () => {
-    const groups = [g('연합반'), g('다른반'), g(' 연합반 '), g('연합  반'), g('연합반')];
-    assert.deepEqual(mergeTargets(groups), [-1, -1, 0, -1, 0]);
-  });
-
-  it('never merges excluded, empty or unnamed groups', () => {
-    const groups = [
-      g('연합반', { include: false }),
-      g('연합반', { students: [] }),
-      g('연합반'),
-      g('연합반', { include: false }),
-      g('연합반'),
-      g('  '),
-      g('')
-    ];
-    assert.deepEqual(mergeTargets(groups), [-1, -1, -1, -1, 2, -1, -1]);
-  });
-
-  it('handles a missing list', () => {
-    assert.deepEqual(mergeTargets(undefined), []);
   });
 });

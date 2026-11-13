@@ -9,7 +9,7 @@ if (typeof module !== 'undefined' && module.exports && typeof require === 'funct
 (function () {
   var CLASS_ID = LMS.AGENT_PARAM.classId;
   var DATE = LMS.AGENT_PARAM.date;
-  var MAKEUP_ID = { type: 'string', description: '보강 ID (예: MKP-0002). get_calendar 또는 get_day_agenda에서 찾습니다.' };
+  var MAKEUP_ID = { type: 'string', description: '보강 ID (예: MKP-0002). get_calendar에서 찾습니다.' };
   function TIME(what) {
     return { type: 'string', description: what + ' (HH:MM, 선택)' };
   }

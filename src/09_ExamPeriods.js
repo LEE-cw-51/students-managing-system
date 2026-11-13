@@ -238,57 +238,36 @@ LMS.createExamPeriods = function (ctx) {
     });
   }
 
-  /** Groups whose names share LMS.examClassNameKey become one class (the first group's settings). */
-  function mergeByName(prepared) {
-    var merged = [];
-    var byKey = {};
-    prepared.forEach(function (pg) {
-      var key = LMS.examClassNameKey(pg.name);
-      if (!byKey[key]) {
-        byKey[key] = { key: key, name: pg.name, group: pg.group, schools: [], grades: [], students: [] };
-        merged.push(byKey[key]);
-      }
-      var m = byKey[key];
-      m.schools.push(pg.group.target_school);
-      m.grades.push(LMS.toStr(pg.group.target_grade));
-      m.students = m.students.concat(pg.students);
-    });
-    return merged;
-  }
-
-  function createExamClass(period, m) {
-    var schedule = LMS.normalizeSchedule(m.group.schedule);
-    if (!schedule.length) throw new Error(m.name + ': 수업 요일과 시간을 입력해 주세요.');
+  /** Validated row for a new exam-prep class of the period (not saved yet). */
+  function newExamClass(period, pg) {
+    var schedule = LMS.normalizeSchedule(pg.group.schedule);
+    if (!schedule.length) throw new Error(pg.name + ': 수업 요일과 시간을 입력해 주세요.');
     schedule.forEach(function (sl) {
-      if (!sl.start || !sl.end) throw new Error(m.name + ': ' + sl.day + '요일 시간을 입력해 주세요.');
+      if (!sl.start || !sl.end) throw new Error(pg.name + ': ' + sl.day + '요일 시간을 입력해 주세요.');
     });
-    var grade = m.grades.every(function (gr) { return gr === m.grades[0]; }) ? m.grades[0] : '';
+    var grade = LMS.toStr(pg.group.target_grade);
     var input = LMS.validateClassInput({
-      class_name: m.name,
+      class_name: pg.name,
       grade: grade,
-      teacher: LMS.toStr(m.group.teacher),
+      teacher: LMS.toStr(pg.group.teacher),
       school_year: LMS.toStr(period.exam_year) || period.start_date.slice(0, 4),
       semester: LMS.toStr(period.exam_semester),
       schedule: schedule,
       class_type: '시험대비',
       exam_period_id: period.exam_period_id,
-      target_school: LMS.uniqueIds(m.schools).join(' · '),
+      target_school: LMS.toStr(pg.group.target_school),
       target_grade: grade,
       status: '운영'
     }, false);
     delete input.schedule_from_legacy;
-    var ts = ctx.now();
-    var cls = Object.assign({}, input, { class_id: ctx.nextIds('CLS', 1)[0], created_at: ts, updated_at: ts });
-    var rows = table('Classes');
-    rows.push(cls);
-    saveTable('Classes', rows);
-    return cls;
+    return input;
   }
 
   /**
-   * Create exam-prep classes and their placements in one go; a group named like an existing class
-   * of the period joins it. suspended_class_ids, when given, replaces the suspended classes.
-   * plan: { groups: [{ class_name, schedule, target_school, target_grade, teacher, start_date, end_date,
+   * Create exam-prep classes and their placements in one go. A group with class_id adds its students
+   * to that class of the period; any other group makes a new class, whose name must be unused in the
+   * period. suspended_class_ids, when given, replaces the suspended classes.
+   * plan: { groups: [{ class_id?, class_name, schedule, target_school, target_grade, teacher, start_date, end_date,
    *          students: [{ student_id, source_class_id, start_date?, end_date? }] }], suspended_class_ids: [] }
    */
   function applyGroups(periodId, plan) {
@@ -296,15 +275,32 @@ LMS.createExamPeriods = function (ctx) {
     plan = plan || {};
     var groups = (plan.groups || []).filter(function (g) { return (g.students || []).length; });
     if (!groups.length && !Array.isArray(plan.suspended_class_ids)) throw new Error('편성할 학생이 없습니다.');
-    var merged = mergeByName(preparePlacements(period, groups));
-    var existingByKey = {};
-    classes(period.exam_period_id).forEach(function (c) {
-      var key = LMS.examClassNameKey(c.class_name);
-      if (!existingByKey[key]) existingByKey[key] = c;
+    var existing = classes(period.exam_period_id);
+    var taken = {};
+    existing.forEach(function (c) { taken[LMS.examClassNameKey(c.class_name)] = true; });
+    // Check every group before anything is saved.
+    var targets = preparePlacements(period, groups).map(function (pg) {
+      var classId = LMS.toStr(pg.group.class_id);
+      if (classId) {
+        var cls = LMS.findById(existing, 'class_id', classId);
+        if (!cls) throw new Error(pg.name + ': 이 시험대비 기간의 반이 아닙니다.');
+        return { cls: cls, students: pg.students };
+      }
+      var key = LMS.examClassNameKey(pg.name);
+      if (taken[key]) throw new Error('‘' + key + '’ 이름의 시험대비 반이 이미 있습니다. 반 이름을 다르게 해 주세요.');
+      taken[key] = true;
+      return { input: newExamClass(period, pg), students: pg.students };
     });
-    var created = merged.map(function (m) {
-      var cls = existingByKey[m.key] || createExamClass(period, m);
-      assignments.placeTemp(cls.class_id, m.students);
+    var created = targets.map(function (t) {
+      var cls = t.cls;
+      if (!cls) {
+        var ts = ctx.now();
+        cls = Object.assign({}, t.input, { class_id: ctx.nextIds('CLS', 1)[0], created_at: ts, updated_at: ts });
+        var rows = table('Classes');
+        rows.push(cls);
+        saveTable('Classes', rows);
+      }
+      assignments.placeTemp(cls.class_id, t.students);
       return cls;
     });
     var periods = table('ExamPeriods');

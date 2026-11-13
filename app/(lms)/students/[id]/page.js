@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import Tabs, { useTab } from '@/components/ui/Tabs';
 import { Async } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
@@ -23,28 +23,11 @@ const TABS = [
   { key: 'counseling', label: '상담·보고서' }
 ];
 
-const LEGACY_TABS = { attendance: 'lessons', reports: 'counseling', history: 'overview' };
-
 function Workspace() {
   const { id } = useParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const legacy = LEGACY_TABS[params.get('tab')];
-  const current = useTab(TABS);
-  const tab = legacy || current;
-  const [historyOpen] = useState(() => params.get('tab') === 'history');
+  const tab = useTab(TABS);
   const [editing, setEditing] = useState(false);
   const overview = useApi(() => api('getStudentOverview', id), [id]);
-
-  useEffect(() => {
-    if (!legacy) return;
-    const next = new URLSearchParams(params.toString());
-    if (legacy === TABS[0].key) next.delete('tab');
-    else next.set('tab', legacy);
-    const qs = next.toString();
-    router.replace(pathname + (qs ? '?' + qs : ''), { scroll: false });
-  }, [legacy, params, pathname, router]);
 
   return (
     <Async state={overview}>
@@ -68,7 +51,7 @@ function Workspace() {
             </div>
             <ClassmateNav studentId={id} classes={data.classes} disabled={editing} />
             <Tabs tabs={TABS} current={tab} scrollHint />
-            {tab === 'overview' ? <OverviewTab data={data} onChanged={overview.reload} historyOpen={historyOpen} /> : null}
+            {tab === 'overview' ? <OverviewTab data={data} onChanged={overview.reload} /> : null}
             {tab === 'lessons' ? <LessonsTab studentId={id} today={data.today} /> : null}
             {tab === 'homework' ? <HomeworkTab studentId={id} /> : null}
             {tab === 'grades' ? <GradesTab studentId={id} /> : null}

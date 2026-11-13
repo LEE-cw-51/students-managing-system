@@ -200,9 +200,10 @@ describe('AI plan input homework_rate', () => {
 
     const context = api.getClassPlanContext(cls.class_id, '2026-09');
     const input = context.input;
+    // Refs follow the roster sorted by student id; lee has left, so only hong and kim get one.
     const byId = {};
-    Object.entries(context.aliases).forEach(([ref, id]) => { byId[id] = input.students.find((s) => s.ref === ref); });
-    assert.equal(byId[lee.student_id], undefined);
+    [hong.student_id, kim.student_id].sort().forEach((id, i) => { byId[id] = input.students.find((s) => s.ref === 'S' + (i + 1)); });
+    assert.equal(input.students.length, 2);
     // hong: p1 A, p3 F; p2 was never graded. 1 A of 2.
     assert.equal(byId[hong.student_id].homework_rate, 50);
     assert.equal(byId[hong.student_id].homework_average, 75);
