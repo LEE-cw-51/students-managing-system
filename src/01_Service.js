@@ -2216,93 +2216,13 @@ LMS.createService = function (store) {
     });
   }
 
+  /** The tasks due on a date (cancelled ones left out). */
   function getDayAgenda(date) {
     date = date || store.today();
     if (!LMS.isIsoDate(date)) throw new Error('날짜 형식이 올바르지 않습니다.');
     var items = [];
-    var teaching = getTodayTeachingTasks(date);
     var students = table('Students');
     var classes = table('Classes');
-
-    (teaching.regular_classes || []).forEach(function (cls) {
-      if (cls.complete) return;
-      if (!cls.student_count) return;
-      items.push({
-        id: 'auto:class:' + cls.class_id,
-        source: 'auto',
-        kind: 'incomplete_class',
-        title: (cls.class_name || '반') + ' 수업 기록',
-        status: '예정',
-        student_id: '',
-        class_id: cls.class_id,
-        class_name: cls.class_name || '',
-        start_time: cls.start_time || '',
-        incomplete_count: cls.incomplete_count || 0,
-        student_count: cls.student_count || 0,
-        recorded_count: cls.recorded_count || 0,
-        action: 'open_today_session'
-      });
-    });
-
-    (teaching.makeup_sessions || []).forEach(function (row) {
-      items.push({
-        id: 'auto:makeup:' + row.makeup_id,
-        source: 'auto',
-        kind: 'makeup',
-        title: row.title || '보강',
-        status: LMS.toStr(row.status) || '예정',
-        student_id: row.student_id || '',
-        student_name: row.student_name || '',
-        class_id: row.class_id || '',
-        class_name: row.class_name || '',
-        makeup_id: row.makeup_id,
-        start_time: row.start_time || '',
-        action: 'open_makeup'
-      });
-    });
-
-    if (date === store.today()) {
-      getLearningAlerts(8).forEach(function (alert) {
-        var labels = (alert.signals || []).map(function (s) { return s.label; }).filter(Boolean);
-        items.push({
-          id: 'auto:alert:' + alert.student_id,
-          source: 'auto',
-          kind: 'learning_alert',
-          title: (alert.student_name || '학생') + ' 학습 점검',
-          status: '예정',
-          student_id: alert.student_id,
-          student_name: alert.student_name || '',
-          class_id: '',
-          memo: labels.join(' · '),
-          signals: alert.signals || [],
-          action: 'open_student'
-        });
-      });
-    }
-
-    (teaching.regular_classes || []).forEach(function (cls) {
-      var classRow = LMS.findById(classes, 'class_id', cls.class_id) || cls;
-      var assignedDate = LMS.previousMeetingDateFor(classRow, date, examPeriods_());
-      if (!assignedDate) return;
-      var hw = getSessionHomework(assignedDate, cls.class_id);
-      if (!(hw.items || []).length) return;
-      var preview = LMS.toStr(hw.items[0].title);
-      if (preview.length > 40) preview = preview.slice(0, 40) + '…';
-      items.push({
-        id: 'auto:hw:' + cls.class_id,
-        source: 'auto',
-        kind: 'homework_check',
-        title: (cls.class_name || '반') + ' 과제 확인',
-        status: '예정',
-        student_id: '',
-        class_id: cls.class_id,
-        class_name: cls.class_name || '',
-        homework_preview: preview,
-        prior_lesson_date: assignedDate,
-        item_count: hw.items.length,
-        action: 'check_homework'
-      });
-    });
 
     table('Tasks').forEach(function (row) {
       if (LMS.toStr(row.due_date) !== date) return;
