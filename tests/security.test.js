@@ -17,11 +17,11 @@ process.env.NODE_ENV = 'test';
 require('./next-stubs.js').install();
 
 const {
-  clientIp, createMemoryCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage, reserveClientRegistration,
-  reserveInviteAttempt, LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_EMAIL_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX,
+  clientIp, createMemoryCounters, createPgCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage, reserveClientRegistration,
+  reserveInviteAttempt, LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_EMAIL_MAX, LOGIN_DEVICE_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX,
   INVITE_IP_MAX, INVITE_GLOBAL_MAX
 } = require('../lib/login-limit.js');
-const { SESSION_MAX_AGE, sessionFresh, deviceToken, deviceTokenFor } = require('../lib/auth.js');
+const { SESSION_MAX_AGE, sessionFresh, deviceToken, deviceTokenFor, deviceIdFor } = require('../lib/auth.js');
 const { guardPost } = require('../lib/request-guard.js');
 const { sign, unsign } = require('../lib/signing.js');
 
@@ -59,14 +59,33 @@ describe('login attempt limit', () => {
     assert.equal((await reserveLoginAttempt('10.1.1.1', 'me@test.kr', { counters, now: T0 })).ok, true);
   });
 
-  it('a trusted device skips the email count and keeps the IP count', async () => {
+  it('a known device is counted on its own, past a locked IP and a locked email', async () => {
     const counters = createMemoryCounters();
     for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) await reserveLoginAttempt(`10.3.0.${i}`, 'owner@test.kr', { counters, now: T0 });
-    assert.equal((await reserveLoginAttempt('10.3.1.1', 'owner@test.kr', { counters, now: T0 })).ok, false);
-    for (let i = 0; i < LOGIN_IP_MAX; i += 1) {
-      assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, trusted: true })).ok, true);
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) await reserveLoginAttempt('10.3.1.2', 'colleague@test.kr', { counters, now: T0 });
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0 })).ok, false, 'an unknown browser');
+    for (let i = 0; i < LOGIN_DEVICE_MAX; i += 1) {
+      assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, true);
     }
-    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, trusted: true })).ok, false);
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, false);
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-b' })).ok, true, 'another browser of the owner');
+
+    await clearLoginAttempts('10.3.1.2', 'owner@test.kr', { counters, device: 'dev-a' });
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, true, 'a success forgets the device count');
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'colleague@test.kr', { counters, now: T0 })).ok, false, 'and leaves the IP count');
+  });
+
+  it('refuses when lms.login_attempts is missing instead of letting logins through uncounted', async (t) => {
+    const log = t.mock.method(console, 'error', () => {});
+    const sql = async () => {
+      throw Object.assign(new Error('relation "lms.login_attempts" does not exist'), { code: '42P01' });
+    };
+    const counters = createPgCounters(sql);
+    await assert.rejects(reserveLoginAttempt('10.4.0.1', 'me@test.kr', { counters, now: T0 }), { code: '42P01' });
+    await assert.rejects(reserveClientRegistration('10.4.0.1', { counters, now: T0 }), { code: '42P01' });
+    await assert.rejects(clearLoginAttempts('10.4.0.1', 'me@test.kr', { counters }), { code: '42P01' });
+    assert.equal(log.mock.callCount(), 1, 'says which migration to apply, once');
+    assert.match(log.mock.calls[0].arguments[0], /login_attempts\.sql/);
   });
 
   it('caps attempts at one email from many IPs, ignoring case and spaces', async () => {
@@ -185,6 +204,16 @@ describe('device cookie', () => {
     assert.equal(deviceTokenFor('junk', 'me@test.kr', T0), false);
     assert.equal(deviceTokenFor(sign(payload, 'session'), 'me@test.kr', T0), false);
     assert.equal(deviceTokenFor(sign({ ...payload, typ: undefined }, 'device'), 'me@test.kr', T0), false);
+  });
+
+  it('gives each browser its own id, and none without a good cookie', () => {
+    const a = deviceToken('me@test.kr', T0);
+    const b = deviceToken('me@test.kr', T0 + 1);
+    assert.match(deviceIdFor(a, 'me@test.kr', T0 + 1000), /^[0-9a-f]{32}$/);
+    assert.equal(deviceIdFor(a, 'me@test.kr', T0 + 1000), deviceIdFor(a, ' ME@test.kr', T0 + 2000));
+    assert.notEqual(deviceIdFor(a, 'me@test.kr', T0 + 1000), deviceIdFor(b, 'me@test.kr', T0 + 1000));
+    assert.equal(deviceIdFor(a, 'other@test.kr', T0 + 1000), '');
+    assert.equal(deviceIdFor(undefined, 'me@test.kr', T0), '');
   });
 });
 

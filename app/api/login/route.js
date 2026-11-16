@@ -42,7 +42,15 @@ export async function POST(req) {
   };
 
   const ip = clientIp(req.headers);
-  const gate = await reserveLoginAttempt(ip, email, { trusted: await knownDevice(email) });
+  const device = await knownDevice(email);
+  let gate;
+  try {
+    gate = await reserveLoginAttempt(ip, email, { device });
+  } catch (e) {
+    // The attempt could not be counted (no lms.login_attempts, database down): refuse, do not skip the limit.
+    console.error('login limit failed', e);
+    return fail(3);
+  }
   if (!gate.ok) {
     if (json) {
       const retryAfter = String(Math.max(1, Math.ceil(gate.retryAfterMs / 1000)));
@@ -58,7 +66,7 @@ export async function POST(req) {
     return fail(3);
   }
   if (!result) return fail(1);
-  await clearLoginAttempts(ip, email);
+  await clearLoginAttempts(ip, email, { device });
   await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
   await rememberDevice(result.user.email);
   if (json) return NextResponse.json({ ok: true });

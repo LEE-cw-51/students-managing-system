@@ -485,9 +485,31 @@ describe('login', () => {
     for (let i = 0; i < LOGIN_IP_MAX - 1; i += 1) {
       assert.equal((await POST(login('ghost@test.local', 'wrong-pass-1', ip))).status, 401);
     }
-    for (let i = 0; i < 3; i += 1) assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 200, `success ${i}`);
+    // A browser without a device cookie each time: a known one is not counted by IP at all.
+    for (let i = 0; i < 3; i += 1) {
+      stubs.jar.clear();
+      assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 200, `success ${i}`);
+    }
+    stubs.jar.clear();
     assert.equal((await POST(login('ghost@test.local', 'wrong-pass-1', ip))).status, 401, 'the last allowed failure');
     assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 429);
+  });
+
+  it('a browser that signed in before gets in from an IP a colleague locked, with its own count', async () => {
+    const { POST } = await routeP;
+    await newTeacher('login4@test.local', 'login-pass-1');
+    const ip = freshIp();
+    stubs.jar.clear();
+    assert.equal((await POST(login('login4@test.local', 'login-pass-1', ip))).status, 200);
+    const device = stubs.jar.get(auth.DEVICE_COOKIE);
+    stubs.jar.clear();
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) {
+      assert.equal((await POST(login('colleague@test.local', 'wrong-pass-1', ip))).status, 401);
+    }
+    assert.equal((await POST(login('colleague@test.local', 'login-pass-1', ip))).status, 429, 'the IP is locked');
+    stubs.jar.set(auth.DEVICE_COOKIE, device);
+    assert.equal((await POST(login('login4@test.local', 'login-pass-1', ip))).status, 200, 'the known browser');
+    assert.equal((await POST(login('colleague@test.local', 'login-pass-1', ip))).status, 429, 'its cookie is for its own email only');
   });
 
   it('a browser that signed in before is not locked out by guesses at its email from elsewhere', async () => {
