@@ -299,6 +299,7 @@ describe('invite form (/api/invite)', () => {
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('Location'), '/');
     assert.equal((await auth.getSession()).email, 'form@test.local');
+    assert.equal(auth.deviceTokenFor(stubs.jar.get(auth.DEVICE_COOKIE), 'form@test.local'), true, 'this browser is now known');
   });
 
   it('refuses a post from another site and leaves the link open', async () => {
@@ -478,15 +479,33 @@ describe('login', () => {
     assert.equal((await POST(login('login@test.local', 'login-pass-1', freshIp()))).status, 200, 'another IP');
   });
 
-  it('a success clears the IP count', async () => {
+  it('a success does not count against the IP, and does not clear its earlier failures', async () => {
     const { POST } = await routeP;
     const ip = freshIp();
-    for (let round = 0; round < 2; round += 1) {
-      for (let i = 0; i < LOGIN_IP_MAX - 1; i += 1) {
-        assert.equal((await POST(login('login@test.local', 'wrong-pass-1', ip))).status, 401);
-      }
-      assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 200, `round ${round}`);
+    for (let i = 0; i < LOGIN_IP_MAX - 1; i += 1) {
+      assert.equal((await POST(login('ghost@test.local', 'wrong-pass-1', ip))).status, 401);
     }
+    for (let i = 0; i < 3; i += 1) assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 200, `success ${i}`);
+    assert.equal((await POST(login('ghost@test.local', 'wrong-pass-1', ip))).status, 401, 'the last allowed failure');
+    assert.equal((await POST(login('login@test.local', 'login-pass-1', ip))).status, 429);
+  });
+
+  it('a browser that signed in before is not locked out by guesses at its email from elsewhere', async () => {
+    const { POST } = await routeP;
+    await newTeacher('login3@test.local', 'login-pass-1');
+    stubs.jar.clear();
+    assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 200);
+    const device = stubs.jar.get(auth.DEVICE_COOKIE);
+    assert.ok(device);
+    stubs.jar.clear();
+    for (let i = 0; i < 10; i += 1) {
+      assert.equal((await POST(login('login3@test.local', `wrong-${i}-pass`, freshIp()))).status, 401);
+    }
+    assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 429, 'an unknown browser');
+    stubs.jar.set(auth.DEVICE_COOKIE, auth.deviceToken('login2@test.local'));
+    assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 429, 'a cookie for another email');
+    stubs.jar.set(auth.DEVICE_COOKIE, device);
+    assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 200, 'the known browser');
   });
 
   it('signs in with the right password and sets a session for the user workspace', async () => {

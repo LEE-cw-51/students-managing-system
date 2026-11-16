@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authenticate } from '../../../lib/accounts.js';
-import { setSession } from '../../../lib/auth.js';
+import { knownDevice, rememberDevice, setSession } from '../../../lib/auth.js';
 import { safeNext } from '../../../lib/safe-next.js';
 import { clientIp, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
@@ -42,7 +42,7 @@ export async function POST(req) {
   };
 
   const ip = clientIp(req.headers);
-  const gate = await reserveLoginAttempt(ip, email);
+  const gate = await reserveLoginAttempt(ip, email, { trusted: await knownDevice(email) });
   if (!gate.ok) {
     if (json) {
       const retryAfter = String(Math.max(1, Math.ceil(gate.retryAfterMs / 1000)));
@@ -60,6 +60,7 @@ export async function POST(req) {
   if (!result) return fail(1);
   await clearLoginAttempts(ip, email);
   await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
+  await rememberDevice(result.user.email);
   if (json) return NextResponse.json({ ok: true });
   return new NextResponse(null, { status: 303, headers: { Location: next || '/' } });
 }

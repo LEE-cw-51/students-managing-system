@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { acceptInvite, passwordProblem } from '../../../lib/accounts.js';
-import { setSession } from '../../../lib/auth.js';
+import { rememberDevice, setSession } from '../../../lib/auth.js';
 import { clientIp, reserveInviteAttempt } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
 
@@ -35,5 +35,6 @@ export async function POST(req) {
     return back(token, e.code === 'EMAIL_TAKEN' ? 'taken' : 'invalid');
   }
   await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
+  await rememberDevice(result.user.email);
   return new NextResponse(null, { status: 303, headers: { Location: '/' } });
 }

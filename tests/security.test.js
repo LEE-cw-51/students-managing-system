@@ -21,7 +21,7 @@ const {
   reserveInviteAttempt, LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_EMAIL_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX,
   INVITE_IP_MAX, INVITE_GLOBAL_MAX
 } = require('../lib/login-limit.js');
-const { SESSION_MAX_AGE, sessionFresh } = require('../lib/auth.js');
+const { SESSION_MAX_AGE, sessionFresh, deviceToken, deviceTokenFor } = require('../lib/auth.js');
 const { guardPost } = require('../lib/request-guard.js');
 const { sign, unsign } = require('../lib/signing.js');
 
@@ -45,16 +45,28 @@ describe('login attempt limit', () => {
     assert.equal((await reserveLoginAttempt('1.2.3.4', 'new@test.kr', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
   });
 
-  it('a correct password clears the IP and email counts', async () => {
+  it('a correct password takes its own try off the IP count and clears the email count', async () => {
     const counters = createMemoryCounters();
     for (let i = 0; i < LOGIN_IP_MAX; i += 1) await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 });
     await clearLoginAttempts('1.2.3.4', 'me@test.kr', { counters });
-    assert.equal((await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 + 1 })).ok, true);
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 + 1 })).ok, true, 'the refunded try');
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'other@test.kr', { counters, now: T0 + 2 })).ok, false, 'earlier tries still count');
+    await clearLoginAttempts('9.9.9.9', 'me@test.kr', { counters });
 
     for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) await reserveLoginAttempt(`10.1.0.${i}`, 'me@test.kr', { counters, now: T0 });
     assert.equal((await reserveLoginAttempt('10.1.1.1', 'me@test.kr', { counters, now: T0 })).ok, false);
     await clearLoginAttempts('10.1.0.0', ' ME@test.kr ', { counters });
     assert.equal((await reserveLoginAttempt('10.1.1.1', 'me@test.kr', { counters, now: T0 })).ok, true);
+  });
+
+  it('a trusted device skips the email count and keeps the IP count', async () => {
+    const counters = createMemoryCounters();
+    for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) await reserveLoginAttempt(`10.3.0.${i}`, 'owner@test.kr', { counters, now: T0 });
+    assert.equal((await reserveLoginAttempt('10.3.1.1', 'owner@test.kr', { counters, now: T0 })).ok, false);
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) {
+      assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, trusted: true })).ok, true);
+    }
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, trusted: true })).ok, false);
   });
 
   it('caps attempts at one email from many IPs, ignoring case and spaces', async () => {
@@ -151,6 +163,28 @@ describe('invite link submission limit', () => {
       assert.equal((await reserveInviteAttempt(`10.0.${Math.floor(i / 200)}.${i % 200}`, { counters: all, now: T0 })).ok, true);
     }
     assert.equal((await reserveInviteAttempt('10.9.9.9', { counters: all, now: T0 })).ok, false);
+  });
+});
+
+describe('device cookie', () => {
+  const YEAR = 365 * 24 * 60 * 60 * 1000;
+
+  it('holds for the email it was issued for, for a year', () => {
+    const token = deviceToken(' Me@Test.kr ', T0);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 + 1000), true);
+    assert.equal(deviceTokenFor(token, 'other@test.kr', T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, '', T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 + YEAR), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 - 60 * 60 * 1000), false, 'from the future');
+    assert.ok(!token.includes('me@test.kr') && !unsign(token, 'device').e.includes('@'), 'no address in the cookie');
+  });
+
+  it('refuses missing, forged and other-purpose tokens', () => {
+    const payload = unsign(deviceToken('me@test.kr', T0), 'device');
+    assert.equal(deviceTokenFor(undefined, 'me@test.kr', T0), false);
+    assert.equal(deviceTokenFor('junk', 'me@test.kr', T0), false);
+    assert.equal(deviceTokenFor(sign(payload, 'session'), 'me@test.kr', T0), false);
+    assert.equal(deviceTokenFor(sign({ ...payload, typ: undefined }, 'device'), 'me@test.kr', T0), false);
   });
 });
 
