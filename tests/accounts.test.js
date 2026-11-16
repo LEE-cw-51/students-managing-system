@@ -629,3 +629,17 @@ describe('logout', () => {
     assert.equal((await authenticate('logout-all@test.local', 'teacher-pass-1')).user.session_version, teacher.ver + 1);
   });
 });
+
+describe('disabling accounts', () => {
+  it('an admin cannot disable their own account, however the id is written', async () => {
+    const me = await newTeacher('self-off@test.local', 'teacher-pass-1', { role: 'admin' });
+    const other = await newTeacher('self-off-other@test.local');
+    await assert.rejects(setUserDisabled(me.uid, true, { actorId: me.uid }), /내 계정/);
+    // Postgres finds a uuid in any case (refused as my own account); the file store finds nothing.
+    await assert.rejects(setUserDisabled(me.uid.toUpperCase(), true, { actorId: me.uid }), /내 계정|찾을 수 없/);
+    await assert.rejects(setUserDisabled(me.uid, true, { actorId: me.uid.toUpperCase() }), /내 계정/);
+    assert.ok(await accounts.loadSessionUser(me), 'still signed in');
+    assert.equal((await setUserDisabled(other.uid, true, { actorId: me.uid })).disabled, true);
+    assert.equal((await setUserDisabled(me.uid, false, { actorId: me.uid })).disabled, false, 're-enabling is not refused');
+  });
+});

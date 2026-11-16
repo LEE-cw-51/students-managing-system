@@ -32,6 +32,7 @@ export async function POST(req) {
       console.error('invite failed', e);
       return back(token, 'server');
     }
+    if (e.code === 'KV_NOT_READY') return back(token, 'server');
     return back(token, e.code === 'EMAIL_TAKEN' ? 'taken' : 'invalid');
   }
   await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });

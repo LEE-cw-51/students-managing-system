@@ -7,7 +7,6 @@ export const runtime = 'nodejs';
 export const POST = adminRoute(async ({ req, params, session }) => {
   const body = await jsonBody(req);
   if (typeof body.disabled !== 'boolean') throw adminError('요청이 올바르지 않습니다.');
-  if (body.disabled && params.id === session.uid) throw adminError('지금 로그인한 내 계정은 비활성화할 수 없습니다.');
-  const { session_version, token_version, ...user } = await setUserDisabled(params.id, body.disabled);
+  const { session_version, token_version, ...user } = await setUserDisabled(params.id, body.disabled, { actorId: session.uid });
   return user;
 });
