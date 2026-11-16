@@ -226,6 +226,13 @@ describe('guardPost', () => {
     assert.equal(guardPost(req({ host: 'lms.example.com', 'content-type': 'application/json' })), null);
   });
 
+  it('compares with the request URL only when no host header came', () => {
+    const internal = { origin: 'http://localhost:8787', 'content-type': 'application/json' };
+    assert.equal(guardPost(req(internal)), null, 'no Host: the URL is all there is');
+    assert.equal(guardPost(req({ ...internal, host: 'lms.example.com' })).status, 403, 'behind a proxy the URL names the internal host');
+    assert.equal(guardPost(req({ ...internal, host: 'internal', 'x-forwarded-host': 'lms.example.com' })).status, 403);
+  });
+
   it('refuses another origin with 403', async () => {
     for (const origin of ['https://evil.example', 'null', 'https://lms.example.com.evil.example']) {
       const res = guardPost(req({ host: 'lms.example.com', origin, 'content-type': 'application/json' }));

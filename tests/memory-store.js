@@ -87,9 +87,6 @@ function createMemoryStore(options) {
     today() {
       return options.today || '2026-09-14';
     },
-    currentUserEmail() {
-      return options.email || 'teacher@example.com';
-    },
     reset() {
       tables = emptyTables();
       persist();

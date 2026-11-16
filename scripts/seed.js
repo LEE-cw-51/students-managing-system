@@ -40,7 +40,6 @@ async function main() {
     writeTable(name, next) { loaded[name] = next || []; },
     now() { return '2026-09-14T10:00:00'; },
     today() { return '2026-09-14'; },
-    currentUserEmail() { return 'teacher@local'; },
     transaction(fn) { return fn(); }
   };
   if (store.readTable('Students').length) {

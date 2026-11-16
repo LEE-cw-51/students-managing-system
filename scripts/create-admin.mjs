@@ -4,15 +4,31 @@
 // Password: ADMIN_PASSWORD env var, otherwise asked on the terminal.
 
 import readline from 'node:readline/promises';
+import { Writable } from 'node:stream';
 import { bootstrapAdmin } from '../lib/accounts.js';
 import { useFileStore } from '../lib/store.js';
 
+// Reads the password without showing it: readline echoes typed keys to its output, which is muted
+// once the prompt is written.
 async function askPassword() {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  if (!process.stdin.isTTY) {
+    throw new Error('터미널이 아니면 비밀번호를 물을 수 없습니다. ADMIN_PASSWORD 환경 변수로 넘겨 주세요.');
+  }
+  let muted = false;
+  const output = new Writable({
+    write(chunk, encoding, done) {
+      if (!muted) process.stdout.write(chunk, encoding);
+      done();
+    }
+  });
+  const rl = readline.createInterface({ input: process.stdin, output, terminal: true });
   try {
-    return await rl.question('비밀번호: ');
+    const asked = rl.question('비밀번호(입력해도 화면에 보이지 않습니다): ');
+    muted = true;
+    return await asked;
   } finally {
     rl.close();
+    process.stdout.write('\n');
   }
 }
 
