@@ -302,6 +302,18 @@ describe('invite form (/api/invite)', () => {
     assert.equal(auth.deviceTokenFor(stubs.jar.get(auth.DEVICE_COOKIE), 'form@test.local'), true, 'this browser is now known');
   });
 
+  it('says a dead link is dead even with a weak password, and a weak password keeps a good link open', async () => {
+    const { POST } = await routeP;
+    const dead = await POST(submit(crypto.randomBytes(32).toString('base64url'), { password: 'short' }));
+    assert.match(dead.headers.get('Location'), /error=invalid$/);
+    const { token } = await createInvite({ email: 'form-weak@test.local' });
+    stubs.jar.clear();
+    assert.match((await POST(submit(token, { password: 'short' }))).headers.get('Location'), /error=weak$/);
+    assert.equal(stubs.jar.size, 0);
+    assert.ok(await peekInvite(token));
+    await assert.rejects(acceptInvite('x'.repeat(43), { password: 'short' }), { code: 'INVITE_INVALID' });
+  });
+
   it('refuses a post from another site and leaves the link open', async () => {
     const { POST } = await routeP;
     const { token } = await createInvite({ email: 'form-csrf@test.local' });

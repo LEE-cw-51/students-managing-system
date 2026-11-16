@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { acceptInvite, passwordProblem } from '../../../lib/accounts.js';
+import { acceptInvite } from '../../../lib/accounts.js';
 import { rememberDevice, setSession } from '../../../lib/auth.js';
 import { clientIp, reserveInviteAttempt } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
@@ -22,7 +22,6 @@ export async function POST(req) {
   const name = String(form?.get('name') || '');
   if (!token) return new NextResponse(null, { status: 303, headers: { Location: '/login' } });
   if (password !== password2) return back(token, 'mismatch');
-  if (passwordProblem(password)) return back(token, 'weak');
   let result;
   try {
     if (!(await reserveInviteAttempt(clientIp(req.headers))).ok) return back(token, 'limited');
@@ -33,6 +32,7 @@ export async function POST(req) {
       return back(token, 'server');
     }
     if (e.code === 'KV_NOT_READY') return back(token, 'server');
+    if (e.code === 'WEAK_PASSWORD') return back(token, 'weak');
     return back(token, e.code === 'EMAIL_TAKEN' ? 'taken' : 'invalid');
   }
   await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
