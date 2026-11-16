@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { acceptInvite } from '../../../lib/accounts.js';
-import { rememberDevice, setSession } from '../../../lib/auth.js';
+import { completeSignIn } from '../../../lib/auth.js';
 import { clientIp, reserveInviteAttempt } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
 
@@ -35,7 +35,6 @@ export async function POST(req) {
     if (e.code === 'WEAK_PASSWORD') return back(token, 'weak');
     return back(token, e.code === 'EMAIL_TAKEN' ? 'taken' : 'invalid');
   }
-  await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
-  await rememberDevice(result.user.email);
+  await completeSignIn(result.user, result.workspaceId);
   return new NextResponse(null, { status: 303, headers: { Location: '/' } });
 }

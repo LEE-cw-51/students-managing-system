@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authenticate } from '../../../lib/accounts.js';
-import { knownDevice, rememberDevice, setSession } from '../../../lib/auth.js';
+import { completeSignIn, knownDevice } from '../../../lib/auth.js';
 import { safeNext } from '../../../lib/safe-next.js';
 import { clientIp, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
@@ -67,8 +67,7 @@ export async function POST(req) {
   }
   if (!result) return fail(1);
   await clearLoginAttempts(ip, email, { device });
-  await setSession({ uid: result.user.id, wid: result.workspaceId, ver: result.user.session_version });
-  await rememberDevice(result.user.email);
+  await completeSignIn(result.user, result.workspaceId);
   if (json) return NextResponse.json({ ok: true });
   return new NextResponse(null, { status: 303, headers: { Location: next || '/' } });
 }
