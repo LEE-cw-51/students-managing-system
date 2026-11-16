@@ -10,7 +10,7 @@ export const GET = adminRoute(async ({ session }) => {
   const me = users.find((u) => u.id === session.uid);
   const mine = me && me.workspaces.find((w) => w.id === session.wid);
   return {
-    users: users.map(({ session_version, ...u }) => u),
+    users: users.map(({ session_version, token_version, ...u }) => u),
     me: session.uid,
     workspace: { id: session.wid, name: mine ? mine.name : '' },
     roles: ROLES,

@@ -11,8 +11,12 @@ create table if not exists lms.users (
   role text not null default 'teacher' check (role in ('admin', 'teacher')),
   disabled boolean not null default false,
   session_version integer not null default 1,
+  token_version integer not null default 1,
   created_at timestamptz not null default now()
 );
+
+-- For a database where an earlier version of this file already created lms.users.
+alter table lms.users add column if not exists token_version integer not null default 1;
 
 create unique index if not exists users_email_key on lms.users (lower(email));
 

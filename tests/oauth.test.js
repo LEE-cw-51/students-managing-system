@@ -21,7 +21,9 @@ const { safeNext } = require('../lib/safe-next.js');
 const crypto = require('node:crypto');
 const { withService, LMS, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
 const { createMemoryStore } = require('./memory-store.js');
-const { bootstrapAdmin, createInvite, acceptInvite, setUserDisabled } = require('../lib/accounts.js');
+const {
+  bootstrapAdmin, createInvite, acceptInvite, setUserDisabled, signOutEverywhere, setPassword, createPasswordReset, loadSessionUser
+} = require('../lib/accounts.js');
 
 const {
   registerClient, validateAuthorizeParams, issueAuthorizationCode, exchangeToken, verifyAccessToken,
@@ -346,11 +348,39 @@ describe('oauth tokens are bound to a user and workspace', () => {
     assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId })).error, 'invalid_grant');
     const code = await exchangeToken({ grant_type: 'authorization_code', code: pending.code, code_verifier: VERIFIER, client_id: pending.clientId, redirect_uri: REDIRECT });
     assert.equal(code.error, 'invalid_grant');
-    // Re-enabling bumps the user version, so old grants stay dead; a new consent works.
+    // Re-enabling bumps the user's versions, so old grants stay dead; a new consent works.
     const back = await setUserDisabled(teacher.uid, false);
     assert.equal(await verifyAccessToken(tokens.access_token), null);
     const fresh = await issueTokens({ ...teacher, ver: back.session_version });
     assert.ok(await verifyAccessToken(fresh.tokens.access_token));
+    await setUserDisabled(teacher.uid, true);
+    await assert.rejects(issueCode(teacher), /로그인/, 'no code for a disabled user');
+  });
+
+  it('keeps the connector through a logout, and cuts it when the password changes', async () => {
+    const teacher = await newTeacher('logout-keeps@test.local');
+    const { clientId, tokens } = await issueTokens(teacher);
+    const pending = await issueCode(teacher);
+    await signOutEverywhere(teacher.uid);
+    assert.equal(await loadSessionUser(teacher), null, 'the web session is over');
+    assert.ok(await verifyAccessToken(tokens.access_token));
+    const refreshed = await exchangeToken({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId });
+    assert.ok(refreshed.tokens, 'refresh still works');
+    const code = await exchangeToken({ grant_type: 'authorization_code', code: pending.code, code_verifier: VERIFIER, client_id: pending.clientId, redirect_uri: REDIRECT });
+    assert.ok(code.tokens, 'a code issued before the logout still works');
+
+    await setPassword(teacher.uid, 'another-pass-2');
+    assert.equal(await verifyAccessToken(refreshed.tokens.access_token), null);
+    assert.equal((await exchangeToken({ grant_type: 'refresh_token', refresh_token: refreshed.tokens.refresh_token, client_id: clientId })).error, 'invalid_grant');
+  });
+
+  it('cuts the connector when a reset link sets a new password', async () => {
+    const teacher = await newTeacher('reset-cuts@test.local');
+    const { tokens } = await issueTokens(teacher);
+    const { token } = await createPasswordReset({ userId: teacher.uid });
+    assert.ok(await verifyAccessToken(tokens.access_token), 'making the link changes nothing');
+    await acceptInvite(token, { password: 'another-pass-2' });
+    assert.equal(await verifyAccessToken(tokens.access_token), null);
   });
 
   it('rejects a token for a workspace the user does not belong to', async () => {

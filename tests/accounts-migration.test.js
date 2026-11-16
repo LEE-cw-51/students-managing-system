@@ -88,7 +88,7 @@ describe('accounts migration', () => {
       return m[1].split(',').map((s) => s.trim());
     };
     const has = (table, cols) => cols.forEach((c) => assert.ok(columnsOf(table).includes(c), `lms.${table}.${c}`));
-    has('users', [...insertCols('users'), 'id', 'disabled', 'session_version', 'created_at']);
+    has('users', [...insertCols('users'), 'id', 'disabled', 'session_version', 'token_version', 'created_at']);
     has('workspaces', [...insertCols('workspaces'), 'created_at']);
     has('workspace_members', [...insertCols('workspace_members'), 'created_at']);
     has('invites', [...insertCols('invites'), 'used_at']);
