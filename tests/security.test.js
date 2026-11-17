@@ -188,32 +188,40 @@ describe('invite link submission limit', () => {
 describe('device cookie', () => {
   const YEAR = 365 * 24 * 60 * 60 * 1000;
 
-  it('holds for the email it was issued for, for a year', () => {
-    const token = deviceToken(' Me@Test.kr ', T0);
-    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 + 1000), true);
-    assert.equal(deviceTokenFor(token, 'other@test.kr', T0 + 1000), false);
-    assert.equal(deviceTokenFor(token, '', T0 + 1000), false);
-    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 + YEAR), false);
-    assert.equal(deviceTokenFor(token, 'me@test.kr', T0 - 60 * 60 * 1000), false, 'from the future');
+  it('holds for the email and token version it was issued for, for a year', () => {
+    const token = deviceToken(' Me@Test.kr ', 3, T0);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 + 1000), true);
+    assert.equal(deviceTokenFor(token, 'other@test.kr', 3, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, '', 3, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 + YEAR), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 - 60 * 60 * 1000), false, 'from the future');
     assert.ok(!token.includes('me@test.kr') && !unsign(token, 'device').e.includes('@'), 'no address in the cookie');
   });
 
+  it('stops counting once the account token version moves on (password change, reset, disable)', () => {
+    const token = deviceToken('me@test.kr', 3, T0);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 4, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', undefined, T0 + 1000), false);
+    assert.equal(deviceIdFor(token, 'me@test.kr', 4, T0 + 1000), '');
+  });
+
   it('refuses missing, forged and other-purpose tokens', () => {
-    const payload = unsign(deviceToken('me@test.kr', T0), 'device');
-    assert.equal(deviceTokenFor(undefined, 'me@test.kr', T0), false);
-    assert.equal(deviceTokenFor('junk', 'me@test.kr', T0), false);
-    assert.equal(deviceTokenFor(sign(payload, 'session'), 'me@test.kr', T0), false);
-    assert.equal(deviceTokenFor(sign({ ...payload, typ: undefined }, 'device'), 'me@test.kr', T0), false);
+    const payload = unsign(deviceToken('me@test.kr', 1, T0), 'device');
+    assert.equal(deviceTokenFor(undefined, 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor('junk', 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign(payload, 'session'), 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign({ ...payload, typ: undefined }, 'device'), 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign({ ...payload, uv: undefined }, 'device'), 'me@test.kr', 1, T0), false, 'a cookie from before versions');
   });
 
   it('gives each browser its own id, and none without a good cookie', () => {
-    const a = deviceToken('me@test.kr', T0);
-    const b = deviceToken('me@test.kr', T0 + 1);
-    assert.match(deviceIdFor(a, 'me@test.kr', T0 + 1000), /^[0-9a-f]{32}$/);
-    assert.equal(deviceIdFor(a, 'me@test.kr', T0 + 1000), deviceIdFor(a, ' ME@test.kr', T0 + 2000));
-    assert.notEqual(deviceIdFor(a, 'me@test.kr', T0 + 1000), deviceIdFor(b, 'me@test.kr', T0 + 1000));
-    assert.equal(deviceIdFor(a, 'other@test.kr', T0 + 1000), '');
-    assert.equal(deviceIdFor(undefined, 'me@test.kr', T0), '');
+    const a = deviceToken('me@test.kr', 1, T0);
+    const b = deviceToken('me@test.kr', 1, T0 + 1);
+    assert.match(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), /^[0-9a-f]{32}$/);
+    assert.equal(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), deviceIdFor(a, ' ME@test.kr', 1, T0 + 2000));
+    assert.notEqual(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), deviceIdFor(b, 'me@test.kr', 1, T0 + 1000));
+    assert.equal(deviceIdFor(a, 'other@test.kr', 1, T0 + 1000), '');
+    assert.equal(deviceIdFor(undefined, 'me@test.kr', 1, T0), '');
   });
 });
 

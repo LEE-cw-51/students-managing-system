@@ -299,7 +299,7 @@ describe('invite form (/api/invite)', () => {
     assert.equal(res.status, 303);
     assert.equal(res.headers.get('Location'), '/');
     assert.equal((await auth.getSession()).email, 'form@test.local');
-    assert.equal(auth.deviceTokenFor(stubs.jar.get(auth.DEVICE_COOKIE), 'form@test.local'), true, 'this browser is now known');
+    assert.equal(auth.deviceTokenFor(stubs.jar.get(auth.DEVICE_COOKIE), 'form@test.local', (await findUserByEmail('form@test.local')).token_version), true, 'this browser is now known');
   });
 
   it('says a dead link is dead even with a weak password, and a weak password keeps a good link open', async () => {
@@ -380,6 +380,22 @@ describe('password reset links', () => {
     await assert.rejects(acceptInvite(token, { password: 'new-pass-123' }), /사용할 수 없는 계정/);
     await setUserDisabled(teacher.uid, false);
     assert.ok(await authenticate('reset-off@test.local', 'old-pass-123'), 'password unchanged');
+  });
+
+  it('made by an admin who was later disabled or demoted stop working, and work again once restored', async () => {
+    const admin2 = await newTeacher('admin2@test.local', 'admin2-pass-1', { role: 'admin', createdBy: owner.uid });
+    const teacher = await newTeacher('maker-reset@test.local', 'old-pass-123');
+    const invite = await createInvite({ email: 'maker-invite@test.local', role: 'admin', createdBy: admin2.uid });
+    const reset = await createPasswordReset({ userId: teacher.uid, createdBy: admin2.uid });
+    await setUserDisabled(admin2.uid, true, { actorId: owner.uid });
+    assert.equal(await peekInvite(invite.token), null);
+    assert.equal(await peekInvite(reset.token), null);
+    await rejectsWith(acceptInvite(invite.token, { password: 'invitee-pass-1' }), 'INVITE_INVALID');
+    await rejectsWith(acceptInvite(reset.token, { password: 'new-pass-123' }), 'INVITE_INVALID');
+    assert.equal(await findUserByEmail('maker-invite@test.local'), null);
+    assert.ok(await authenticate('maker-reset@test.local', 'old-pass-123'), 'password unchanged');
+    await setUserDisabled(admin2.uid, false, { actorId: owner.uid });
+    assert.ok(await peekInvite(reset.token), 'the unused link works again once its admin is back');
   });
 
   it('an invite for a new email does not close reset links', async () => {
@@ -536,10 +552,25 @@ describe('login', () => {
       assert.equal((await POST(login('login3@test.local', `wrong-${i}-pass`, freshIp()))).status, 401);
     }
     assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 429, 'an unknown browser');
-    stubs.jar.set(auth.DEVICE_COOKIE, auth.deviceToken('login2@test.local'));
+    stubs.jar.set(auth.DEVICE_COOKIE, auth.deviceToken('login2@test.local', (await findUserByEmail('login2@test.local')).token_version));
     assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 429, 'a cookie for another email');
     stubs.jar.set(auth.DEVICE_COOKIE, device);
     assert.equal((await POST(login('login3@test.local', 'login-pass-1', freshIp()))).status, 200, 'the known browser');
+  });
+
+  it('a password reset ends the own count of old browsers: they go back to the IP and email limits', async () => {
+    const teacher = await newTeacher('login5@test.local', 'login-pass-1');
+    const before = await findUserByEmail('login5@test.local');
+    stubs.jar.set(auth.DEVICE_COOKIE, auth.deviceToken('login5@test.local', before.token_version));
+    assert.match(await auth.knownDevice('login5@test.local'), /^[0-9a-f]{32}$/, 'a known browser before the reset');
+    const { token } = await createPasswordReset({ userId: teacher.uid, createdBy: owner.uid });
+    await acceptInvite(token, { password: 'login-pass-2' });
+    assert.equal(await auth.knownDevice('login5@test.local'), '', 'the same cookie no longer counts');
+    stubs.jar.set(auth.DEVICE_COOKIE, auth.deviceToken('login5@test.local', (await findUserByEmail('login5@test.local')).token_version));
+    assert.ok(await auth.knownDevice('login5@test.local'), 'a cookie from after the reset does');
+    await setUserDisabled(teacher.uid, true, { actorId: owner.uid });
+    assert.equal(await auth.knownDevice('login5@test.local'), '', 'a disabled account has no known browser');
+    stubs.jar.clear();
   });
 
   it('signs in with the right password and sets a session for the user workspace', async () => {
