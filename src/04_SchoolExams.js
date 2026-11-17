@@ -189,6 +189,63 @@ LMS.schoolExams = (function () {
   };
 })();
 
+/**
+ * School exam schedule writes (SchoolExams rows). Validation / D-day views stay on
+ * LMS.schoolExams; this factory owns create/update/delete against the table.
+ * ctx: table, saveTable, now, nextIds. Callers run inside the service transaction.
+ */
+LMS.createSchoolExamWrites = function (ctx) {
+  var table = ctx.table;
+  var saveTable = ctx.saveTable;
+
+  function saveSchoolExam(data) {
+    var input = LMS.schoolExams.validate(data);
+    var rows = table('SchoolExams');
+    var key = LMS.schoolExamKey(input);
+    var ts = ctx.now();
+    var row = input.school_exam_id ? LMS.findById(rows, 'school_exam_id', input.school_exam_id) : null;
+    if (input.school_exam_id && !row) throw new Error('시험 일정을 찾을 수 없습니다.');
+    var clash = rows.filter(function (r) {
+      return LMS.schoolExamKey(r) === key && r !== row;
+    })[0];
+    if (row && clash) throw new Error('같은 학교·학년의 같은 시험이 이미 있습니다.');
+    if (!row) row = clash || null;
+    if (row) {
+      Object.keys(input).forEach(function (k) {
+        if (k !== 'school_exam_id') row[k] = input[k];
+      });
+      row.updated_at = ts;
+    } else {
+      row = Object.assign({}, input, {
+        school_exam_id: ctx.nextIds('SCX', 1)[0],
+        created_at: ts,
+        updated_at: ts
+      });
+      rows.push(row);
+    }
+    saveTable('SchoolExams', rows);
+    return row;
+  }
+
+  function saveSchoolExamsBatch(list) {
+    return (list || []).map(function (item) { return saveSchoolExam(item); });
+  }
+
+  function deleteSchoolExam(id) {
+    var rows = table('SchoolExams');
+    var next = rows.filter(function (r) { return LMS.toStr(r.school_exam_id) !== LMS.toStr(id); });
+    if (next.length === rows.length) throw new Error('시험 일정을 찾을 수 없습니다.');
+    saveTable('SchoolExams', next);
+    return true;
+  }
+
+  return {
+    saveSchoolExam: saveSchoolExam,
+    saveSchoolExamsBatch: saveSchoolExamsBatch,
+    deleteSchoolExam: deleteSchoolExam
+  };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = LMS;
 }

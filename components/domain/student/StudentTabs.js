@@ -13,7 +13,6 @@ import RangePicker, { RANGES } from '@/components/ui/RangePicker';
 import Field from '@/components/ui/Field';
 import ClassChangeDialog, { openRegularClasses } from './ClassChangeDialog';
 import { CopyButton, QuickCounsel } from './CounselingTab';
-import LMS from '../../../src/00_Core.js';
 
 /** Add a regular class to the student (추가 수강, or the first class for a 미배정 student). */
 function AssignClassModal({ studentId, exceptIds, onClose, onDone }) {
@@ -538,10 +537,9 @@ export function HomeworkTab({ studentId }) {
                         <td data-label="숙제">
                           <div className="cluster" style={{ alignItems: 'center' }}>
                             {row.items.map((it) => {
-                              const tone = LMS.isHomeworkDone(it.status) ? 'ok' : it.status === 'E' || it.status === 'F' ? 'danger' : it.status === '미확인' ? 'muted' : 'warn';
                               const busy = savingId === it.item_id;
                               return (
-                                <label key={it.item_id || it.title} className={'tag ' + tone} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                <label key={it.item_id || it.title} className={'tag ' + (it.tone || 'muted')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                                   <span>{it.title}{it.scope === 'student' ? ' · 개인' : ''}</span>
                                   <select
                                     className="grade-select"

@@ -29,30 +29,75 @@ const trendRate = (api, classId) => api.getClassTrend(classId, 1).months[0].home
 const trendAverage = (api, classId) => api.getClassTrend(classId, 1).months[0].homework_average;
 const logRow = (api, classId, date) => api.getClassHomeworkLog(classId, MONTH).rows.find((r) => r.date === date);
 
+describe('숙제 통계 (LMS.homeworkStats)', () => {
+  it('returns 숙제 완료율, 숙제 평균 점수, and tone on each cell', () => {
+    assert.deepEqual(LMS.homeworkStats([{ status: 'A' }, { status: 'F' }, { status: 'A' }]), {
+      cells: [
+        { status: 'A', tone: 'ok' },
+        { status: 'F', tone: 'danger' },
+        { status: 'A', tone: 'ok' }
+      ],
+      done: 2,
+      checked: 3,
+      rate: 67,
+      average: 83
+    });
+    assert.deepEqual(LMS.homeworkStats([{ status: 'A' }, { status: 'B' }, { status: 'C' }, { status: 'D' }]), {
+      cells: [
+        { status: 'A', tone: 'ok' },
+        { status: 'B', tone: 'warn' },
+        { status: 'C', tone: 'warn' },
+        { status: 'D', tone: 'warn' }
+      ],
+      done: 1,
+      checked: 4,
+      rate: 25,
+      average: 84
+    });
+    assert.deepEqual(LMS.homeworkStats([{ status: '완료' }, { status: '미완료' }, { status: '' }]), {
+      cells: [
+        { status: '완료', tone: 'ok' },
+        { status: '미완료', tone: 'danger' },
+        { status: '', tone: 'muted' }
+      ],
+      done: 1,
+      checked: 2,
+      rate: 50,
+      average: 75
+    });
+    assert.deepEqual(LMS.homeworkStats([]), { cells: [], done: 0, checked: 0, rate: null, average: null });
+    assert.deepEqual(LMS.homeworkStats(undefined), { cells: [], done: 0, checked: 0, rate: null, average: null });
+  });
+
+  it('differs 숙제 완료율 from 숙제 평균 점수 when students got B–D', () => {
+    const stats = LMS.homeworkStats([{ status: 'B' }, { status: 'B' }, { status: 'C' }]);
+    assert.equal(stats.rate, 0);
+    assert.equal(stats.average, 86);
+  });
+});
+
+describe('숙제 grade tone (LMS.homeworkGradeTone)', () => {
+  it('maps A→ok, B–D→warn, E·F→danger, empty→muted', () => {
+    assert.deepEqual(
+      ['A', 'B', 'C', 'D', 'E', 'F', '', '미확인', '완료', '미완료'].map(LMS.homeworkGradeTone),
+      ['ok', 'warn', 'warn', 'warn', 'danger', 'danger', 'muted', 'muted', 'ok', 'danger']
+    );
+  });
+});
+
 describe('LMS.homeworkRate', () => {
   it('is the share of graded items that are A, and null when nothing was checked', () => {
     assert.deepEqual(LMS.homeworkRate([{ status: 'A' }, { status: 'F' }, { status: 'A' }]), { done: 2, checked: 3, rate: 67 });
-    assert.deepEqual(LMS.homeworkRate([{ status: 'A' }, { status: 'B' }, { status: 'C' }, { status: 'D' }]), { done: 1, checked: 4, rate: 25 });
     assert.deepEqual(LMS.homeworkRate([{ status: '완료' }, { status: '미완료' }, { status: '' }]), { done: 1, checked: 2, rate: 50 });
     assert.deepEqual(LMS.homeworkRate([]), { done: 0, checked: 0, rate: null });
-    assert.deepEqual(LMS.homeworkRate(undefined), { done: 0, checked: 0, rate: null });
   });
 });
 
 describe('숙제 평균 점수 (LMS.homeworkAverage)', () => {
   it('averages item points over graded items, and is null when nothing was checked', () => {
     assert.equal(LMS.homeworkAverage([{ status: 'A' }, { status: 'F' }, { status: 'A' }]), 83);
-    assert.equal(LMS.homeworkAverage([{ status: 'A' }, { status: 'B' }, { status: 'C' }, { status: 'D' }]), 84);
     assert.equal(LMS.homeworkAverage([{ status: 'E' }, { status: '' }]), 59);
-    assert.equal(LMS.homeworkAverage([{ status: '완료' }, { status: '미완료' }]), 75);
     assert.equal(LMS.homeworkAverage([]), null);
-    assert.equal(LMS.homeworkAverage(undefined), null);
-  });
-
-  it('differs from 숙제 완료율 when students got B–D', () => {
-    const cells = [{ status: 'B' }, { status: 'B' }, { status: 'C' }];
-    assert.equal(LMS.homeworkRate(cells).rate, 0);
-    assert.equal(LMS.homeworkAverage(cells), 86);
   });
 });
 
@@ -160,8 +205,8 @@ describe('숙제 완료율 across screens', () => {
     assert.equal(row.average, 100);
     assert.equal(row.checked, true);
     assert.deepEqual(row.cells[s.student_id], {
-      done: 1, total: 2, checked: 1, missing: [], replace_class: false, letter: 'A',
-      grades: [{ title: 'p1', grade: 'A' }, { title: 'p2', grade: '' }]
+      done: 1, total: 2, checked: 1, missing: [], replace_class: false, letter: 'A', tone: 'ok',
+      grades: [{ title: 'p1', grade: 'A', tone: 'ok' }, { title: 'p2', grade: '', tone: 'muted' }]
     });
     assert.equal(api.getClassOverview(a.class_id).month.homework_rate, 100);
     assert.equal(trendRate(api, a.class_id), 100);

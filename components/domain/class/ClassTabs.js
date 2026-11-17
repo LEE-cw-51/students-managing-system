@@ -13,7 +13,7 @@ import ClassChangeDialog, { openRegularClasses } from '@/components/domain/stude
 import { api, useApi } from '@/lib/client-api';
 import { addDays, dateRange, formatDate, percent, points as pointsLabel, relativeDay, score, shortDate, timeSpan } from '@/lib/format';
 import RangePicker, { RANGES } from '@/components/ui/RangePicker';
-import LMS from '../../../src/00_Core.js';
+
 function textbookLine(cls) {
   const past = (cls.textbook_timeline || []).filter((h) => !h.current);
   return (
@@ -144,16 +144,11 @@ function PlanLine({ label, plan }) {
 
 // ---------------------------------------------------------------- 숙제
 
-function gradeTone(letter) {
-  if (!letter) return 'unchecked';
-  return LMS.isHomeworkDone(letter) ? 'full' : letter === 'E' || letter === 'F' ? 'none' : 'part';
-}
-
 function HwCell({ cell, who, open, onToggle }) {
   if (!cell) return <span className="muted">-</span>;
   const text = cell.checked ? cell.letter : '미입력';
   return (
-    <button type="button" className={'hw-cell ' + gradeTone(cell.checked ? cell.letter : '')} aria-haspopup="dialog" aria-expanded={open}
+    <button type="button" className={'hw-cell ' + (cell.tone || 'muted')} aria-haspopup="dialog" aria-expanded={open}
       aria-label={`${who} ${text}, 항목별 등급 보기`} onClick={(e) => onToggle(e.currentTarget)}>{text}</button>
   );
 }
@@ -208,7 +203,7 @@ function GradePopover({ anchor, title, cell, onClose }) {
       {cell.replace_class ? <span className="hint">반 숙제 제외 · 개인 숙제만</span> : null}
       <ul>
         {(cell.grades || []).map((g, i) => (
-          <li key={i}><span>{g.title}</span><span className={'hw-cell ' + gradeTone(g.grade)}>{g.grade || '미입력'}</span></li>
+          <li key={i}><span>{g.title}</span><span className={'hw-cell ' + (g.tone || 'muted')}>{g.grade || '미입력'}</span></li>
         ))}
       </ul>
     </div>
@@ -294,7 +289,7 @@ export function HomeworkTab({ classId }) {
                           <div className="hw-card-missing">
                             <span className="hint">미완료(A 아님) · 미입력</span>
                             {missing.map(({ s, cell }) => (
-                              <Link key={s.student_id} href={`/students/${s.student_id}?tab=homework`}>{s.name} <span className={'hw-cell ' + gradeTone(cell.checked ? cell.letter : '')}>{cell.checked ? cell.letter : '미입력'}</span></Link>
+                              <Link key={s.student_id} href={`/students/${s.student_id}?tab=homework`}>{s.name} <span className={'hw-cell ' + (cell.tone || 'muted')}>{cell.checked ? cell.letter : '미입력'}</span></Link>
                             ))}
                           </div>
                         ) : null}

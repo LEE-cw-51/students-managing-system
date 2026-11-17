@@ -360,12 +360,12 @@ button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-we
 .hw-matrix th.sticky { background: var(--surface-sunken); z-index: 2; }
 .grade-select { width: auto; min-width: 58px; min-height: 32px; padding: 2px 6px; }
 .hw-cell { display: inline-block; min-width: 40px; padding: 2px 6px; border-radius: 6px; font-size: 12px; font-weight: 700; }
-.hw-cell.full { background: var(--ok-soft); color: var(--ok); }
-.hw-cell.part { background: var(--warn-soft); color: var(--warn); }
-.hw-cell.none { background: var(--bad-soft); color: var(--bad); }
-.hw-cell.unchecked { color: var(--ink-2); font-weight: 400; }
+.hw-cell.ok { background: var(--ok-soft); color: var(--ok); }
+.hw-cell.warn { background: var(--warn-soft); color: var(--warn); }
+.hw-cell.danger { background: var(--bad-soft); color: var(--bad); }
+.hw-cell.muted { color: var(--ink-2); font-weight: 400; }
 button.hw-cell { border: 1px solid transparent; font-family: inherit; line-height: 1.5; cursor: pointer; }
-button.hw-cell.unchecked { background: transparent; }
+button.hw-cell.muted { background: transparent; }
 button.hw-cell:hover, button.hw-cell[aria-expanded="true"] { border-color: currentColor; }
 button.hw-cell:focus-visible { outline: none; box-shadow: var(--focus); }
 .hw-matrix td.hw-check { white-space: nowrap; font-size: 13px; }

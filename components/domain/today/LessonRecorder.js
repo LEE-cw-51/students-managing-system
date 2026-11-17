@@ -292,6 +292,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
   const save = async () => {
     setError('');
     const s = form.session;
+    // Client checks below are UX focus only; save rules live in saveTodaySession (10_ClassDay).
     if (s.test_on && !String(s.test_max_score).trim()) {
       setError('테스트 만점을 입력해 주세요.');
       return focusClassMax();
@@ -346,6 +347,7 @@ function Editor({ data, onSaved, onGoDate, onGuard }) {
     }
     setSaving(true);
     try {
+      // Thin adapter: form → saveTodaySession payload (no extra domain branches here).
       await api('saveTodaySession', {
         lesson_date: data.date,
         class_id: cls.class_id,

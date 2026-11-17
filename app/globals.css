@@ -67,6 +67,7 @@
   --scrim: rgba(var(--shadow-rgb), 0.4);
   --scrim-strong: rgba(var(--shadow-rgb), 0.42);
   --focus-color: rgba(30, 107, 82, 0.32);
+  --focus: 0 0 0 3px var(--focus-color);
 
   /* Shape */
   --radius: 14px;
