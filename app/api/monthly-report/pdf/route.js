@@ -28,6 +28,9 @@ export async function POST(req) {
   if (!studentId || !year || !month) {
     return NextResponse.json({ ok: false, error: '학생, 연도, 월을 입력해 주세요.' }, { status: 400 });
   }
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return NextResponse.json({ ok: false, error: '연도와 월을 올바르게 입력해 주세요.' }, { status: 400 });
+  }
   if (!reportText) {
     return NextResponse.json({ ok: false, error: 'PDF로 내보낼 보고서 내용이 없습니다.' }, { status: 400 });
   }

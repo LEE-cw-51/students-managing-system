@@ -47,7 +47,10 @@ async function main() {
     await sql.end();
     return;
   }
-  seedDemo(LMS.createService(store));
+  const service = LMS.createService(store);
+  // Stamp the schema version first: data without it is read as v1 and refused by ensureSchema.
+  service.ensureSchema();
+  seedDemo(service);
   for (const name of Object.keys(LMS.TABLES)) {
     await sql`
       insert into lms.kv (workspace_id, name, rows, updated_at)

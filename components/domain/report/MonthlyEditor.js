@@ -99,7 +99,7 @@ export default function MonthlyEditor({ row, year, month, prev, next, onNavigate
             <button type="button" className="btn secondary" onClick={copy} disabled={!text}>복사</button>
             <button type="button" className="btn secondary" onClick={pdf} disabled={!text || !!busy}>{busy === 'pdf' ? 'PDF 만드는 중…' : 'PDF 저장'}</button>
             {locked ? (
-              <button type="button" className="btn secondary" onClick={unconfirm} disabled={!!busy}>확정 취소</button>
+              <button type="button" className="btn secondary" onClick={unconfirm} disabled={!!busy || !saved}>확정 취소</button>
             ) : (
               <>
                 <button type="button" className="btn secondary" onClick={() => save('임시')} disabled={!text || !!busy}>임시 저장</button>

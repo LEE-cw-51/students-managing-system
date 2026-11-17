@@ -66,8 +66,13 @@ export async function POST(req) {
     return fail(3);
   }
   if (!result) return fail(1);
-  await clearLoginAttempts(ip, email, { device });
-  await completeSignIn(result.user, result.workspaceId);
+  try {
+    await clearLoginAttempts(ip, email, { device });
+    await completeSignIn(result.user, result.workspaceId);
+  } catch (e) {
+    console.error('login failed after password check', e);
+    return fail(3);
+  }
   if (json) return NextResponse.json({ ok: true });
   return new NextResponse(null, { status: 303, headers: { Location: next || '/' } });
 }
