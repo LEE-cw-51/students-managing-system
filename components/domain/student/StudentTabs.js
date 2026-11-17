@@ -406,7 +406,7 @@ export function LessonsTab({ studentId, today }) {
             <span>출석 <strong>{d.counts.present}</strong></span>
             <span>결석 <strong style={d.counts.absent ? { color: 'var(--bad)' } : undefined}>{d.counts.absent}</strong></span>
             <span>보강 <strong>{d.counts.makeup}</strong></span>
-            <span title="지난 수업일 중 기록 없음">미입력 <strong style={d.counts.missing ? { color: 'var(--brand)' } : undefined}>{d.counts.missing}</strong></span>
+            <span title="지난 수업일 중 기록 없음">미입력 <strong style={d.counts.missing ? { color: 'var(--warn)' } : undefined}>{d.counts.missing}</strong></span>
           </div>
         )}
       </Async>
