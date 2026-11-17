@@ -404,9 +404,9 @@ export function LessonsTab({ studentId, today }) {
           <div className="sd-summary" aria-label={`${m}월 출결 집계`}>
             <span>출석률 <strong>{percent(d.attendance_rate)}</strong></span>
             <span>출석 <strong>{d.counts.present}</strong></span>
-            <span>결석 <strong style={d.counts.absent ? { color: 'var(--red)' } : undefined}>{d.counts.absent}</strong></span>
+            <span>결석 <strong style={d.counts.absent ? { color: 'var(--bad)' } : undefined}>{d.counts.absent}</strong></span>
             <span>보강 <strong>{d.counts.makeup}</strong></span>
-            <span title="지난 수업일 중 기록 없음">미입력 <strong style={d.counts.missing ? { color: 'var(--terracotta)' } : undefined}>{d.counts.missing}</strong></span>
+            <span title="지난 수업일 중 기록 없음">미입력 <strong style={d.counts.missing ? { color: 'var(--brand)' } : undefined}>{d.counts.missing}</strong></span>
           </div>
         )}
       </Async>

@@ -1,18 +1,78 @@
 /* Base tokens and primitives shared by the login page and the app (app/(lms)/app.css builds on these). */
 
+/*
+ * Design tokens. Every color, shadow and focus ring in the app comes from here; components never write a
+ * color of their own. Names say what a value is for (surface, accent, bad), not what it looks like, so a new
+ * palette changes only this block. Dark values go in the [data-theme="dark"] block when the dark theme is made.
+ */
 :root {
+  /* Page and surfaces */
+  --bg: #f3efe6;                      /* page background */
+  --surface: #fff;                    /* inputs, tables, cards inside the page */
+  --card: #fffdf8;                    /* .card */
+  --surface-sunken: #faf7f1;          /* table heads, quoted text, previews */
+  --surface-hover: #fbf8f2;           /* hovered table row */
+  --surface-faint: #faf8f3;           /* empty calendar day */
+  --topbar-bg: rgba(243, 239, 230, 0.94);
+  --bg-fade: rgba(243, 239, 230, 0);  /* --bg at zero alpha, for overflow fades */
+  --float-bg: rgba(255, 253, 248, 0.97);
+
+  /* Text and lines */
   --ink: #1c2430;
-  --muted: #5c6777;
+  --ink-2: #5c6777;                   /* secondary text, labels */
+  --ink-3: #8a94a3;                   /* scheduled, not yet happened */
   --line: #e4ddd2;
-  --paper: #f3efe6;
-  --card: #fffdf8;
-  --navy: #1b4f72;
-  --navy-2: #163e59;
-  --terracotta: #c45c26;
-  --green: #2f6f4e;
-  --red: #a33b32;
-  --shadow: 0 1px 2px rgba(28, 36, 48, 0.06);
+  --track: #efe9de;                   /* progress and score bar track */
+  --tag-muted: #ece8e0;
+  --skeleton-1: #ece7dd;
+  --skeleton-2: #f5f1e9;
+
+  /* Accent: links, primary buttons, selection */
+  --accent: #1b4f72;
+  --accent-strong: #163e59;
+  --accent-soft: #e8eef4;
+  --on-accent: #fff;                  /* text on --accent, --ink, --bad, --ok, --warn fills */
+  --brand: #c45c26;                   /* logo mark, active nav marker */
+  --brand-soft: #f8e3d6;
+
+  /* State */
+  --ok: #2f6f4e;
+  --ok-soft: #dcefe4;
+  --warn: #8a6100;
+  --warn-soft: #fbefcf;
+  --warn-line: #ecd9a5;
+  --bad: #a33b32;
+  --bad-soft: #f6dedb;
+  --bad-line: #e6c2bd;
+
+  /* Sidebar */
+  --side-bg: #163e59;
+  --side-ink: #eef5fb;
+  --side-ink-2: #d5e2ec;
+  --side-ink-strong: #fff;
+  --side-hover: rgba(255, 255, 255, 0.1);
+  --side-active: rgba(255, 255, 255, 0.14);
+  --side-line: rgba(255, 255, 255, 0.16);
+
+  /* Toast (dark chip) controls */
+  --toast-btn: rgba(255, 255, 255, 0.18);
+  --toast-btn-hover: rgba(255, 255, 255, 0.28);
+  --toast-btn-line: rgba(255, 255, 255, 0.5);
+
+  /* Depth */
+  --shadow-rgb: 28, 36, 48;           /* rgba(var(--shadow-rgb), alpha) */
+  --shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.06);
+  --shadow-drawer: 0 0 40px rgba(0, 0, 0, 0.3);
+  --scrim: rgba(var(--shadow-rgb), 0.4);
+  --scrim-strong: rgba(var(--shadow-rgb), 0.42);
+  --focus-color: rgba(27, 79, 114, 0.28);
+
+  /* Shape */
   --radius: 10px;
+}
+
+/* Dark theme: tokens only, filled in later. */
+:root[data-theme="dark"] {
 }
 
 * { box-sizing: border-box; }
@@ -22,7 +82,7 @@ body {
   font-size: 15px;
   line-height: 1.55;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--bg);
 }
 
 .display {
@@ -31,17 +91,17 @@ body {
   letter-spacing: -0.02em;
   line-height: 1.35;
 }
-.muted { color: var(--muted); font-size: 13px; }
+.muted { color: var(--ink-2); font-size: 13px; }
 
 .brand { display: flex; gap: 12px; align-items: center; margin-bottom: 28px; }
 .brand-mark {
   width: 40px; height: 40px; border-radius: 12px; flex: none;
-  background: var(--terracotta); color: white;
+  background: var(--brand); color: var(--on-accent);
   display: grid; place-items: center; font-weight: 700;
   font-family: "Gowun Batang", "Noto Sans KR", serif;
 }
 .brand strong { display: block; font-size: 18px; font-weight: 700; }
-.brand span { font-size: 12px; color: #d5e2ec; }
+.brand span { font-size: 12px; color: var(--side-ink-2); }
 
 .card {
   background: var(--card);
@@ -52,30 +112,30 @@ body {
 }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 140px; flex: 1; }
-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+label { font-size: 12px; color: var(--ink-2); font-weight: 600; }
 input, select, textarea, button { font: inherit; color: inherit; }
 input, select, textarea {
   width: 100%;
   border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-  background: white;
+  background: var(--surface);
 }
 input, select { min-height: 42px; }
 textarea { min-height: 84px; resize: vertical; }
 
 .btn {
   border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer;
-  background: var(--navy); color: white; font-weight: 600;
+  background: var(--accent); color: var(--on-accent); font-weight: 600;
   min-height: 42px;
 }
-.btn.secondary { background: white; color: var(--navy); border: 1px solid var(--line); }
-.btn.ghost { background: transparent; color: var(--navy); }
-.btn.danger { background: var(--red); }
-.btn.ok { background: var(--green); }
+.btn.secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--line); }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.danger { background: var(--bad); }
+.btn.ok { background: var(--ok); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 
 input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(27, 79, 114, 0.28);
+  box-shadow: var(--focus);
 }
 
 /* ---------- Login ---------- */
@@ -89,15 +149,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .password-row input { flex: 1; }
 .password-row .btn { width: auto; margin: 0; flex: 0 0 auto; }
 .login-error {
-  color: var(--red); font-size: 13px; margin-bottom: 10px;
-  background: #f8e3d6; border-radius: 12px; padding: 10px 12px;
+  color: var(--bad); font-size: 13px; margin-bottom: 10px;
+  background: var(--brand-soft); border-radius: 12px; padding: 10px 12px;
 }
 .oauth-title { margin: 0 0 10px; font-size: 17px; color: var(--ink); }
 .oauth-scope { margin: 0 0 12px; padding-left: 18px; font-size: 14px; line-height: 1.6; }
 .oauth-target { margin: 0 0 14px; }
 .oauth-warning {
   margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--ink);
-  background: #f8e3d6; border-radius: 12px; padding: 10px 12px;
+  background: var(--brand-soft); border-radius: 12px; padding: 10px 12px;
 }
 .oauth-actions { display: flex; gap: 8px; }
 .login-card .oauth-actions .btn[type="submit"] { flex: 1; margin-top: 0; }

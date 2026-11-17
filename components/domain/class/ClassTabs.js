@@ -471,7 +471,7 @@ function AssignModal({ classId, members, onClose, onDone }) {
             <tbody>
               {visible.length ? visible.map((s) => (
                 <tr key={s.id} className="clickable" onClick={() => toggle(s.id)} aria-selected={sel.selected.has(s.id)}
-                  style={sel.selected.has(s.id) ? { background: 'var(--navy-soft)' } : undefined}>
+                  style={sel.selected.has(s.id) ? { background: 'var(--accent-soft)' } : undefined}>
                   <td className="check-col"><input type="checkbox" checked={sel.selected.has(s.id)} onChange={() => toggle(s.id)} onClick={(e) => e.stopPropagation()} aria-label={`${s.name} 선택`} /></td>
                   <td><strong>{s.name}</strong> <span className="muted">{s.grade} · {s.school || '학교 미입력'}</span></td>
                   <td>{s.classes.length ? <span className="muted">{s.classes.join(', ')}</span> : <span className="tag warn">미배정</span>}</td>
