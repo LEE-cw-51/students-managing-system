@@ -292,9 +292,9 @@ LMS.createAgent = function (ctx) {
   /**
    * Server-only: store one chat turn. Creates the conversation on the first turn and a
    * pending proposal when the assistant asked for changes ([{ tool, args, preview? }]).
-   * A call that carries its preview (made by previewAgentAction during the turn) is stored as
-   * is: the data may have changed during the AI wait, and the turn must not be lost for it.
-   * Approval checks every change again against the data at that time.
+   * A call that carries its preview (from stageWrite / proposeConnectorWrite / propose) is
+   * stored as is — previewAgentAction is not run again. Direct callers without preview still
+   * get one check here (tests / legacy). Approval checks every change again at apply time.
    * data.source: LMS.AGENT_SOURCE_MCP for connector turns; anything else is the assistant chat.
    */
   function saveAgentTurn(data) {
@@ -315,7 +315,8 @@ LMS.createAgent = function (ctx) {
 
     var proposal = null;
     var calls = (Array.isArray(data.calls) ? data.calls : []).map(function (c) {
-      var preview = c.preview || previewAgentAction(c.tool, c.args);
+      // Attached preview wins: AI write turns preview once upstream (ai-propose).
+      var preview = c.preview ? c.preview : previewAgentAction(c.tool, c.args);
       return { tool: c.tool, label: LMS.agentActions.get(c.tool).label, args: preview.args, target: preview.target, before: preview.before, after: preview.after, text: preview.text };
     });
     if (calls.length) {

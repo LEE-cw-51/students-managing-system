@@ -99,7 +99,7 @@ export default function TaskForm({ date, task, onClose, onSaved }) {
         <Field label="메모">{(id) => <textarea id={id} rows={2} value={form.memo} onChange={(e) => set('memo', e.target.value)} />}</Field>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          {isEdit ? <button type="button" className="btn ghost" style={{ marginRight: 'auto', color: 'var(--red)' }} onClick={remove}>삭제</button> : null}
+          {isEdit ? <button type="button" className="btn ghost" style={{ marginRight: 'auto', color: 'var(--bad)' }} onClick={remove}>삭제</button> : null}
           <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : isEdit ? '저장' : '추가'}</button>
         </div>

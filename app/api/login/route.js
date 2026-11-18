@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { authenticate } from '../../../lib/accounts.js';
-import { completeSignIn, knownDevice } from '../../../lib/auth.js';
+import { authenticateBrowser, loginLimitMessage } from '../../../lib/identity.js';
 import { safeNext } from '../../../lib/safe-next.js';
-import { clientIp, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage } from '../../../lib/login-limit.js';
 import { guardPost } from '../../../lib/request-guard.js';
 
 export const runtime = 'nodejs';
@@ -41,36 +39,16 @@ export async function POST(req) {
     return loginPage(String(code));
   };
 
-  const ip = clientIp(req.headers);
-  const device = await knownDevice(email);
-  let gate;
-  try {
-    gate = await reserveLoginAttempt(ip, email, { device });
-  } catch (e) {
-    // The attempt could not be counted (no lms.login_attempts, database down): refuse, do not skip the limit.
-    console.error('login limit failed', e);
-    return fail(3);
-  }
-  if (!gate.ok) {
-    if (json) {
-      const retryAfter = String(Math.max(1, Math.ceil(gate.retryAfterMs / 1000)));
-      return NextResponse.json({ ok: false, error: loginLimitMessage(gate.retryAfterMs) }, { status: 429, headers: { 'Retry-After': retryAfter } });
+  const result = await authenticateBrowser({ email, password, headers: req.headers });
+  if (!result.ok) {
+    if (result.reason === 'limited') {
+      if (json) {
+        const retryAfter = String(Math.max(1, Math.ceil(result.retryAfterMs / 1000)));
+        return NextResponse.json({ ok: false, error: loginLimitMessage(result.retryAfterMs) }, { status: 429, headers: { 'Retry-After': retryAfter } });
+      }
+      return loginPage(`locked-${Math.max(1, Math.ceil(result.retryAfterMs / 60000))}`);
     }
-    return loginPage(`locked-${Math.max(1, Math.ceil(gate.retryAfterMs / 60000))}`);
-  }
-  let result;
-  try {
-    result = await authenticate(email, password);
-  } catch (e) {
-    console.error('login failed', e);
-    return fail(3);
-  }
-  if (!result) return fail(1);
-  try {
-    await clearLoginAttempts(ip, email, { device });
-    await completeSignIn(result.user, result.workspaceId);
-  } catch (e) {
-    console.error('login failed after password check', e);
+    if (result.reason === 'bad_credentials') return fail(1);
     return fail(3);
   }
   if (json) return NextResponse.json({ ok: true });

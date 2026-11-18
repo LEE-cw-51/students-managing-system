@@ -28,6 +28,8 @@
 
 ## 수업 기록
 
+- **수업일 기록**: 하루 반 저장의 읽기·쓰기(`getTodayClassSession` / `saveTodaySession`)는 `src/10_ClassDay.js`만 합니다. 반 기록 ↔ Lessons 복사 규칙은 계속 `src/03_Sessions.js`입니다.
+- **수업 기록·반 세션** (`Lessons` / `ClassSessions`): 학생 수업 행·반 세션·공지 읽기·쓰기는 `src/14_Lessons.js`(`createLessons`)만 합니다. 복사 locality는 `src/03_Sessions.js`에 남고, 수업일 화면은 ClassDay가 lessons 포트를 호출합니다.
 - **반 기록(원본)과 학생 기록의 복사 필드**: 반 기록(`ClassSessions` 행)이 그날 반 값의 원본이고, 학생 수업 기록(`Lessons` 행)은 복사본을 가집니다. 복사와 역방향 반영은 `src/03_Sessions.js`만 합니다.
   - 진도는 개인 진도(`progress_own`)가 없는 학생에게, 숙제 글은 그 학생의 유효 숙제(반 공통 항목 + 개인 항목, `homework_replace_class`면 개인만)를 학생 기록에 복사합니다. 체크리스트가 없으면 학생 기록에 가장 많은 글을 씁니다.
   - **개별 공지**(`student_notice`)는 학생 기록에만 두고, 반 공지·학생 피드백(`special_note`)과 별개입니다.
@@ -37,14 +39,42 @@
   - 새 교재로 바꾸면 이전 교재는 새 시작일 전날에 끝나고, 교재를 비우면 입력한 끝내는 날에 끝납니다.
   - **교재 이력 표시** (`textbook_timeline`): 반 화면이 받는 교재 이력 모양입니다. 오래된 순으로 `label`(예: `개념원리 (2026-03-01 ~ 2026-06-30)`, 사용 중이면 `~ 사용 중`, 시작일이 없으면 `시작일 없음`)과 `current`(사용 중 여부)를 줍니다. 반 개요는 지난 교재만, 반 정보 수정은 전부 보여 주고, 둘 다 `label`을 그대로 씁니다. (`LMS.textbookTimeline`)
 - **학생 시험 통계**: 월간 보고서, 학생 개인 화면, 반 통계의 학생별 월 평균은 만점이 달라도 `(점수 ÷ 만점) × 100`입니다. 일일 보고서와 한 시험의 반 평균은 원점수입니다. 만점이 다른 날의 일일 보고서 반 평균은 비웁니다.
-- **숙제 완료**: 등급이 A인 숙제 칸일 때만입니다(예전 값 `완료`는 A로 봄). B–F는 모두 미완료이고(예전 값 `미완료`는 F), 미입력 칸은 완료도 미완료도 아닙니다. 숙제 기록의 완료 수·미완료 목록·칸 색, 학생 숙제의 미완료 목록, 학생 배지의 숙제 미완료 날, 수업 기록의 숙제 완료 수, 오늘 화면의 숙제 미완료 학생 수가 모두 `LMS.isHomeworkDone`을 씁니다.
-- **숙제 완료율** (%): 등급을 입력한 칸 중 숙제 완료(A) 칸의 비율입니다. 미입력 칸은 빼고, 숙제를 낸 날 그 반에 배정된 학생만 셉니다(지금 휴원·퇴원 여부는 보지 않음). 반·학생 개요, 통계, 숙제 기록, 강의 계획 AI 입력이 모두 `LMS.homeworkRate`를 씁니다.
-- **숙제 평균 점수** (점): 숙제 완료율과 같은 칸(등급을 입력한 칸, 그날 그 반 학생만)의 등급 점수 평균입니다. A 100, B 89, C 79, D 69, E 59, F 50(`LMS.ASSIGNMENT_POINTS`). 완료 여부가 아니라 얼마나 잘 했는지를 봅니다. 숙제 완료율 옆에 함께 보여 주고(반·학생 개요, 반 통계 추이, 숙제 기록 표, 학생 숙제 탭), 강의 계획 AI 입력에도 함께 넘깁니다. (`LMS.homeworkAverage`)
+- **숙제 항목·확인** (`HomeworkItems` / `HomeworkChecks`): 반·개인 숙제 목록, 확인 등급, 주간 숙제 현황, 확인일 계산은 `src/13_Homework.js`(`createHomework`)만 합니다. 반 기록 ↔ 숙제 글 복사는 계속 `src/03_Sessions.js`입니다. 수업일 화면은 ClassDay가 homework 포트를 호출합니다.
+- **숙제 완료**: 등급이 A인 숙제 칸일 때만입니다(예전 값 `완료`는 A로 봄). B–F는 모두 미완료이고(예전 값 `미완료`는 F), 미입력 칸은 완료도 미완료도 아닙니다. 숙제 기록의 완료 수·미완료 목록, 학생 숙제의 미완료 목록, 학생 배지의 숙제 미완료 날, 수업 기록의 숙제 완료 수, 오늘 화면의 숙제 미완료 학생 수가 모두 `LMS.isHomeworkDone`을 씁니다.
+- **숙제 완료율** (%): 등급을 입력한 칸 중 숙제 완료(A) 칸의 비율입니다. 미입력 칸은 빼고, 숙제를 낸 날 그 반에 배정된 학생만 셉니다(지금 휴원·퇴원 여부는 보지 않음). 반·학생 개요, 통계, 숙제 기록, 강의 계획 AI 입력이 모두 숙제 통계(`LMS.homeworkStats` / Views `homeworkStats_`)를 통해 씁니다.
+- **숙제 평균 점수** (점): 숙제 완료율과 같은 칸(등급을 입력한 칸, 그날 그 반 학생만)의 등급 점수 평균입니다. A 100, B 89, C 79, D 69, E 59, F 50(`LMS.ASSIGNMENT_POINTS`). 완료 여부가 아니라 얼마나 잘 했는지를 봅니다. 숙제 완료율 옆에 함께 보여 주고(반·학생 개요, 반 통계 추이, 숙제 기록 표, 학생 숙제 탭), 강의 계획 AI 입력에도 함께 넘깁니다.
+- **숙제 통계** (`LMS.homeworkStats`): 확인 칸 묶음에서 숙제 완료율·숙제 평균 점수와 칸별 `tone`을 한 번에 줍니다. 저장소에서 칸을 모을 때는 Views의 `homeworkStats_`가 같은 모양을 만듭니다. 반·학생 숙제 화면의 칸·항목에도 `tone`을 붙이며, 화면은 이 값만 칠합니다(`LMS.homeworkGradeTone`: A `ok`, B–D `warn`, E·F `danger`, 미입력 `muted`).
 - **출석률** (%): 수업 기록 중 `결석`이 아닌 기록의 비율입니다. 기록이 없으면 비웁니다. 반·학생 개요, 반 통계, 강의 계획 AI 입력(학생별·반 전체)이 `LMS.attendanceRate`를 씁니다. 학생 출결 달력은 보강·미기록 칸이 섞여 있어 출석·결석 칸 수로 따로 셉니다.
 - **과제 이행률** (A–F): 항목 등급 점수(A 100, B 89, C 79, D 69, E 59, F 50)의 평균을 구간으로 다시 매긴 글자입니다. 숙제 완료(A만)와는 다른 값입니다. 숙제 평균 점수와 같은 점수표를 쓰지만, 기간 전체가 아니라 수업일 하루의 학생 한 명 숙제를 글자로 매긴 값이고 수업 기록에 저장됩니다. 90 이상 A, 80 이상 B, 70 이상 C, 60 이상 D, 51 이상 E, 50 이하는 F. 수업 기록과 일일 보고서에 씁니다.
 
+## 상담일지
+
+- **상담일지** (`CounselingNotes` 행): 읽기·쓰기·목록·삭제와 후속 할 일 연동은 `src/11_Counseling.js`(`createCounseling`)만 합니다. 직접 만든 할 일 수정·삭제는 서비스 할 일 칸에 남습니다.
+
+## 보강
+
+- **보강 일정** (`MakeupSessions` 행): 만들기·수정·취소와 제목 규칙은 `src/12_Makeup.js`(`createMakeup`)만 합니다. 달력 이벤트 조합(정규+보강)은 `src/20_Calendar.js`(`createCalendar`)가 맡습니다.
+
+## 학생·반
+
+- **학생** (`Students` 행): 목록·조회·만들기·수정·퇴원·학년 진급·일괄 상태는 `src/17_Students.js`(`createStudents`)만 합니다. 배정 생명주기 훅은 계속 `src/02_Assignments.js`입니다.
+- **반·구성원** (`Classes` 행과 날짜별 명단): 만들기·수정·종료·삭제·구성원은 `src/18_Classes.js`(`createClasses`)만 합니다. 배정·시험대비 연동 훅은 Assignments/ExamPeriods에 남습니다.
+
+## 보고서
+
+- **일일·월간 보고서**: 생성·저장·일괄 생성·월간 상태 목록·반 월간 통계(`getClassStats`)는 `src/15_Reports.js`(`createReports`)만 합니다. 수업·숙제·상담 데이터는 lessons/homework/counseling 포트를 읽습니다.
+
+## 확정 강의 계획·달력·설정·스키마·셸
+
+- **확정 강의 계획** (`ClassPlans` 행의 get/list/save/delete): `src/19_ClassPlans.js`(`createClassPlans`)만 합니다. 초안·분할·적용·휴강은 계속 `src/06_Plans.js`입니다.
+- **달력** (`getCalendar`): 정규 수업 이벤트와 보강 이벤트를 한 구간에 모아 주는 것은 `src/20_Calendar.js`(`createCalendar`)만 합니다.
+- **설정** (`Settings` 행): 읽기·병합 저장·키 단위 저장은 `src/21_Settings.js`(`createSettings`)만 합니다.
+- **스키마** (`ensureSchema` / `_Meta` 버전): 마이그레이션은 `src/22_Schema.js`(`createSchema`)만 합니다.
+- **셸 부트스트랩·룩업**: `getShellBootstrap`·`getLookups`는 `src/23_Shell.js`(`createShell`)만 합니다.
+
 ## 할 일
 
+- **할 일·하루 일정** (`Tasks` 행과 오늘 수업 할 일 목록): 직접 할 일 CRUD·하루 일정·수업 할 일 목록은 `src/16_Tasks.js`(`createTasks`)만 합니다. 상담 후속 할 일 행의 만들기·고치기는 `src/11_Counseling.js`에 남습니다.
 - **할 일** (`Tasks` 행): 예정일이 있는 일 한 건입니다. 상태는 `예정`, `완료`, `취소`입니다.
   - **출처**(`source`): `manual`(직접 추가) 또는 `counseling`(상담일지의 후속 할 일). 값이 없는 행은 `manual`로 봅니다. (`LMS.taskSource`)
 - **상담 후속 할 일 보호**: 상담일지에서 생긴 할 일은 할 일로는 고치거나 지울 수 없고 상담일지에서 바꿉니다. 서비스의 할 일 수정·삭제, AI 쓰기 동작, 오늘 화면의 수정 버튼이 모두 `LMS.isTaskEditable`(`LMS.assertTaskEditable`)을 씁니다. 상태(완료·취소)는 출처와 관계없이 바꿀 수 있습니다.
@@ -54,7 +84,7 @@
 
 ## AI 제안
 
-- **제안** (`AgentProposals` 행): AI 비서 대화나 Claude 커넥터가 요청한 변경 묶음입니다. 만들 때는 저장하지 않고 승인 대기(`pending`)에 올립니다. 만들기·반영·거절은 `lib/proposals.js`(`propose`, `apply`, `reject`)만 합니다.
+- **제안** (`AgentProposals` 행): AI 비서 대화나 Claude 커넥터가 요청한 변경 묶음입니다. 만들 때는 저장하지 않고 승인 대기(`pending`)에 올립니다. AI 화면(비서·MCP)의 쓰기 턴 호출 경로는 `lib/ai-propose.js`입니다(`stageWrite`, `proposeAssistantTurn`, `proposeConnectorWrite`, `apply`, `reject`). 쓰기 미리보기(`previewAgentAction`)는 논리 쓰기당 한 번(`previewWrite` / `stageWrite` 또는 `proposeConnectorWrite`)이고, `propose`·`saveAgentTurn`은 붙은 preview를 다시 검사하지 않습니다. 트랜잭션·호출자 강제는 `lib/proposals.js`(`propose`, `apply`, `reject`)가 맡고, HTTP `/api/agent/apply`·`reject`도 그쪽을 직접 부릅니다.
   - 상태는 `pending`(승인 대기), `applied`(반영), `rejected`(거절), `failed`(실패)입니다. `pending`이 아닌 제안을 **처리된 제안**이라고 합니다.
   - **출처**(`source`): `assistant`(앱의 AI 비서 대화) 또는 `mcp`(Claude 커넥터). 이 값이 없는 예전 행은 `[Claude 커넥터]` 대화 제목으로 구분합니다.
 - **반영**: 제안의 변경을 실행하고 다시 읽어 확인합니다. 제안마다 한 트랜잭션이라, 실패하면 그 제안의 변경만 되돌리고 `failed`와 실패 사유를 남깁니다. 여러 건은 오래된 제안부터 따로 반영합니다.
@@ -64,7 +94,7 @@
 ## 쓰기 모드
 
 - **쓰기 모드** (`mcp_write_mode`): Claude 커넥터가 쓰기 도구를 쓸 수 있는지입니다. `read_only`(조회만)와 `proposal`(승인 대기 제안) 둘뿐입니다. 예전 값 `direct`, `claude_approve`는 DB를 고치지 않고 읽을 때 `proposal`로 보고, 그 밖의 값은 `read_only`로 봅니다(`LMS.normalizeMcpWriteMode`). 설정을 저장할 때의 규칙은 `LMS.mcpWriteModeToStore` 한 곳에 있습니다. 어느 모드도 바로 저장하지 않고, 승인은 앱에서만 합니다([ADR-0002](docs/adr/0002-approval-only-in-app.md)).
-- **쓰기 정책**: 화면(`assistant` AI 비서, `mcp` Claude 커넥터)과 쓰기 모드를 받아 어떤 도구를 내놓는지, 모델에게 보이는 도구 설명, 승인 대기에 올린 뒤의 상태 문구, 지시문의 쓰기 규칙을 답합니다. `lib/write-policy.js`(`writePolicy`)만 정하고, AI 비서와 MCP 서버는 이 답을 그대로 씁니다. AI 비서는 모드가 없어 늘 `proposal`입니다.
+- **쓰기 정책**: 화면(`assistant` AI 비서, `mcp` Claude 커넥터)과 쓰기 모드를 받아 어떤 도구를 내놓는지, 모델에게 보이는 도구 설명, 승인 대기에 올린 뒤의 상태 문구, 지시문의 쓰기 규칙을 답합니다. 정책 값은 `lib/write-policy.js`(`writePolicy`)가 정하고, AI 비서·MCP는 `lib/ai-propose.js`를 통해 그 답을 씁니다. AI 비서는 모드가 없어 늘 `proposal`입니다.
   - 쓰기 도구 설명 앞의 `[승인 필요]`는 정책이 붙입니다. 쓰기 동작(`src/agent-actions/*`)의 설명에는 넣지 않습니다.
 
 ## AI 비서
@@ -75,7 +105,7 @@
 
 ## 시험대비 기간
 
-시험대비 기간(`ExamPeriods` 행)의 시험대비 반, 휴강 반, 복귀일은 `src/09_ExamPeriods.js`(`createExamPeriods`)만 답하고, `ExamPeriods` 행도 이 module만 고칩니다. 임시 배정(`StudentClasses` 행)은 반 배정 module(`src/02_Assignments.js`)만 쓰고, 임시 배정이나 그 기간의 정규 배정이 바뀌면 이 module에 알려 복귀일을 다시 계산하게 합니다.
+시험대비 기간(`ExamPeriods` 행)의 시험대비 반, 휴강 반, 복귀일은 `src/09_ExamPeriods.js`(`createExamPeriods`)만 답하고, `ExamPeriods` 행도 이 module만 고칩니다. 임시 배정(`StudentClasses` 행)은 반 배정 module(`src/02_Assignments.js`)만 씁니다. 임시 배정이나 그 기간의 정규 배정이 바뀌면 반 배정이 `onPlacementChanged`(복귀일 재계산 알림 port)로 알리고, createService가 두 module을 만든 뒤 그 알림을 `recomputeResume`에 연결합니다. 다니는 반/열린 정규 배정·반 구성원/수업 기록 대상은 합치지 않습니다([ADR-0001](docs/adr/0001-class-membership-two-concepts-two-rosters.md)).
 
 - **시험대비 반**: 반 종류가 `시험대비`이고 `exam_period_id`가 그 기간인 반입니다. 종료된 반도 포함합니다. (`classes`)
 - **기간 상태**: `예정`(시작 전), `진행 중`, `끝남`(날짜가 지났지만 마감 안 함), `마감`, `취소`입니다. (`state`)
@@ -88,7 +118,7 @@
 
 ## 학교 시험 일정
 
-학교 시험 일정(`SchoolExams` 행)의 입력 검사, D-day, 다가오는 시험 고르기는 `src/04_SchoolExams.js`(`LMS.schoolExams`)만 합니다.
+학교 시험 일정(`SchoolExams` 행)의 입력 검사, D-day, 다가오는 시험 고르기는 `src/04_SchoolExams.js`(`LMS.schoolExams`)만 합니다. 행 저장·일괄 저장·삭제는 같은 파일의 `createSchoolExamWrites`가 맡습니다.
 
 - **D-day 기준일**: 수학 시험일이 있으면 그날, 없으면 시험 시작일입니다. 복귀일(시험대비 기간)은 이와 달리 시험 마지막 날을 씁니다.
 - **시험 중**: 오늘이 시험 시작일부터 마지막 날 사이입니다. D-day 기준일 당일만 `D-day`로, 나머지 날은 `시험 중`으로 표시합니다.
@@ -107,8 +137,10 @@
 
 ## 계정과 로그인
 
+브라우저 로그인·세션 확인·기기 인식·시도 제한 칸의 호출 경로는 `lib/identity.js`입니다(`authenticateBrowser`, `acceptInviteAndSignIn`, `getSession`, `completeSignIn`, `knownDevice`, `loadSessionUser`, `loadGrantUser`). 쿠키·세션 원시 동작은 `lib/auth.js`, 칸 카운터는 `lib/login-limit.js`, 계정 행·비밀번호는 `lib/accounts.js`, HMAC은 `lib/signing.js`, 커넥터 토큰 발급은 `lib/oauth.js`가 맡습니다(커넥터의 사용자·`token_version` 검사는 같은 `loadGrantUser`).
+
 - **세션 버전** (`lms.users.session_version`): 로그인 쿠키에 담기는 그 사람의 번호입니다. 로그아웃, 비밀번호 변경·재설정, 계정 비활성화 때 올라가고, 번호가 다른 쿠키는 모든 기기에서 통과하지 않습니다.
 - **토큰 버전** (`lms.users.token_version`): Claude 커넥터의 코드와 토큰에 담기는 그 사람의 번호입니다(`uv`). 비밀번호 변경·재설정과 계정 비활성화 때만 올라갑니다. 로그아웃으로는 올라가지 않아서 커넥터는 유지됩니다. 작업공간의 `mcp_token_version`(연결 끊기(전체))과는 다른 값입니다.
 - **기기 쿠키** (`lms_device`): 이 브라우저가 어떤 이메일로 로그인한 적이 있다는 서명된 표시입니다(1년, 이메일은 해시로만). 로그인과 초대·재설정 링크 수락 때 남기고 로그아웃해도 지우지 않습니다. 남길 때의 토큰 버전이 함께 담겨, 비밀번호 변경·재설정이나 계정 비활성화 뒤에는 예전 쿠키가 기기로 인정되지 않습니다. 그 자체로는 로그인되지 않습니다.
 - **기기 id**: 기기 쿠키 값의 해시입니다. 브라우저마다 다릅니다. (`knownDevice`)
-- **로그인 시도 제한의 칸**(bucket): 15분 동안 시도를 세는 단위입니다. 처음 보는 브라우저는 IP(5회) → 이메일(10회) → 전체(50회) 순서로, 기기 쿠키가 그 이메일과 지금 토큰 버전에 맞는 브라우저는 기기 id(10회) → 전체로 셉니다. 맞는 비밀번호는 자기가 센 한 번(IP)이나 칸 전체(이메일, 기기)를 지웁니다. 횟수는 `lms.login_attempts`에 있고, 표가 없으면 로그인을 거절합니다. (`lib/login-limit.js`)
+- **로그인 시도 제한의 칸**(bucket): 15분 동안 시도를 세는 단위입니다. 처음 보는 브라우저는 IP(5회) → 이메일(10회) → 전체(50회) 순서로, 기기 쿠키가 그 이메일과 지금 토큰 버전에 맞는 브라우저는 기기 id(10회) → 전체로 셉니다. 맞는 비밀번호는 자기가 센 한 번(IP)이나 칸 전체(이메일, 기기)를 지웁니다. 횟수는 `lms.login_attempts`에 있고, 표가 없으면 로그인을 거절합니다. (`authenticateBrowser` → `lib/login-limit.js`)

@@ -1,8 +1,10 @@
 /**
  * 시험대비 기간 (ExamPeriods rows): which classes are the period's exam-prep classes, which regular
  * classes it suspends, and when each suspended class resumes. Every write to ExamPeriods rows goes
- * through here; placements (StudentClasses) are written only by the assignment module, which this
- * module calls. Terms follow GLOSSARY.md (시험대비 반, 휴강 반, 마지막 휴강일, 복귀일).
+ * through here; placements (StudentClasses) are written only by the assignment module.
+ * Resume dates: Assignments notifies via onPlacementChanged; createService binds that port to
+ * recomputeResume after both modules exist (Service is composition root, not a glue leak of the
+ * two roster concepts — ADR-0001). Terms follow GLOSSARY.md (시험대비 반, 휴강 반, 마지막 휴강일, 복귀일).
  * Server-only: reads tables, so it is not imported by the browser.
  */
 var LMS = (typeof LMS !== 'undefined') ? LMS : {};

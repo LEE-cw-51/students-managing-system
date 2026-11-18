@@ -8,6 +8,7 @@ const LMS = require('../src/01_Service.js');
 const { createMemoryStore } = require('./memory-store.js');
 const { isPublicApi } = require('../lib/store.js');
 const { PUBLIC_API } = require('../lib/public-api.js');
+const domains = require('../src/service-domains.js');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -45,12 +46,25 @@ describe('browser API allowlist', () => {
     });
     assert.deepEqual([...used].sort(), [...PUBLIC_API].sort());
     assert.equal(PUBLIC_API.size, 89);
+    assert.deepEqual([...PUBLIC_API].sort(), domains.publicApiNames().sort());
   });
 
   it('only lists real service functions', () => {
     PUBLIC_API.forEach((n) => {
       assert.equal(typeof api[n], 'function', n);
       assert.equal(isPublicApi(api, n), true, n);
+    });
+  });
+
+  it('exposes domain bag seams from shared maps', () => {
+    Object.keys(domains.ASSIGNMENTS_BAG).forEach((n) => {
+      assert.equal(typeof api[n], 'function', n);
+    });
+    Object.keys(domains.EXAM_PERIODS_BAG).forEach((n) => {
+      assert.equal(typeof api[n], 'function', n);
+    });
+    domains.CLASS_DAY_PUBLIC.forEach((n) => {
+      assert.equal(typeof api[n], 'function', n);
     });
   });
 

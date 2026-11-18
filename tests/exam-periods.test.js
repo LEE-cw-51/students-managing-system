@@ -18,9 +18,9 @@ function moduleOver(tables, today = '2026-11-05') {
     now: () => today + 'T09:00:00',
     nextIds: (prefix, n) => Array.from({ length: n || 1 }, () => prefix + '_' + (++seq))
   };
-  let periods = null;
-  const asg = LMS.createAssignments({ ...base, resumeStale: (id) => periods.recomputeResume(id) });
-  periods = LMS.createExamPeriods({
+  const placementResume = { recompute: null, notify: (id) => { if (placementResume.recompute) placementResume.recompute(id); } };
+  const asg = LMS.createAssignments({ ...base, onPlacementChanged: (id) => placementResume.notify(id) });
+  const periods = LMS.createExamPeriods({
     ...base,
     assignments: asg,
     requireStudent: (id) => {
@@ -29,6 +29,7 @@ function moduleOver(tables, today = '2026-11-05') {
       return row;
     }
   });
+  placementResume.recompute = (id) => periods.recomputeResume(id);
   return { periods, asg, tables };
 }
 

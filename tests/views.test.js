@@ -39,7 +39,7 @@ describe('class workspace views', () => {
     assert.ok(log.rows.every((r, i, all) => i === 0 || all[i - 1].date > r.date), 'newest first');
   });
 
-  it('homework log reports per-student completion', () => {
+  it('homework log reports per-student completion with board tone', () => {
     const { api, demo } = seeded();
     const log = api.getClassHomeworkLog(demo.classes[1].class_id, { start: '2026-10-01', end: TODAY });
     assert.equal(log.students.length, 4);
@@ -47,6 +47,8 @@ describe('class workspace views', () => {
     const cell = checked.cells[log.students[0].student_id];
     assert.equal(cell.total, 2);
     assert.ok(cell.done >= 0 && cell.done <= 2);
+    assert.ok(['ok', 'warn', 'danger', 'muted'].includes(cell.tone));
+    cell.grades.forEach((g) => assert.ok(['ok', 'warn', 'danger', 'muted'].includes(g.tone)));
   });
 
   it('tests summarise scores and detail sorts by score', () => {

@@ -706,6 +706,18 @@ LMS.isHomeworkDone = function (grade) {
 };
 
 /**
+ * Board tone for one homework grade letter (or empty / 미확인).
+ * Screens paint this as-is: ok (A), warn (B–D), danger (E·F), muted (미입력).
+ */
+LMS.homeworkGradeTone = function (grade) {
+  var code = LMS.homeworkGrade(grade);
+  if (!code) return 'muted';
+  if (LMS.isHomeworkDone(code)) return 'ok';
+  if (code === 'E' || code === 'F') return 'danger';
+  return 'warn';
+};
+
+/**
  * 숙제 완료율 over homework check rows. Ungraded cells have no row and are left out;
  * callers pass only rows of students who were in the item's class on its lesson date.
  * rate is the rounded share (%) of graded items that are 숙제 완료 (A).
@@ -737,6 +749,25 @@ LMS.homeworkAverage = function (cells) {
     sum += LMS.ASSIGNMENT_POINTS[code];
   });
   return checked ? Math.round(sum / checked) : null;
+};
+
+/**
+ * 숙제 통계 for a set of check rows: 숙제 완료율, 숙제 평균 점수, and a tone on each cell.
+ * Prefer this over calling homeworkRate / homeworkAverage / homeworkGradeTone separately.
+ */
+LMS.homeworkStats = function (cells) {
+  var list = (cells || []).map(function (c) {
+    var row = c && typeof c === 'object' ? c : { status: c };
+    return Object.assign({}, row, { tone: LMS.homeworkGradeTone(row.status) });
+  });
+  var rateInfo = LMS.homeworkRate(list);
+  return {
+    cells: list,
+    done: rateInfo.done,
+    checked: rateInfo.checked,
+    rate: rateInfo.rate,
+    average: LMS.homeworkAverage(list)
+  };
 };
 
 /** 출석률 (%): lesson records that are not 결석 over all records. null when there are none. */

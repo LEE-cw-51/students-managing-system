@@ -97,7 +97,7 @@ export default function SchoolExamForm({ initial, schools, onClose, onSaved }) {
         </div>
         {error ? <div className="error-box" role="alert">{error}</div> : null}
         <div className="form-actions">
-          {isEdit ? <button type="button" className="btn ghost" style={{ marginRight: 'auto', color: 'var(--red)' }} onClick={remove}>삭제</button> : null}
+          {isEdit ? <button type="button" className="btn ghost" style={{ marginRight: 'auto', color: 'var(--bad)' }} onClick={remove}>삭제</button> : null}
           <ModalCancel />
           <button type="submit" className="btn" disabled={saving}>{saving ? '저장 중…' : '저장'}</button>
         </div>

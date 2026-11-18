@@ -180,7 +180,7 @@ function McpConnections({ tokenVersion }) {
   };
   return (
     <div className="field">
-      <span id={headId} style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>연결된 커넥터</span>
+      <span id={headId} style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600 }}>연결된 커넥터</span>
       <div aria-labelledby={headId} role="group">
         <Async state={state}>
           {(list) => (list.length ? (
