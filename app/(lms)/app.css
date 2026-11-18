@@ -1418,3 +1418,16 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--navy); }
   .agent-head span { display: none; }
   .agent-msg.assistant { width: 100%; max-width: 100%; }
 }
+
+/* Admin: accounts */
+.adm-table td.primary { font-weight: 600; }
+.adm-email { word-break: break-all; margin-right: 6px; }
+.adm-table tr.adm-off td { color: var(--muted); }
+.adm-actions { flex-wrap: nowrap; }
+.adm-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.adm-ws { flex-wrap: wrap; align-self: flex-start; }
+.adm-link-lead { margin: 0; }
+.adm-link-warn { margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--amber-soft); color: var(--amber); font-size: 13px; }
+@media (max-width: 640px) {
+  .adm-actions { flex-wrap: wrap; }
+}

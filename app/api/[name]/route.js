@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { isAuthed } from '../../../lib/auth.js';
-import { withService, isPublicApi } from '../../../lib/store.js';
+import { getSession, serviceFor } from '../../../lib/auth.js';
+import { isPublicApi } from '../../../lib/store.js';
 import { errorResponse } from '../../../lib/api-error.js';
 import { guardPost } from '../../../lib/request-guard.js';
 
@@ -9,14 +9,15 @@ export const runtime = 'nodejs';
 export async function POST(req, ctx) {
   const refused = guardPost(req);
   if (refused) return refused;
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
   const { name } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const args = Array.isArray(body.args) ? body.args : [];
   try {
-    const data = await withService((api) => {
+    const data = await serviceFor(session)((api) => {
       if (name === 'apiBatch') {
         const calls = args[0] || [];
         return calls.map((c) => {

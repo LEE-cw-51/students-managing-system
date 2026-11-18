@@ -6,6 +6,8 @@ export function proxy(request) {
   if (
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/login') ||
+    pathname.startsWith('/invite/') ||
+    pathname === '/api/invite' ||
     pathname.startsWith('/.well-known/') ||
     pathname.startsWith('/api/oauth/') ||
     pathname === '/api/mcp' ||

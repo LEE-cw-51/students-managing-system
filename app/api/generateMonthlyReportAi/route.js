@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isAuthed } from '../../../lib/auth.js';
-import { withService } from '../../../lib/store.js';
+import { getSession, serviceFor } from '../../../lib/auth.js';
 import {
   buildMonthlyAiSections,
   buildGenerateMonthlyReportAiData,
@@ -15,7 +14,8 @@ export const maxDuration = 60;
 export async function POST(req) {
   const refused = guardPost(req);
   if (refused) return refused;
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
   if (!isMonthlyAiConfigured()) {
@@ -34,7 +34,7 @@ export async function POST(req) {
   }
 
   try {
-    const pack = await withService((api) => api.getMonthlyReportContext(studentId, year, month));
+    const pack = await serviceFor(session)((api) => api.getMonthlyReportContext(studentId, year, month));
     const ai = await buildMonthlyAiSections(pack);
     return NextResponse.json({
       ok: true,

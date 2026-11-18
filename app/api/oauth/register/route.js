@@ -5,7 +5,13 @@ export const runtime = 'nodejs';
 
 export async function POST(req) {
   // Counted before the body is read, so malformed or oversized bodies use up the limit too.
-  const gate = await reserveClientRegistration(clientIp(req.headers));
+  let gate;
+  try {
+    gate = await reserveClientRegistration(clientIp(req.headers));
+  } catch (e) {
+    console.error('register limit failed', e);
+    return corsJson({ error: 'server_error', error_description: '잠시 뒤에 다시 시도해 주세요.' }, 500);
+  }
   if (!gate.ok) {
     const retryAfter = String(Math.max(1, Math.ceil(gate.retryAfterMs / 1000)));
     return corsJson(

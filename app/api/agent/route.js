@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isAuthed } from '../../../lib/auth.js';
-import { withService } from '../../../lib/store.js';
+import { getSession, serviceFor } from '../../../lib/auth.js';
 import { isAgentConfigured } from '../../../lib/ai-client.js';
 import { runAgentTurn } from '../../../lib/agent.js';
 import { errorDetails, errorResponse } from '../../../lib/api-error.js';
@@ -17,7 +16,8 @@ export const maxDuration = 60;
 export async function POST(req) {
   const refused = guardPost(req);
   if (refused) return refused;
-  if (!(await isAuthed())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
   }
   if (!isAgentConfigured()) {
@@ -37,16 +37,17 @@ export async function POST(req) {
     message,
     clientTurnId: /^[\w-]{1,64}$/.test(clientTurnId) ? clientTurnId : ''
   };
-  if (body.stream === true) return streamTurn(turn, req.signal);
+  const run = serviceFor(session);
+  if (body.stream === true) return streamTurn(turn, run, req.signal);
   try {
-    const data = await runAgentTurn(turn, withService);
+    const data = await runAgentTurn(turn, run);
     return NextResponse.json({ ok: true, data });
   } catch (e) {
     return errorResponse(e);
   }
 }
 
-function streamTurn(turn, requestSignal) {
+function streamTurn(turn, run, requestSignal) {
   const encoder = new TextEncoder();
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -65,7 +66,7 @@ function streamTurn(turn, requestSignal) {
       }
     };
     try {
-      const data = await runAgentTurn(turn, withService, { onEvent: send, signal: controller.signal });
+      const data = await runAgentTurn(turn, run, { onEvent: send, signal: controller.signal });
       send({ type: 'done', data });
     } catch (e) {
       if (!controller.signal.aborted) {

@@ -1,13 +1,13 @@
 'use strict';
 
-const { describe, it, after } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// The /api/mcp route reads Settings through withService: keep its file store in a temp folder,
-// never in dev-server/data.json. Must run before lib/store.js is loaded.
+// The /api/mcp route reads Settings through withService and checks tokens against accounts: keep the
+// file stores in a temp folder, never in dev-server/. Must run before lib/store.js is loaded.
 const originalCwd = process.cwd();
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lms-mcp-'));
 process.chdir(dataDir);
@@ -25,8 +25,9 @@ const { readWriteMode } = require('../lib/write-policy.js');
 const MCP_WRITE_MODES = LMS.MCP_WRITE_MODES;
 const normalizeWriteMode = LMS.normalizeMcpWriteMode;
 const { APP_SESSION, apply, reject } = require('../lib/proposals.js');
-const { withService } = require('../lib/store.js');
-const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, validateAuthorizeParams } = require('../lib/oauth.js');
+const { withService, DEFAULT_WORKSPACE_ID } = require('../lib/store.js');
+const { exchangeToken, issueAuthorizationCode, pkceChallenge, registerClient, tokenRunner, validateAuthorizeParams, verifyAccessToken } = require('../lib/oauth.js');
+const { bootstrapAdmin, createInvite, acceptInvite, setUserDisabled } = require('../lib/accounts.js');
 const { sign } = require('../lib/signing.js');
 
 after(() => {
@@ -450,8 +451,17 @@ describe('mcp over HTTP', () => {
 
 describe('/api/mcp route', () => {
   const routeP = import('../app/api/mcp/route.js');
+  const sessionOf = ({ user, workspaceId }) => ({ uid: user.id, wid: workspaceId, ver: user.session_version });
+  let admin;
+  let teacher;
 
-  async function accessToken() {
+  before(async () => {
+    admin = sessionOf(await bootstrapAdmin({ email: 'admin@test.local', password: 'admin-pass-1' }));
+    const { token } = await createInvite({ email: 'teacher@test.local' });
+    teacher = sessionOf(await acceptInvite(token, { password: 'teacher-pass-1' }));
+  });
+
+  async function accessToken(session = admin) {
     const ru = 'https://claude.ai/api/mcp/auth_callback';
     const { client } = registerClient({ redirect_uris: [ru] });
     const verifier = 'v'.repeat(43);
@@ -459,10 +469,13 @@ describe('/api/mcp route', () => {
       client_id: client.client_id, redirect_uri: ru, response_type: 'code',
       code_challenge: pkceChallenge(verifier), code_challenge_method: 'S256'
     });
-    const code = await issueAuthorizationCode(params);
+    const code = await issueAuthorizationCode(params, session);
     const { tokens } = await exchangeToken({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: client.client_id, redirect_uri: ru });
     return tokens.access_token;
   }
+
+  const callTool = (name, args, id = 9) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+  const studentNames = async (res) => JSON.parse((await res.json()).result.content[0].text).students.map((s) => s.name);
 
   function assertUnauthorized(res) {
     assert.equal(res.status, 401);
@@ -489,13 +502,56 @@ describe('/api/mcp route', () => {
     assert.equal(first.status, 200);
     assert.deepEqual((await first.json()).result.tools.map((t) => t.name), READ_NAMES);
 
-    await withService((api) => api.saveSettings({ mcp_write_mode: 'proposal' }));
+    await withService(DEFAULT_WORKSPACE_ID, (api) => api.saveSettings({ mcp_write_mode: 'proposal' }));
     const second = await (await POST(rpc(LIST, auth))).json();
     assert.deepEqual(second.result.tools.map((t) => t.name), [...READ_NAMES, ...WRITE_NAMES]);
     assert.equal((await GET(new Request('https://lms.test/api/mcp', { headers: auth }))).status, 405);
 
-    await withService((api) => api.saveSettings({ mcp_token_version: '1' }));
+    await withService(DEFAULT_WORKSPACE_ID, (api) => api.saveSettings({ mcp_token_version: '1' }));
     assertUnauthorized(await POST(rpc(LIST, auth)));
+  });
+
+  it('runs tools only on the workspace in the token, noting the token user', async () => {
+    const { POST } = await routeP;
+    const student = { grade: '중2', parent_phone: '010-0000-0000', enrollment_date: '2026-03-01', status: '재원' };
+    await withService(DEFAULT_WORKSPACE_ID, (api) => api.createStudent({ ...student, name: '관리자쪽학생' }));
+    await withService(teacher.wid, (api) => {
+      api.createStudent({ ...student, name: '강사쪽학생' });
+      api.saveSettings({ mcp_write_mode: 'proposal' });
+    });
+    const teacherAuth = { Authorization: `Bearer ${await accessToken(teacher)}` };
+    const adminAuth = { Authorization: `Bearer ${await accessToken(admin)}` };
+
+    assert.deepEqual(await studentNames(await POST(rpc(callTool('search_students', { query: '쪽학생' }), teacherAuth))), ['강사쪽학생']);
+    assert.deepEqual(await studentNames(await POST(rpc(callTool('search_students', { query: '쪽학생' }), adminAuth))), ['관리자쪽학생']);
+
+    const pendingIn = (wid) => withService(wid, (api) => api.listPendingProposals().length);
+    const adminBefore = await pendingIn(DEFAULT_WORKSPACE_ID);
+    const write = await (await POST(rpc(callTool('create_task', { due_date: '2026-09-20', kind: 'admin', title: '교재 주문' }), teacherAuth))).json();
+    assert.equal(write.result.isError, undefined, write.result.content[0].text);
+    assert.equal(await pendingIn(teacher.wid), 1);
+    assert.equal(await pendingIn(DEFAULT_WORKSPACE_ID), adminBefore);
+
+    const verified = await verifyAccessToken(teacherAuth.Authorization.slice('Bearer '.length));
+    assert.equal(verified.user.email, 'teacher@test.local');
+    assert.equal(await tokenRunner(verified)((api) => api.listPendingProposals().length), 1);
+  });
+
+  it('refuses the token of a disabled user', async () => {
+    const { POST } = await routeP;
+    const { token } = await createInvite({ email: 'gone@test.local' });
+    const gone = sessionOf(await acceptInvite(token, { password: 'teacher-pass-1' }));
+    const auth = { Authorization: `Bearer ${await accessToken(gone)}` };
+    assert.equal((await POST(rpc(LIST, auth))).status, 200);
+    await setUserDisabled(gone.uid, true);
+    assertUnauthorized(await POST(rpc(LIST, auth)));
+  });
+
+  it('refuses a legacy token without uid/wid', async () => {
+    const { POST } = await routeP;
+    const ver = await withService(DEFAULT_WORKSPACE_ID, (api) => String(api.getSettings().mcp_token_version || '0'));
+    const legacy = sign({ typ: 'access', cid: 'c', ver, sc: '', exp: Math.floor(Date.now() / 1000) + 60 }, 'token');
+    assertUnauthorized(await POST(rpc(LIST, { Authorization: `Bearer ${legacy}` })));
   });
 });
 

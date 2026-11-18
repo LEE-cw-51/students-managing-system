@@ -24,10 +24,13 @@ function loadEnv() {
 
 loadEnv();
 
+// Default workspace from the accounts migration.
+const WORKSPACE_ID = '00000000-0000-0000-0000-000000000001';
+
 async function main() {
   const sql = postgres(process.env.DATABASE_URL, { ssl: 'require', max: 1, prepare: false });
   const loaded = {};
-  const rows = await sql`select name, rows from lms.kv`;
+  const rows = await sql`select name, rows from lms.kv where workspace_id = ${WORKSPACE_ID}`;
   rows.forEach((row) => { loaded[row.name] = row.rows || []; });
   Object.keys(LMS.TABLES).forEach((name) => {
     if (!loaded[name]) loaded[name] = [];
@@ -37,7 +40,6 @@ async function main() {
     writeTable(name, next) { loaded[name] = next || []; },
     now() { return '2026-09-14T10:00:00'; },
     today() { return '2026-09-14'; },
-    currentUserEmail() { return 'teacher@local'; },
     transaction(fn) { return fn(); }
   };
   if (store.readTable('Students').length) {
@@ -45,12 +47,15 @@ async function main() {
     await sql.end();
     return;
   }
-  seedDemo(LMS.createService(store));
+  const service = LMS.createService(store);
+  // Stamp the schema version first: data without it is read as v1 and refused by ensureSchema.
+  service.ensureSchema();
+  seedDemo(service);
   for (const name of Object.keys(LMS.TABLES)) {
     await sql`
-      insert into lms.kv (name, rows, updated_at)
-      values (${name}, ${sql.json(store.readTable(name))}, now())
-      on conflict (name) do update
+      insert into lms.kv (workspace_id, name, rows, updated_at)
+      values (${WORKSPACE_ID}, ${name}, ${sql.json(store.readTable(name))}, now())
+      on conflict (workspace_id, name) do update
       set rows = excluded.rows, updated_at = now()
     `;
   }

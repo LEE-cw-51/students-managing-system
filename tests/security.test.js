@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// Session versions live in Settings via withService: keep the file store in a temp folder.
+// lib/auth.js loads accounts and the store: keep the file stores in a temp folder.
 // Must run before lib/store.js is loaded.
 const originalCwd = process.cwd();
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lms-security-'));
@@ -14,12 +14,14 @@ process.chdir(dataDir);
 process.env.LMS_STORE = 'file';
 process.env.AUTH_SECRET = 'test-secret';
 process.env.NODE_ENV = 'test';
+require('./next-stubs.js').install();
 
 const {
-  clientIp, createMemoryCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage, reserveClientRegistration,
-  LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX
+  clientIp, createMemoryCounters, createPgCounters, reserveLoginAttempt, clearLoginAttempts, loginLimitMessage, reserveClientRegistration,
+  reserveInviteAttempt, LOGIN_WINDOW_MS, LOGIN_IP_MAX, LOGIN_EMAIL_MAX, LOGIN_DEVICE_MAX, LOGIN_GLOBAL_MAX, REGISTER_IP_MAX, REGISTER_GLOBAL_MAX,
+  INVITE_IP_MAX, INVITE_GLOBAL_MAX
 } = require('../lib/login-limit.js');
-const { SESSION_MAX_AGE, readSessionVersion, bumpSessionVersion, sessionValid } = require('../lib/session-version.js');
+const { SESSION_MAX_AGE, sessionFresh, deviceToken, deviceTokenFor, deviceIdFor } = require('../lib/auth.js');
 const { guardPost } = require('../lib/request-guard.js');
 const { sign, unsign } = require('../lib/signing.js');
 
@@ -34,35 +36,96 @@ describe('login attempt limit', () => {
   it('blocks the sixth attempt from one IP within 15 minutes and lets it in after the window', async () => {
     const counters = createMemoryCounters();
     for (let i = 0; i < LOGIN_IP_MAX; i += 1) {
-      assert.deepEqual(await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + i * 1000 }), { ok: true });
+      assert.deepEqual(await reserveLoginAttempt('1.2.3.4', `u${i}@test.kr`, { counters, now: T0 + i * 1000 }), { ok: true });
     }
-    const blocked = await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + 60000 });
+    const blocked = await reserveLoginAttempt('1.2.3.4', 'new@test.kr', { counters, now: T0 + 60000 });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 60000);
-    assert.equal((await reserveLoginAttempt('5.6.7.8', { counters, now: T0 + 60000 })).ok, true);
-    assert.equal((await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
+    assert.equal((await reserveLoginAttempt('5.6.7.8', 'new@test.kr', { counters, now: T0 + 60000 })).ok, true);
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'new@test.kr', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
   });
 
-  it('a correct password clears the IP count', async () => {
+  it('a correct password takes its own try off the IP count and clears the email count', async () => {
     const counters = createMemoryCounters();
-    for (let i = 0; i < LOGIN_IP_MAX; i += 1) await reserveLoginAttempt('1.2.3.4', { counters, now: T0 });
-    await clearLoginAttempts('1.2.3.4', { counters });
-    assert.equal((await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + 1 })).ok, true);
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 });
+    await clearLoginAttempts('1.2.3.4', 'me@test.kr', { counters });
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 + 1 })).ok, true, 'the refunded try');
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'other@test.kr', { counters, now: T0 + 2 })).ok, false, 'earlier tries still count');
+    await clearLoginAttempts('9.9.9.9', 'me@test.kr', { counters });
+
+    for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) await reserveLoginAttempt(`10.1.0.${i}`, 'me@test.kr', { counters, now: T0 });
+    assert.equal((await reserveLoginAttempt('10.1.1.1', 'me@test.kr', { counters, now: T0 })).ok, false);
+    await clearLoginAttempts('10.1.0.0', ' ME@test.kr ', { counters });
+    assert.equal((await reserveLoginAttempt('10.1.1.1', 'me@test.kr', { counters, now: T0 })).ok, true);
+  });
+
+  it('a known device is counted on its own, past a locked IP and a locked email', async () => {
+    const counters = createMemoryCounters();
+    for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) await reserveLoginAttempt(`10.3.0.${i}`, 'owner@test.kr', { counters, now: T0 });
+    for (let i = 0; i < LOGIN_IP_MAX; i += 1) await reserveLoginAttempt('10.3.1.2', 'colleague@test.kr', { counters, now: T0 });
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0 })).ok, false, 'an unknown browser');
+    for (let i = 0; i < LOGIN_DEVICE_MAX; i += 1) {
+      assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, true);
+    }
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, false);
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-b' })).ok, true, 'another browser of the owner');
+
+    await clearLoginAttempts('10.3.1.2', 'owner@test.kr', { counters, device: 'dev-a' });
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'owner@test.kr', { counters, now: T0, device: 'dev-a' })).ok, true, 'a success forgets the device count');
+    assert.equal((await reserveLoginAttempt('10.3.1.2', 'colleague@test.kr', { counters, now: T0 })).ok, false, 'and leaves the IP count');
+  });
+
+  it('refuses when lms.login_attempts is missing instead of letting logins through uncounted', async (t) => {
+    const log = t.mock.method(console, 'error', () => {});
+    const sql = async () => {
+      throw Object.assign(new Error('relation "lms.login_attempts" does not exist'), { code: '42P01' });
+    };
+    const counters = createPgCounters(sql);
+    await assert.rejects(reserveLoginAttempt('10.4.0.1', 'me@test.kr', { counters, now: T0 }), { code: '42P01' });
+    await assert.rejects(reserveClientRegistration('10.4.0.1', { counters, now: T0 }), { code: '42P01' });
+    await assert.rejects(clearLoginAttempts('10.4.0.1', 'me@test.kr', { counters }), { code: '42P01' });
+    assert.equal(log.mock.callCount(), 1, 'says which migration to apply, once');
+    assert.match(log.mock.calls[0].arguments[0], /login_attempts\.sql/);
+  });
+
+  it('caps attempts at one email from many IPs, ignoring case and spaces', async () => {
+    const counters = createMemoryCounters();
+    for (let i = 0; i < LOGIN_EMAIL_MAX; i += 1) {
+      assert.equal((await reserveLoginAttempt(`10.2.0.${i}`, i % 2 ? 'Target@Test.kr ' : 'target@test.kr', { counters, now: T0 })).ok, true);
+    }
+    const blocked = await reserveLoginAttempt('10.2.1.1', 'target@test.kr', { counters, now: T0 + 1000 });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 1000);
+    assert.equal((await reserveLoginAttempt('10.2.1.1', 'other@test.kr', { counters, now: T0 + 1000 })).ok, true);
+  });
+
+  it('keeps the typed email out of the counter table', async () => {
+    const counters = createMemoryCounters();
+    const buckets = [];
+    const hit = counters.hit;
+    counters.hit = (bucket, ...rest) => {
+      buckets.push(bucket);
+      return hit(bucket, ...rest);
+    };
+    await reserveLoginAttempt('1.2.3.4', 'secret@test.kr', { counters, now: T0 });
+    assert.equal(buckets.length, 3);
+    assert.equal(buckets.some((b) => b.includes('secret')), false);
+    assert.match(buckets[1], /^email:[0-9a-f]{32}$/);
   });
 
   it('caps attempts from all IPs together', async () => {
     const counters = createMemoryCounters();
     for (let i = 0; i < LOGIN_GLOBAL_MAX; i += 1) {
-      assert.equal((await reserveLoginAttempt(`10.0.0.${i}`, { counters, now: T0 })).ok, true);
+      assert.equal((await reserveLoginAttempt(`10.0.0.${i}`, `u${i}@test.kr`, { counters, now: T0 })).ok, true);
     }
-    const blocked = await reserveLoginAttempt('10.0.1.1', { counters, now: T0 + 1000 });
+    const blocked = await reserveLoginAttempt('10.0.1.1', 'late@test.kr', { counters, now: T0 + 1000 });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 1000);
   });
 
   it('counts parallel guesses before any password check', async () => {
     const counters = createMemoryCounters();
-    const results = await Promise.all(Array.from({ length: 20 }, () => reserveLoginAttempt('1.2.3.4', { counters, now: T0 })));
+    const results = await Promise.all(Array.from({ length: 20 }, () => reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 })));
     assert.equal(results.filter((r) => r.ok).length, LOGIN_IP_MAX);
   });
 
@@ -90,7 +153,7 @@ describe('OAuth client registration limit', () => {
     const blocked = await reserveClientRegistration('1.2.3.4', { counters, now: T0 + 1000 });
     assert.equal(blocked.ok, false);
     assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 1000);
-    assert.equal((await reserveLoginAttempt('1.2.3.4', { counters, now: T0 + 1000 })).ok, true, 'login is counted apart');
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 + 1000 })).ok, true, 'login is counted apart');
     assert.equal((await reserveClientRegistration('1.2.3.4', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
 
     const all = createMemoryCounters();
@@ -98,46 +161,95 @@ describe('OAuth client registration limit', () => {
       assert.equal((await reserveClientRegistration(`10.0.0.${i}`, { counters: all, now: T0 })).ok, true);
     }
     assert.equal((await reserveClientRegistration('10.0.1.1', { counters: all, now: T0 })).ok, false);
-    assert.equal((await reserveLoginAttempt('10.0.1.1', { counters: all, now: T0 })).ok, true);
+    assert.equal((await reserveLoginAttempt('10.0.1.1', 'me@test.kr', { counters: all, now: T0 })).ok, true);
   });
 });
 
-describe('session expiry and version', () => {
+describe('invite link submission limit', () => {
+  it('caps submissions per IP and overall, in buckets apart from login attempts', async () => {
+    const counters = createMemoryCounters();
+    for (let i = 0; i < INVITE_IP_MAX; i += 1) {
+      assert.equal((await reserveInviteAttempt('1.2.3.4', { counters, now: T0 })).ok, true);
+    }
+    const blocked = await reserveInviteAttempt('1.2.3.4', { counters, now: T0 + 1000 });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.retryAfterMs, LOGIN_WINDOW_MS - 1000);
+    assert.equal((await reserveLoginAttempt('1.2.3.4', 'me@test.kr', { counters, now: T0 + 1000 })).ok, true, 'login is counted apart');
+    assert.equal((await reserveInviteAttempt('1.2.3.4', { counters, now: T0 + LOGIN_WINDOW_MS })).ok, true);
+
+    const all = createMemoryCounters();
+    for (let i = 0; i < INVITE_GLOBAL_MAX; i += 1) {
+      assert.equal((await reserveInviteAttempt(`10.0.${Math.floor(i / 200)}.${i % 200}`, { counters: all, now: T0 })).ok, true);
+    }
+    assert.equal((await reserveInviteAttempt('10.9.9.9', { counters: all, now: T0 })).ok, false);
+  });
+});
+
+describe('device cookie', () => {
+  const YEAR = 365 * 24 * 60 * 60 * 1000;
+
+  it('holds for the email and token version it was issued for, for a year', () => {
+    const token = deviceToken(' Me@Test.kr ', 3, T0);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 + 1000), true);
+    assert.equal(deviceTokenFor(token, 'other@test.kr', 3, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, '', 3, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 + YEAR), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 3, T0 - 60 * 60 * 1000), false, 'from the future');
+    assert.ok(!token.includes('me@test.kr') && !unsign(token, 'device').e.includes('@'), 'no address in the cookie');
+  });
+
+  it('stops counting once the account token version moves on (password change, reset, disable)', () => {
+    const token = deviceToken('me@test.kr', 3, T0);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', 4, T0 + 1000), false);
+    assert.equal(deviceTokenFor(token, 'me@test.kr', undefined, T0 + 1000), false);
+    assert.equal(deviceIdFor(token, 'me@test.kr', 4, T0 + 1000), '');
+  });
+
+  it('refuses missing, forged and other-purpose tokens', () => {
+    const payload = unsign(deviceToken('me@test.kr', 1, T0), 'device');
+    assert.equal(deviceTokenFor(undefined, 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor('junk', 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign(payload, 'session'), 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign({ ...payload, typ: undefined }, 'device'), 'me@test.kr', 1, T0), false);
+    assert.equal(deviceTokenFor(sign({ ...payload, uv: undefined }, 'device'), 'me@test.kr', 1, T0), false, 'a cookie from before versions');
+  });
+
+  it('gives each browser its own id, and none without a good cookie', () => {
+    const a = deviceToken('me@test.kr', 1, T0);
+    const b = deviceToken('me@test.kr', 1, T0 + 1);
+    assert.match(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), /^[0-9a-f]{32}$/);
+    assert.equal(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), deviceIdFor(a, ' ME@test.kr', 1, T0 + 2000));
+    assert.notEqual(deviceIdFor(a, 'me@test.kr', 1, T0 + 1000), deviceIdFor(b, 'me@test.kr', 1, T0 + 1000));
+    assert.equal(deviceIdFor(a, 'other@test.kr', 1, T0 + 1000), '');
+    assert.equal(deviceIdFor(undefined, 'me@test.kr', 1, T0), '');
+  });
+});
+
+describe('session expiry', () => {
   const NOW = T0 + 1000;
   const DAY = 24 * 60 * 60 * 1000;
-
-  it('accepts a fresh session of the current version and old cookies without a version as 0', () => {
-    assert.equal(sessionValid({ ok: true, at: NOW - DAY, sv: '0' }, '0', NOW), true);
-    assert.equal(sessionValid({ ok: true, at: NOW - DAY }, '0', NOW), true);
-    assert.equal(sessionValid({ ok: true, at: NOW - DAY }, '1', NOW), false);
-    assert.equal(sessionValid({ ok: true, at: NOW, sv: '1' }, '2', NOW), false);
-  });
+  const cookie = (at) => ({ uid: 'u', wid: 'w', ver: 1, at });
 
   it('expires sessions after SESSION_MAX_AGE (30 days, same as the cookie)', () => {
     assert.equal(SESSION_MAX_AGE, 60 * 60 * 24 * 30);
-    assert.equal(sessionValid({ ok: true, at: NOW - 30 * DAY + 1, sv: '0' }, '0', NOW), true);
-    assert.equal(sessionValid({ ok: true, at: NOW - 30 * DAY, sv: '0' }, '0', NOW), false);
-    assert.equal(sessionValid({ ok: true, sv: '0' }, '0', NOW), false);
-    assert.equal(sessionValid({ ok: true, at: NOW + DAY, sv: '0' }, '0', NOW), false);
+    assert.equal(sessionFresh(cookie(NOW - DAY), NOW), true);
+    assert.equal(sessionFresh(cookie(NOW - 30 * DAY + 1), NOW), true);
+    assert.equal(sessionFresh(cookie(NOW - 30 * DAY), NOW), false);
+    assert.equal(sessionFresh(cookie(undefined), NOW), false);
+    assert.equal(sessionFresh(cookie(String(NOW)), NOW), false);
+  });
+
+  it('allows a few minutes of clock skew, not a cookie from the future', () => {
+    assert.equal(sessionFresh(cookie(NOW + 60 * 1000), NOW), true);
+    assert.equal(sessionFresh(cookie(NOW + DAY), NOW), false);
   });
 
   it('never takes an OAuth token or an unsigned payload for a session', () => {
-    const access = unsign(sign({ typ: 'access', cid: 'c', ver: '0', iat: 1, exp: 2 }, 'token'), 'token');
-    assert.equal(sessionValid(access, '0', NOW), false);
-    assert.equal(unsign(sign({ ok: true, at: NOW }, 'token'), 'session'), null, 'a token-key signature is no session');
-    assert.equal(sessionValid({ ok: true, at: NOW, typ: 'access' }, '0', NOW), false);
-    assert.equal(sessionValid(null, '0', NOW), false);
-  });
-
-  it('logging out moves the stored version on, so earlier cookies stop working', async () => {
-    const before = await readSessionVersion();
-    assert.equal(before, '0');
-    const payload = { ok: true, at: Date.now(), sv: before };
-    assert.equal(sessionValid(payload, await readSessionVersion()), true);
-    assert.equal(await bumpSessionVersion(), '1');
-    assert.equal(await readSessionVersion(), '1');
-    assert.equal(sessionValid(payload, await readSessionVersion()), false);
-    assert.equal(sessionValid({ ok: true, at: Date.now() }, await readSessionVersion()), false);
+    const access = unsign(sign({ typ: 'access', cid: 'c', ver: '0', iat: 1, at: NOW, exp: 2 }, 'token'), 'token');
+    assert.equal(sessionFresh(access, NOW), false);
+    assert.equal(unsign(sign(cookie(NOW), 'token'), 'session'), null, 'a token-key signature is no session');
+    assert.equal(sessionFresh({ ...cookie(NOW), typ: 'access' }, NOW), false);
+    assert.equal(sessionFresh(null, NOW), false);
   });
 });
 
@@ -151,12 +263,30 @@ describe('guardPost', () => {
     assert.equal(guardPost(req({ host: 'lms.example.com', 'content-type': 'application/json' })), null);
   });
 
+  it('compares with the request URL only when no host header came', () => {
+    const internal = { origin: 'http://localhost:8787', 'content-type': 'application/json' };
+    assert.equal(guardPost(req(internal)), null, 'no Host: the URL is all there is');
+    assert.equal(guardPost(req({ ...internal, host: 'lms.example.com' })).status, 403, 'behind a proxy the URL names the internal host');
+    assert.equal(guardPost(req({ ...internal, host: 'internal', 'x-forwarded-host': 'lms.example.com' })).status, 403);
+  });
+
   it('refuses another origin with 403', async () => {
     for (const origin of ['https://evil.example', 'null', 'https://lms.example.com.evil.example']) {
       const res = guardPost(req({ host: 'lms.example.com', origin, 'content-type': 'application/json' }));
       assert.equal(res.status, 403);
       assert.equal((await res.json()).ok, false);
     }
+  });
+
+  it('refuses a browser that says the request came from another site', async () => {
+    for (const site of ['cross-site', 'same-site']) {
+      const res = guardPost(req({ host: 'lms.example.com', 'sec-fetch-site': site, 'content-type': 'application/json' }));
+      assert.equal(res.status, 403, site);
+    }
+    const form = { host: 'lms.example.com', 'content-type': 'application/x-www-form-urlencoded' };
+    assert.equal(guardPost(req({ ...form, 'sec-fetch-site': 'cross-site' }), { json: false }).status, 403, 'login CSRF from a form');
+    assert.equal(guardPost(req({ ...form, 'sec-fetch-site': 'same-origin', origin: 'https://lms.example.com' }), { json: false }), null);
+    assert.equal(guardPost(req({ ...form, 'sec-fetch-site': 'none' }), { json: false }), null, 'typed into the address bar');
   });
 
   it('requires a JSON body type unless json is false', async () => {

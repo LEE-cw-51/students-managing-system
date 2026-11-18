@@ -13,6 +13,8 @@ secrets.json
 # Local mock DB
 dev-server/data.json
 dev-server/data.json.bak
+dev-server/data-*.json
+dev-server/accounts.json
 
 # Python leftovers
 __pycache__/

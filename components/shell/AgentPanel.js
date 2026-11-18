@@ -36,6 +36,11 @@ function writeLast(id) {
   } catch { /* storage unavailable */ }
 }
 
+/** On sign-out: conversation ids are numbered per workspace, so the next account on this browser must not reopen it. */
+export function forgetLastConversation() {
+  writeLast('');
+}
+
 async function readJson(res) {
   const data = await res.json().catch(() => null);
   if (!data) throw new ApiError('서버 응답을 읽을 수 없습니다.');
