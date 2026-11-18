@@ -279,9 +279,10 @@ describe('assignments module commands (T7)', () => {
       now: () => '2026-11-05T09:00:00',
       nextIds: (prefix, n) => Array.from({ length: n || 1 }, () => prefix + '_' + (++seq))
     };
-    let periods = null;
-    const asg = LMS.createAssignments({ ...base, resumeStale: (id) => periods.recomputeResume(id) });
-    periods = LMS.createExamPeriods({ ...base, assignments: asg });
+    const placementResume = { recompute: null, notify: (id) => { if (placementResume.recompute) placementResume.recompute(id); } };
+    const asg = LMS.createAssignments({ ...base, onPlacementChanged: (id) => placementResume.notify(id) });
+    const periods = LMS.createExamPeriods({ ...base, assignments: asg });
+    placementResume.recompute = (id) => periods.recomputeResume(id);
     return { tables, asg };
   }
   const temp = (tables, id) => tables.StudentClasses.find((r) => r.id === id);

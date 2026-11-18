@@ -650,7 +650,7 @@ LMS.createPlanner = function (ctx) {
     var lessons = table('Lessons').filter(function (l) {
       return LMS.toStr(l.class_id) === LMS.toStr(classId) && LMS.inRange(l.lesson_date, since, now);
     });
-    var homeworkCells = ctx.homeworkCells({ classId: classId, from: since, to: now });
+    var homework = ctx.homeworkStats({ classId: classId, from: since, to: now });
     var schoolExamRows = table('SchoolExams');
     var examsByKey = LMS.schoolExams.nextByKey(schoolExamRows, now, 60);
     var examBrief = function (e) {
@@ -668,7 +668,9 @@ LMS.createPlanner = function (ctx) {
       var alias = 'S' + (i + 1);
       var own = lessons.filter(function (l) { return LMS.toStr(l.student_id) === LMS.toStr(s.student_id); })
         .sort(function (a, b) { return LMS.toStr(a.lesson_date).localeCompare(LMS.toStr(b.lesson_date)); });
-      var mine = homeworkCells.filter(function (c) { return c.student_id === LMS.toStr(s.student_id); });
+      var mine = LMS.homeworkStats((homework.cells || []).filter(function (c) {
+        return c.student_id === LMS.toStr(s.student_id);
+      }));
       var exam = examsByKey[LMS.schoolGroupKey(s.school, s.grade)];
       if (exam) exams[exam.school_exam_id] = exam;
       var counsel = table('CounselingNotes').filter(function (n) {
@@ -678,8 +680,8 @@ LMS.createPlanner = function (ctx) {
         ref: alias,
         grade: LMS.toStr(s.grade),
         attendance_rate: LMS.attendanceRate(own),
-        homework_rate: LMS.homeworkRate(mine).rate,
-        homework_average: LMS.homeworkAverage(mine),
+        homework_rate: mine.rate,
+        homework_average: mine.average,
         recent_tests: own.filter(function (l) { return LMS.toStr(l.test_status) === '실시'; }).slice(-4).map(function (l) {
           return { date: l.lesson_date, score: LMS.toNum(l.test_score), max: LMS.toNum(l.test_max_score) };
         }),
@@ -718,8 +720,8 @@ LMS.createPlanner = function (ctx) {
         }).slice(-12),
         class_stats_last_4_weeks: {
           attendance_rate: LMS.attendanceRate(lessons),
-          homework_rate: LMS.homeworkRate(homeworkCells).rate,
-          homework_average: LMS.homeworkAverage(homeworkCells)
+          homework_rate: homework.rate,
+          homework_average: homework.average
         },
         upcoming_school_exams: LMS.schoolExams.upcoming(schoolExamRows, now, 60).filter(function (e) {
           return exams[e.school_exam_id];

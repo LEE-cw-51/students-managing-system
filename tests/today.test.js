@@ -239,6 +239,71 @@ describe('saveTodaySession', () => {
     assert.throws(() => s.api.saveTodaySession(p), { message: '이 반 명단에 없는 학생입니다: ' + outsider.name });
     assert.equal(JSON.stringify([s.store.readTable('Lessons'), s.store.readTable('HomeworkChecks')]), before);
   });
+
+  it('get→save→get round-trip keeps progress, prior checks, personal/replace and plan_done', () => {
+    const s = seeded();
+    s.api.saveClassPlan({
+      class_id: s.classId,
+      period_type: '일간',
+      period_key: TODAY,
+      title: '오늘 계획',
+      content: '피타고라스'
+    });
+    const before = s.api.getTodayClassSession(TODAY, s.classId);
+    assert.ok(before.prior_homework);
+    assert.ok(before.daily_plan);
+    const first = before.students[0].student_id;
+    const second = before.students[1].student_id;
+    const priorChecks = before.students.flatMap((st) =>
+      (before.prior_homework.items || []).map((it) => ({
+        item_id: it.item_id,
+        student_id: st.student_id,
+        status: st.student_id === second ? 'B' : 'A'
+      }))
+    );
+    s.api.saveTodaySession({
+      lesson_date: TODAY,
+      class_id: s.classId,
+      session: {
+        progress: '11. 피타고라스 정리',
+        content: '증명',
+        test_title: '확인 테스트',
+        test_max_score: '10',
+        test_difficulty: '중'
+      },
+      prior: { assigned_date: before.prior_homework.assigned_date, checks: priorChecks },
+      homework_items: [{ title: '교재 80~83쪽' }, { title: '오답 정리' }],
+      plan_done_status: '일부',
+      students: before.students.map((st, i) => ({
+        student_id: st.student_id,
+        attendance: i === 0 ? '결석' : '출석',
+        test_status: i === 0 ? '미실시' : '실시',
+        test_score: i === 0 ? '' : 8,
+        concentration: i === 0 ? '' : 'A',
+        homework_replace_class: st.student_id === first ? 'Y' : '',
+        personal_homework: st.student_id === first
+          ? [{ title: '대체숙제' }]
+          : (st.student_id === second ? [{ title: '개인보충' }] : [])
+      }))
+    });
+    const after = s.api.getTodayClassSession(TODAY, s.classId);
+    assert.equal(after.session.progress, '11. 피타고라스 정리');
+    assert.equal(after.daily_plan.done_status, '일부');
+    assert.deepEqual(after.today_homework.items.map((it) => it.title), ['교재 80~83쪽', '오답 정리']);
+    assert.equal(after.today_homework.replace_by_student[first], 'Y');
+    assert.deepEqual(after.today_homework.personal_items_by_student[first].map((it) => it.title), ['대체숙제']);
+    assert.deepEqual(after.today_homework.personal_items_by_student[second].map((it) => it.title), ['개인보충']);
+    assert.equal(after.today_homework.replace_by_student[second], '');
+    const lessonFirst = after.students.find((st) => st.student_id === first).lesson;
+    const lessonSecond = after.students.find((st) => st.student_id === second).lesson;
+    assert.equal(lessonFirst.homework, '대체숙제');
+    assert.deepEqual(lessonSecond.homework.split('\n').sort(), ['교재 80~83쪽', '오답 정리', '개인보충'].sort());
+    assert.equal(lessonSecond.assignment_completion, 'B');
+    assert.equal(lessonFirst.progress, '11. 피타고라스 정리');
+    const priorItemId = after.prior_homework.items[0].item_id;
+    assert.equal(after.prior_homework.checks_by_student[second][priorItemId], 'B');
+    assert.equal(after.prior_homework.checks_by_student[first][priorItemId], 'A');
+  });
 });
 
 describe('lesson validation', () => {
