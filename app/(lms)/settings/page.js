@@ -332,55 +332,61 @@ export default function SettingsPage() {
     <div className="settings-page">
       <PageHeader title="설정" sub="보고서·PDF에 들어가는 정보" />
       <div className="stack">
-        <section className="card">
-          <SectionHead title="학원 정보" changed={isChanged('academy')} />
-          <p className="st-hint">사이드바와 보고서·PDF에 들어갑니다.</p>
-          <div className="st-academy">
-            {input('academy_name', '학원명')}
-            {input('teacher_name', '담당 강사명')}
-            {input('contact', '연락처', { inputMode: 'tel' })}
-          </div>
-        </section>
-
-        <section className="card">
-          <SectionHead title="보고서 문구" changed={isChanged('report')} />
-          <p className="st-hint">일일·월간 보고서의 처음과 끝에 들어갑니다.</p>
-          <div className="st-report">
-            <div className="st-report-fields">
-              {input('report_greeting', '인사말')}
-              <Field label="맺음말" hint="비우면 기본 문구가 들어갑니다.">
-                {(id) => <textarea id={id} rows={3} value={value(form, 'report_closing')} placeholder={PLACEHOLDERS.report_closing} onChange={set('report_closing')} />}
-              </Field>
+        <div className="settings-group">
+          <h2 className="settings-group-title">학원 · 보고서</h2>
+          <section className="card">
+            <SectionHead title="학원 정보" changed={isChanged('academy')} />
+            <p className="st-hint">사이드바와 보고서·PDF에 들어갑니다.</p>
+            <div className="st-academy">
+              {input('academy_name', '학원명')}
+              {input('teacher_name', '담당 강사명')}
+              {input('contact', '연락처', { inputMode: 'tel' })}
             </div>
-            <ReportPreview form={form} date={boot.today} />
-          </div>
-        </section>
+          </section>
 
-        <section className="card">
-          <SectionHead title="과제 이행 등급 기준" changed={isChanged('assignment')} />
-          <HelpRow text="보고서에 등급과 함께 표시되는 설명입니다." label="등급 계산 방법">
-            <p>항목 등급을 점수로 바꿔 평균을 냅니다: {GRADE_KEYS.map((g) => `${g} ${LMS.ASSIGNMENT_POINTS[g]}`).join(' · ')}</p>
-            <p>평균이 A 90점 이상, B 80점 이상, C 70점 이상, D 60점 이상, E 51점 이상, 그 아래는 F입니다.</p>
-          </HelpRow>
-          <div className="st-grades">
-            {GRADE_KEYS.map((g) => input(`assignment_${g}`, `${g} 기준`))}
-          </div>
-        </section>
+          <section className="card">
+            <SectionHead title="보고서 문구" changed={isChanged('report')} />
+            <p className="st-hint">일일·월간 보고서의 처음과 끝에 들어갑니다.</p>
+            <div className="st-report">
+              <div className="st-report-fields">
+                {input('report_greeting', '인사말')}
+                <Field label="맺음말" hint="비우면 기본 문구가 들어갑니다.">
+                  {(id) => <textarea id={id} rows={3} value={value(form, 'report_closing')} placeholder={PLACEHOLDERS.report_closing} onChange={set('report_closing')} />}
+                </Field>
+              </div>
+              <ReportPreview form={form} date={boot.today} />
+            </div>
+          </section>
 
-        <McpConnectorCard form={form} set={set} changed={isChanged('mcp')}
-          tokenVersion={saved.mcp_token_version} onDisconnected={() => boot.refresh()} />
-
-        <section className="card st-promote">
-          <div className="st-promote-text">
-            <SectionHead title="새 학년도 준비">
-              <span className="tag muted">저장과 별개 · 바로 적용</span>
-            </SectionHead>
-            <HelpRow text="재원생 학년을 한 단계씩 올립니다(중2 → 중3)." label="자세히">
-              <p>3월에 한 번 쓰는 작업입니다. 창에서 학년별 인원을 확인한 뒤 적용하며, 설정 저장과 상관없이 바로 반영됩니다. 입력 중인 설정은 그대로 남습니다.</p>
+          <section className="card">
+            <SectionHead title="과제 이행 등급 기준" changed={isChanged('assignment')} />
+            <HelpRow text="보고서에 등급과 함께 표시되는 설명입니다." label="등급 계산 방법">
+              <p>항목 등급을 점수로 바꿔 평균을 냅니다: {GRADE_KEYS.map((g) => `${g} ${LMS.ASSIGNMENT_POINTS[g]}`).join(' · ')}</p>
+              <p>평균이 A 90점 이상, B 80점 이상, C 70점 이상, D 60점 이상, E 51점 이상, 그 아래는 F입니다.</p>
             </HelpRow>
-          </div>
-          <button type="button" className="btn secondary" onClick={() => setPromoting(true)}>학년 올리기…</button>
-        </section>
+            <div className="st-grades">
+              {GRADE_KEYS.map((g) => input(`assignment_${g}`, `${g} 기준`))}
+            </div>
+          </section>
+
+          <section className="card st-promote">
+            <div className="st-promote-text">
+              <SectionHead title="새 학년도 준비">
+                <span className="tag muted">저장과 별개 · 바로 적용</span>
+              </SectionHead>
+              <HelpRow text="재원생 학년을 한 단계씩 올립니다(중2 → 중3)." label="자세히">
+                <p>3월에 한 번 쓰는 작업입니다. 창에서 학년별 인원을 확인한 뒤 적용하며, 설정 저장과 상관없이 바로 반영됩니다. 입력 중인 설정은 그대로 남습니다.</p>
+              </HelpRow>
+            </div>
+            <button type="button" className="btn secondary" onClick={() => setPromoting(true)}>학년 올리기…</button>
+          </section>
+        </div>
+
+        <div className="settings-group">
+          <h2 className="settings-group-title">Claude · MCP 연동</h2>
+          <McpConnectorCard form={form} set={set} changed={isChanged('mcp')}
+            tokenVersion={saved.mcp_token_version} onDisconnected={() => boot.refresh()} />
+        </div>
 
         <div className="save-bar">
           <span className={'save-state ' + (dirty ? 'dirty' : '')}>

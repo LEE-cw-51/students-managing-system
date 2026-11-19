@@ -3,7 +3,8 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
-import Tabs, { useTab } from '@/components/ui/Tabs';
+import { PageSkeleton } from '@/components/ui/Feedback';
+import Tabs, { TabPanel, useTab } from '@/components/ui/Tabs';
 import DailyReports from '@/components/domain/report/DailyReports';
 import MonthlyBoard from '@/components/domain/report/MonthlyBoard';
 import { useBoot } from '@/components/shell/AppShell';
@@ -43,16 +44,19 @@ function ReportsView() {
   );
   return (
     <div className="reports-page">
-      {tab === 'daily'
-        ? <DailyReports date={date} classId={params.get('class') || ''} onChange={set} head={head} />
-        : <MonthlyBoard ym={month} classId={legacyClass || params.get('mclass') || ''} onChange={set} head={head} />}
+      <TabPanel tabKey="daily" current={tab}>
+        <DailyReports date={date} classId={params.get('class') || ''} onChange={set} head={head} />
+      </TabPanel>
+      <TabPanel tabKey="monthly" current={tab}>
+        <MonthlyBoard ym={month} classId={legacyClass || params.get('mclass') || ''} onChange={set} head={head} />
+      </TabPanel>
     </div>
   );
 }
 
 export default function ReportsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <ReportsView />
     </Suspense>
   );

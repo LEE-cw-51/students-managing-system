@@ -361,8 +361,10 @@ LMS.createAgent = function (ctx) {
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
    * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
+   * overrides: { [index]: args } — edited args for those calls; each is re-previewed before run
+   * (LMS.agentActions.apply). A bad override fails the whole apply like any other preview error.
    */
-  function applyAgentProposal(proposalId, selected) {
+  function applyAgentProposal(proposalId, selected, overrides) {
     var row = requireProposal(proposalId);
     if (!mustSettle(row, 'applied')) return slimProposal(row);
     var calls = row.calls || [];
@@ -378,10 +380,12 @@ LMS.createAgent = function (ctx) {
         throw none;
       }
     }
+    var over = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : null;
     var s = svc();
     var results = calls.map(function (c, i) {
       if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
-      var check = LMS.agentActions.apply(s, c.tool, c.args);
+      var args = over && Object.prototype.hasOwnProperty.call(over, i) ? over[i] : c.args;
+      var check = LMS.agentActions.apply(s, c.tool, args);
       return { tool: c.tool, text: c.text, ok: check.ok, after: check.after };
     });
     var rows = table('AgentProposals');

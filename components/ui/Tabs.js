@@ -11,6 +11,16 @@ export function useTab(tabs) {
   return tabs.some((t) => t.key === key) ? key : tabs[0].key;
 }
 
+/** Active tab body wrapper: pairs with Tabs tab `id` / `aria-controls`. */
+export function TabPanel({ tabKey, current, children }) {
+  if (tabKey !== current) return null;
+  return (
+    <div role="tabpanel" id={'tab-' + tabKey} aria-labelledby={'tab-btn-' + tabKey}>
+      {children}
+    </div>
+  );
+}
+
 /** `scrollHint` fades the right edge with › while tabs overflow and keeps the current tab in view. */
 export default function Tabs({ tabs, current, scrollHint }) {
   const pathname = usePathname();
@@ -51,7 +61,16 @@ export default function Tabs({ tabs, current, scrollHint }) {
   const list = (
     <div className="tabs" role="tablist" ref={listRef}>
       {tabs.map((t) => (
-        <Link key={t.key} href={hrefFor(t.key)} role="tab" aria-selected={t.key === current} scroll={false} replace>
+        <Link
+          key={t.key}
+          id={'tab-btn-' + t.key}
+          href={hrefFor(t.key)}
+          role="tab"
+          aria-selected={t.key === current}
+          aria-controls={'tab-' + t.key}
+          scroll={false}
+          replace
+        >
           {t.label}{t.count !== undefined && t.count !== null ? <span className="muted"> {t.count}</span> : null}
         </Link>
       ))}

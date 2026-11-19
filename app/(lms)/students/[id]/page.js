@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import Tabs, { useTab } from '@/components/ui/Tabs';
-import { Async } from '@/components/ui/Feedback';
+import Tabs, { TabPanel, useTab } from '@/components/ui/Tabs';
+import PageHeader from '@/components/ui/PageHeader';
+import { Async, PageSkeleton } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
 import StudentForm from '@/components/domain/student/StudentForm';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/components/domain/student/StudentTabs';
 import CounselingTab from '@/components/domain/student/CounselingTab';
 import ClassmateNav from '@/components/domain/student/ClassmateNav';
+import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { telHref } from '@/lib/format';
 
@@ -25,38 +26,59 @@ const TABS = [
 
 function Workspace() {
   const { id } = useParams();
+  const boot = useBoot();
   const tab = useTab(TABS);
   const [editing, setEditing] = useState(false);
+  const header = useApi(() => api('getStudent', id), [id]);
   const overview = useApi(() => api('getStudentOverview', id), [id]);
 
+  const reload = () => Promise.all([header.reload(), overview.reload()]);
+
   return (
-    <Async state={overview}>
-      {(data) => {
-        const s = data.student;
+    <Async state={header}>
+      {(s) => {
         const meta = [s.grade, s.school, s.enrollment_date ? `등록 ${s.enrollment_date}` : ''].filter(Boolean).join(' · ');
+        const ov = overview.data;
         return (
           <>
-            <div className="page-header sd-header">
-              <div className="page-header-title">
-                <Link className="rec-back" href="/students">‹ 학생</Link>
-                <h1 className="display">{s.name}</h1>
-                {meta ? <span className="sub">{meta}</span> : null}
-                {s.status !== '재원' ? <span className="tag muted">{s.status}</span> : null}
-                {data.badges.length ? <Badges badges={data.badges} /> : null}
-              </div>
-              <div className="page-actions">
-                {telHref(s.parent_phone) ? <a className="btn secondary" href={telHref(s.parent_phone)}>학부모 전화</a> : null}
-                <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
-              </div>
-            </div>
-            <ClassmateNav studentId={id} classes={data.classes} disabled={editing} />
+            <PageHeader
+              className="sd-header"
+              back={{ href: '/students', label: '‹ 학생' }}
+              title={s.name}
+              sub={meta || null}
+              badges={(
+                <>
+                  {s.status !== '재원' ? <span className="tag muted">{s.status}</span> : null}
+                  {ov && ov.badges.length ? <Badges badges={ov.badges} /> : null}
+                </>
+              )}
+              actions={(
+                <>
+                  {telHref(s.parent_phone) ? <a className="btn secondary" href={telHref(s.parent_phone)}>학부모 전화</a> : null}
+                  <button type="button" className="btn secondary" onClick={() => setEditing(true)}>정보 수정</button>
+                </>
+              )}
+            />
+            {ov ? <ClassmateNav studentId={id} classes={ov.classes} disabled={editing} /> : null}
             <Tabs tabs={TABS} current={tab} scrollHint />
-            {tab === 'overview' ? <OverviewTab data={data} onChanged={overview.reload} /> : null}
-            {tab === 'lessons' ? <LessonsTab studentId={id} today={data.today} /> : null}
-            {tab === 'homework' ? <HomeworkTab studentId={id} /> : null}
-            {tab === 'grades' ? <GradesTab studentId={id} /> : null}
-            {tab === 'counseling' ? <CounselingTab studentId={id} onChanged={overview.reload} /> : null}
-            {editing ? <StudentForm initial={s} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); overview.reload(); }} /> : null}
+            <TabPanel tabKey="overview" current={tab}>
+              <Async state={overview}>
+                {(data) => <OverviewTab data={data} onChanged={overview.reload} />}
+              </Async>
+            </TabPanel>
+            <TabPanel tabKey="lessons" current={tab}>
+              <LessonsTab studentId={id} today={boot.today} />
+            </TabPanel>
+            <TabPanel tabKey="homework" current={tab}>
+              <HomeworkTab studentId={id} />
+            </TabPanel>
+            <TabPanel tabKey="grades" current={tab}>
+              <GradesTab studentId={id} />
+            </TabPanel>
+            <TabPanel tabKey="counseling" current={tab}>
+              <CounselingTab studentId={id} onChanged={overview.reload} />
+            </TabPanel>
+            {editing ? <StudentForm initial={s} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} /> : null}
           </>
         );
       }}
@@ -66,7 +88,7 @@ function Workspace() {
 
 export default function StudentPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <Workspace />
     </Suspense>
   );

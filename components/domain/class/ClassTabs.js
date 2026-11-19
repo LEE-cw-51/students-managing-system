@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Async, EmptyState, Kpi } from '@/components/ui/Feedback';
+import { Async, EmptyState, Kpi, TableScroll } from '@/components/ui/Feedback';
 import Modal from '@/components/ui/Modal';
 import Field from '@/components/ui/Field';
 import MiniBars from '@/components/ui/MiniBars';
@@ -121,7 +121,7 @@ function UpcomingExams({ exams }) {
           </li>
         ))}
       </ul>
-      <Link className="btn secondary sm" href="/exams">시험 일정</Link>
+      <Link className="link-btn" href="/exams">시험 일정</Link>
     </section>
   );
 }
@@ -241,6 +241,7 @@ export function HomeworkTab({ classId }) {
       <Async state={state}>
         {(data) => data.rows.length ? (
           <>
+            <TableScroll>
             <div className="table-wrap hw-matrix-wrap">
               <table className="data-table hw-matrix">
                 <thead>
@@ -275,6 +276,7 @@ export function HomeworkTab({ classId }) {
                 </tbody>
               </table>
             </div>
+            </TableScroll>
             <ul className="hw-cards">
               {data.rows.map((r) => {
                 const cells = data.students.map((s) => ({ s, cell: r.cells[s.student_id] })).filter((x) => x.cell);

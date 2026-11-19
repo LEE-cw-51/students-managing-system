@@ -292,6 +292,66 @@ function LiveBubble({ live, elapsed }) {
 const STATUS_LABEL = { pending: '승인 대기', applied: '반영됨', rejected: '거절함', failed: '실패' };
 const STATUS_TONE = { pending: 'amber', applied: 'ok', rejected: 'muted', failed: 'danger' };
 
+/** Fields the teacher can tweak before approve (ids stay locked in the stored args). */
+const EDITABLE_ARG_KEYS = [
+  'attendance', 'test_status', 'test_score', 'test_max_score', 'test_difficulty',
+  'assignment_completion', 'concentration', 'special_note', 'student_notice',
+  'progress', 'homework', 'content', 'test_title', 'test_scope', 'class_notice', 'memo',
+  'status', 'kind', 'title', 'due_date', 'text'
+];
+const ARG_LABELS = {
+  attendance: '출결', test_status: '테스트', test_score: '점수', test_max_score: '만점',
+  test_difficulty: '난이도', assignment_completion: '과제', concentration: '집중도',
+  special_note: '특이사항', student_notice: '전달사항', progress: '진도', homework: '숙제',
+  content: '내용', test_title: '테스트 제목', test_scope: '시험 범위', class_notice: '반 공지',
+  memo: '메모', status: '상태', kind: '종류', title: '제목', due_date: '기한', text: '텍스트'
+};
+const NUMBER_ARGS = new Set(['test_score', 'test_max_score']);
+
+function editableDraft(args) {
+  const out = {};
+  if (!args || typeof args !== 'object') return out;
+  EDITABLE_ARG_KEYS.forEach((k) => {
+    if (args[k] !== undefined && args[k] !== null) out[k] = args[k];
+  });
+  return out;
+}
+
+function coerceArg(key, raw) {
+  if (!NUMBER_ARGS.has(key)) return raw;
+  const s = String(raw ?? '').trim();
+  if (s === '') return '';
+  const n = Number(s);
+  return Number.isFinite(n) ? n : raw;
+}
+
+function sameArg(a, b) {
+  if (a === b) return true;
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') return na === nb;
+  return String(a ?? '') === String(b ?? '');
+}
+
+/** Merged args for calls the teacher edited; undefined when nothing changed. */
+function buildOverrides(calls, drafts, selected) {
+  const overrides = {};
+  calls.forEach((c, i) => {
+    if (!selected.includes(i)) return;
+    const draft = drafts[i] || {};
+    const base = c.args || {};
+    let changed = false;
+    const merged = { ...base };
+    Object.keys(draft).forEach((k) => {
+      const next = coerceArg(k, draft[k]);
+      if (!sameArg(base[k], next)) changed = true;
+      merged[k] = next;
+    });
+    if (changed) overrides[i] = merged;
+  });
+  return Object.keys(overrides).length ? overrides : undefined;
+}
+
 function ResultTag({ result }) {
   if (!result) return null;
   if (result.skipped) return <span className="tag muted">건너뜀</span>;
@@ -302,13 +362,20 @@ function ProposalCard({ proposal, onChange }) {
   const toast = useToast();
   const [busy, setBusy] = useState('');
   const [selected, setSelected] = useState(() => proposal.calls.map((_, i) => i));
+  const [drafts, setDrafts] = useState(() => proposal.calls.map((c) => editableDraft(c.args)));
   const p = proposal;
   const pending = p.status === 'pending';
   const toggle = (i) => setSelected((list) => (list.includes(i) ? list.filter((x) => x !== i) : [...list, i].sort((a, b) => a - b)));
+  const setDraft = (i, key, value) => {
+    setDrafts((rows) => rows.map((row, j) => (j === i ? { ...row, [key]: value } : row)));
+  };
   const act = async (kind) => {
     setBusy(kind);
     try {
-      const next = await postJson(`/api/agent/${kind}`, kind === 'apply' ? { proposal_id: p.proposal_id, selected } : { proposal_id: p.proposal_id });
+      const body = kind === 'apply'
+        ? { proposal_id: p.proposal_id, selected, overrides: buildOverrides(p.calls, drafts, selected) }
+        : { proposal_id: p.proposal_id };
+      const next = await postJson(`/api/agent/${kind}`, body);
       onChange(next);
       if (kind === 'apply') {
         const count = Array.isArray(next.result) ? next.result.filter((r) => r && !r.skipped).length : selected.length;
@@ -340,23 +407,42 @@ function ProposalCard({ proposal, onChange }) {
         <span className={'tag ' + STATUS_TONE[p.status]}>{STATUS_LABEL[p.status] || p.status}</span>
       </div>
       <ul>
-        {p.calls.map((c, i) => (
-          <li key={i}>
-            {pending ? (
-              <label className="agent-proposal-item">
-                <input type="checkbox" checked={selected.includes(i)} onChange={() => toggle(i)} disabled={Boolean(busy)} />
-                <span className="agent-proposal-label">{c.label}</span>
-                <span>{c.text}</span>
-              </label>
-            ) : (
-              <>
-                <span className="agent-proposal-label">{c.label}</span>
-                <span>{c.text}</span>
-              </>
-            )}
-            <ResultTag result={results[i]} />
-          </li>
-        ))}
+        {p.calls.map((c, i) => {
+          const fields = Object.keys(drafts[i] || {});
+          return (
+            <li key={i}>
+              {pending ? (
+                <label className="agent-proposal-item">
+                  <input type="checkbox" checked={selected.includes(i)} onChange={() => toggle(i)} disabled={Boolean(busy)} />
+                  <span className="agent-proposal-label">{c.label}</span>
+                  <span>{c.text}</span>
+                </label>
+              ) : (
+                <>
+                  <span className="agent-proposal-label">{c.label}</span>
+                  <span>{c.text}</span>
+                </>
+              )}
+              <ResultTag result={results[i]} />
+              {pending && fields.length ? (
+                <div className="agent-proposal-edits" onClick={(e) => e.stopPropagation()}>
+                  {fields.map((key) => (
+                    <label key={key} className="agent-proposal-edit">
+                      <span>{ARG_LABELS[key] || key}</span>
+                      <input
+                        type={NUMBER_ARGS.has(key) ? 'number' : 'text'}
+                        value={drafts[i][key] ?? ''}
+                        disabled={Boolean(busy) || !selected.includes(i)}
+                        onChange={(e) => setDraft(i, key, e.target.value)}
+                        aria-label={`${c.label} ${ARG_LABELS[key] || key}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {p.status === 'failed' && p.result && p.result.error ? (
         <p className="agent-proposal-error" role="alert">반영하지 못했습니다(변경 없음): {p.result.error}</p>

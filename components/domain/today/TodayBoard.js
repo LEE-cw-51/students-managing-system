@@ -144,7 +144,7 @@ export default function TodayBoard({ date, state, onOpenClass }) {
             </section>
 
             <section className="card">
-              <div className="card-head"><h2>주의 학생 {b.flagged.length ? `${b.flagged.length}명` : ''}</h2><Link className="link-btn" href="/students">학생 목록</Link></div>
+              <div className="card-head"><h2>주의 학생 {b.flagged.length ? `${b.flagged.length}명` : ''}</h2><Link className="link-btn" href="/students?flagged=1">학생 목록</Link></div>
               {b.unassigned_count ? (
                 <div className="notice-bar" style={{ marginBottom: 12 }}>
                   반이 없는 재원생 {b.unassigned_count}명 · <Link href="/students?class=__none__">미배정 학생 보기</Link>
@@ -159,7 +159,7 @@ export default function TodayBoard({ date, state, onOpenClass }) {
                     </div>
                   ))}
                 </div>
-              ) : <EmptyState>{b.date === b.today ? '주의가 필요한 학생이 없습니다.' : '주의 학생은 오늘 날짜에서만 보여 줍니다.'}</EmptyState>}
+              ) : <EmptyState>{b.date === b.today ? '주의가 필요한 학생이 없습니다.' : '이 날짜에는 주의 학생을 표시하지 않습니다'}</EmptyState>}
             </section>
             <section className="card">
               <div className="card-head"><h2>이번 주 숙제 확인</h2><span className="muted">{b.weekly_homework.week_label}</span></div>

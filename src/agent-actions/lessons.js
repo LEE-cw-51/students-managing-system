@@ -198,6 +198,7 @@ var actions = {
     label: '수업 기록 추가',
     progress: '수업 기록 추가 준비 중',
     description: '학생 한 명의 하루 수업 기록을 새로 만듭니다. 이미 그날 기록이 있으면 update_lesson을 씁니다(get_student_lessons로 lesson_id 확인). 진도·숙제처럼 반 전체 값은 save_class_session을 씁니다.',
+    surfaces: ['assistant', 'mcp'],
     destructive: false,
     parameters: {
       type: 'object',
@@ -236,6 +237,7 @@ var actions = {
     label: '수업 기록 수정',
     progress: '수업 기록 수정 준비 중',
     description: '이미 있는 수업 기록을 고칩니다. 바꿀 항목만 넣습니다. lesson_id는 get_student_lessons 또는 get_attendance에서 찾습니다. progress·homework를 바꾸면 그날 반 기록이 바뀌어 같은 반 학생 모두에게 반영됩니다.',
+    surfaces: ['assistant', 'mcp'],
     parameters: {
       type: 'object',
       properties: Object.assign({ lesson_id: { type: 'string', description: '수업 기록 ID (예: LES-0012)' } }, LESSON_PARAMS, {
@@ -358,6 +360,7 @@ var actions = {
     label: '반 수업 기록',
     progress: '반 수업 기록 준비 중',
     description: '반의 하루 기록(진도·수업 내용·테스트 정보·시험 범위·공지·메모)을 저장합니다. 바꿀 항목만 넣습니다. 그날 학생 기록에도 진도와 테스트 정보가 함께 반영됩니다. class_id는 list_classes로 찾습니다.',
+    surfaces: ['assistant', 'mcp'],
     parameters: {
       type: 'object',
       properties: Object.assign({ class_id: CLASS_ID, lesson_date: DATE('수업일') }, SESSION_PARAMS),

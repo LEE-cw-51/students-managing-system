@@ -1,10 +1,11 @@
 import Link from 'next/link';
 
-/** Page title row: optional breadcrumbs [{href,label}], subtitle and action buttons. */
-export default function PageHeader({ title, crumbs, sub, actions }) {
+/** Page title row: optional back link, crumbs, subtitle, badges slot, and action buttons. */
+export default function PageHeader({ title, back, crumbs, sub, badges, actions, className }) {
   return (
-    <div className="page-header">
+    <div className={'page-header' + (className ? ' ' + className : '')}>
       <div className="page-header-title">
+        {back ? <Link className="rec-back" href={back.href}>{back.label}</Link> : null}
         {crumbs && crumbs.length ? (
           <nav className="crumbs" aria-label="위치">
             {crumbs.map((c, i) => (
@@ -16,7 +17,8 @@ export default function PageHeader({ title, crumbs, sub, actions }) {
           </nav>
         ) : null}
         <h1 className="display">{title}</h1>
-        {sub ? <div className="sub">{sub}</div> : null}
+        {sub ? <span className="sub">{sub}</span> : null}
+        {badges || null}
       </div>
       {actions ? <div className="page-actions">{actions}</div> : null}
     </div>

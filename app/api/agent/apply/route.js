@@ -7,8 +7,9 @@ import { guardPost } from '../../../../lib/request-guard.js';
 export const runtime = 'nodejs';
 
 /**
- * Approve assistant proposals: `{ proposal_id, selected? }` for one (a failure undoes every
- * change and is recorded on it), or `{ proposal_ids }` for several with per-item results.
+ * Approve assistant proposals: `{ proposal_id, selected?, overrides? }` for one (a failure undoes
+ * every change and is recorded on it; overrides re-preview edited args before run), or
+ * `{ proposal_ids }` for several with per-item results.
  */
 export async function POST(req) {
   const refused = guardPost(req);

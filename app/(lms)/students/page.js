@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import Tabs, { useTab } from '@/components/ui/Tabs';
+import Tabs, { TabPanel, useTab } from '@/components/ui/Tabs';
 import CounselingLog from '@/components/domain/student/CounselingLog';
 import PageHeader from '@/components/ui/PageHeader';
-import { Async, EmptyState } from '@/components/ui/Feedback';
+import { Async, EmptyState, PageSkeleton } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
 import StudentForm from '@/components/domain/student/StudentForm';
 import { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
@@ -28,7 +28,7 @@ const TABS = [
 
 export default function StudentsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <StudentsView />
     </Suspense>
   );
@@ -48,7 +48,8 @@ function StudentsView() {
         actions={tab === 'list' ? <button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button> : null}
       />
       <Tabs tabs={TABS} current={tab} />
-      {tab === 'list' ? <StudentList onCreate={() => setCreating(true)} /> : <CounselingLog />}
+      <TabPanel tabKey="list" current={tab}><StudentList onCreate={() => setCreating(true)} /></TabPanel>
+      <TabPanel tabKey="counseling" current={tab}><CounselingLog /></TabPanel>
       {creating ? <StudentForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/students/${row.student_id}`)} /> : null}
     </div>
   );
@@ -139,6 +140,7 @@ function StudentList({ onCreate }) {
           ))}
         </div>
       </div>
+      <p className="hint st-search-hint">검색은 이 브라우저에만 유지됩니다. 학년·반·주의 필터는 주소에 남습니다.</p>
       {sel.chosen.length ? <StudentBulkBar ids={sel.chosen} onDone={bulkDone} onClear={sel.clear} /> : null}
       <Async state={state}>
         {() => rows.length ? (

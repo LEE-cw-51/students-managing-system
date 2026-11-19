@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
-import { Async, EmptyState } from '@/components/ui/Feedback';
+import { Async, EmptyState, PageSkeleton } from '@/components/ui/Feedback';
 import ClassForm from '@/components/domain/class/ClassForm';
 import { api, useApi } from '@/lib/client-api';
 import { useBoot } from '@/components/shell/AppShell';
@@ -101,7 +101,7 @@ function ClassCards({ rows, today }) {
 
 export default function ClassesPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <ClassesView />
     </Suspense>
   );

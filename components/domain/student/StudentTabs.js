@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Async, EmptyState, Kpi } from '@/components/ui/Feedback';
+import { Async, EmptyState, Kpi, TableScroll } from '@/components/ui/Feedback';
 import GradeTrend from '@/components/ui/GradeTrend';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
@@ -268,12 +268,12 @@ export function OverviewTab({ data, onChanged }) {
               </li>
             ))}
           </ul>
-          <Link className="btn secondary sm" href="/exams">시험 일정</Link>
+          <Link className="link-btn" href="/exams">시험 일정</Link>
         </section>
       ) : null}
       <div className="cols-2">
         <section className="card">
-          <div className="card-head"><h2>상담 · 후속 조치</h2><Link className="btn secondary sm" href="?tab=counseling" scroll={false}>상담 전체</Link></div>
+          <div className="card-head"><h2>상담 · 후속 조치</h2><Link className="link-btn" href="?tab=counseling" scroll={false}>상담 전체</Link></div>
           <QuickCounsel studentId={s.student_id} today={today} onSaved={onChanged} />
           {tasks.length ? (
             <div className="sd-sub">
@@ -297,7 +297,7 @@ export function OverviewTab({ data, onChanged }) {
           </div>
         </section>
         <section className="card">
-          <div className="card-head"><h2>최근 특이사항</h2><Link className="btn secondary sm" href="?tab=lessons" scroll={false}>수업·출결</Link></div>
+          <div className="card-head"><h2>최근 특이사항</h2><Link className="link-btn" href="?tab=lessons" scroll={false}>수업·출결</Link></div>
           {notes.length ? (
             <ul className="sd-lines">
               {notes.map((n) => (
@@ -447,6 +447,7 @@ export function LessonsTab({ studentId, today }) {
           <div className="card-head"><h2>수업 기록</h2><RangePicker value={r.range} onChange={r.setRange} /></div>
           <Async state={lessons}>
             {(rows) => rows.length ? (
+              <TableScroll>
               <div className="table-wrap">
                 <table className="data-table stack-mobile">
                   <thead><tr><th>날짜</th><th>반</th><th>출결</th><th>테스트 (반 평균)</th><th className="center">과제</th><th className="center">집중도</th><th>진도 · 특이사항</th><th className="right">보고서</th></tr></thead>
@@ -469,6 +470,7 @@ export function LessonsTab({ studentId, today }) {
                   </tbody>
                 </table>
               </div>
+              </TableScroll>
             ) : <EmptyState title="이 기간에 수업 기록이 없습니다" />}
           </Async>
         </section>
@@ -515,7 +517,7 @@ export function HomeworkTab({ studentId }) {
             <div className="kpis">
               <Kpi label="완료율" value={percent(d.rate)} note={`확인한 숙제 ${d.checked}개 중 A`} />
               <Kpi label="숙제 평균 점수" value={pointsLabel(d.average)} note="A 100 · B 89 · C 79 · D 69 · E 59 · F 50" />
-              <Kpi label="미완료" value={`${d.missing.length}개`} note="A가 아닌 숙제" tone={d.missing.length ? 'terracotta' : undefined} />
+              <Kpi label="미완료" value={`${d.missing.length}개`} note="A가 아닌 숙제" tone={d.missing.length ? 'warn' : undefined} />
             </div>
             {d.missing.length ? (
               <section className="card">

@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useRef } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
+import { PageSkeleton } from '@/components/ui/Feedback';
 import TodayBoard from '@/components/domain/today/TodayBoard';
 import LessonRecorder from '@/components/domain/today/LessonRecorder';
 import WeekStrip from '@/components/domain/today/WeekStrip';
@@ -57,7 +58,7 @@ function TodayView() {
 
 export default function TodayPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <TodayView />
     </Suspense>
   );

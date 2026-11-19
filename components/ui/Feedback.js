@@ -4,6 +4,19 @@ export function Loading({ label = '불러오는 중…' }) {
   return <div className="loading" role="status"><span className="spinner" aria-hidden="true" />{label}</div>;
 }
 
+/** Light Suspense fallback for list/detail pages (uses --skeleton-* tokens). */
+export function PageSkeleton({ rows = 4 }) {
+  return (
+    <div className="page-skeleton" role="status" aria-label="불러오는 중">
+      <div className="skeleton page-skeleton-title" />
+      <div className="skeleton page-skeleton-sub" />
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="skeleton page-skeleton-row" style={{ width: `${88 - (i % 3) * 10}%` }} />
+      ))}
+    </div>
+  );
+}
+
 export function ErrorBox({ error, onRetry }) {
   if (!error) return null;
   return (
@@ -42,6 +55,16 @@ export function Kpi({ label, value, note, tone }) {
       <div className="kpi-label">{label}</div>
       <div className="kpi-value" style={tone ? { color: `var(--${tone})` } : undefined}>{value}</div>
       {note ? <div className="kpi-note">{note}</div> : null}
+    </div>
+  );
+}
+
+/** Tablet-width hint for tables that scroll horizontally (641–980px). */
+export function TableScroll({ children, className }) {
+  return (
+    <div className={'table-scroll' + (className ? ' ' + className : '')}>
+      <p className="table-scroll-hint">좌우로 밀어 보세요</p>
+      {children}
     </div>
   );
 }
