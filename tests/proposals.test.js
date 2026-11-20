@@ -133,6 +133,9 @@ describe('proposals: apply and reject from the app', () => {
       () => apply(APP_SESSION, {}, run),
       () => apply(APP_SESSION, { proposal_id: p.proposal_id, selected: [] }, run),
       () => apply(APP_SESSION, { proposal_id: p.proposal_id, selected: [-1] }, run),
+      () => apply(APP_SESSION, { proposal_id: p.proposal_id, overrides: [] }, run),
+      () => apply(APP_SESSION, { proposal_id: p.proposal_id, overrides: { '-1': { title: 'x' } } }, run),
+      () => apply(APP_SESSION, { proposal_id: p.proposal_id, overrides: { 0: '결석' } }, run),
       () => apply(APP_SESSION, { proposal_ids: [] }, run),
       () => reject(APP_SESSION, { proposal_id: '  ' }, run),
       () => reject(APP_SESSION, { proposal_ids: Array.from({ length: PROPOSAL_BATCH_MAX + 1 }, (_, i) => 'AGP-X' + i) }, run)

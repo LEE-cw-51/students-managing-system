@@ -179,7 +179,7 @@ describe('mcp tool surfaces', () => {
   });
 
   it('proposal lists every write tool, each backed by a write action', () => {
-    assert.equal(MCP_ONLY_WRITES.length, 46);
+    assert.equal(MCP_ONLY_WRITES.length, 43);
     const names = listTools('proposal').map((t) => t.name);
     WRITE_NAMES.forEach((n) => assert.ok(names.includes(n), n));
     assert.deepEqual([...WRITE_NAMES].sort(), LMS.agentActions.list().map((a) => a.name).sort());
@@ -201,7 +201,7 @@ describe('mcp tool surfaces', () => {
     const openAi = toolDefinitions().map((d) => d.function.name);
     const anthropic = anthropicToolDefinitions().map((d) => d.name);
     const assistant = assistantTools().map((t) => t.name);
-    assert.equal(assistant.length, 13);
+    assert.equal(assistant.length, 16);
     assert.deepEqual(openAi, assistant);
     assert.deepEqual(anthropic, assistant);
     MCP_ONLY.forEach((n) => {

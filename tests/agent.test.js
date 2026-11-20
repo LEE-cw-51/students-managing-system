@@ -10,7 +10,7 @@ const {
 } = require('../lib/agent.js');
 const { APP_SESSION, apply, reject, PROPOSAL_BATCH_MAX } = require('../lib/proposals.js');
 
-const applyProposal = (id, run, selected) => apply(APP_SESSION, { proposal_id: id, selected }, run);
+const applyProposal = (id, run, selected, overrides) => apply(APP_SESSION, { proposal_id: id, selected, overrides }, run);
 const applyProposals = (ids, run) => apply(APP_SESSION, { proposal_ids: ids }, run);
 const rejectProposals = (ids, run) => reject(APP_SESSION, { proposal_ids: ids }, run);
 const { abortedError, chatWithTools, parseToolArguments } = require('../lib/ai-client.js');
@@ -680,6 +680,72 @@ describe('agent proposals', () => {
     assert.equal(lessonOf(kim.student_id).attendance, '출석');
     assert.equal(api.getCounselingNotes(hong.student_id).length, 1);
     assert.equal(statusOf(), 'applied');
+  });
+
+  it('applies edited args after re-preview and refuses a bad override', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const p = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } }
+    ]);
+    const statusOf = () => api.getAgentConversation(p.conversation_id).messages[1].proposal.status;
+
+    // A bad override fails preview; nothing is saved and the proposal is marked failed.
+    await assert.rejects(
+      applyProposal(p.proposal_id, run, [0], { 0: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '지각' } }),
+      /출석/
+    );
+    assert.equal(statusOf(), 'failed');
+    assert.equal(lessonOf(hong.student_id).attendance, '출석');
+
+    const p2 = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } },
+      { tool: 'update_attendance', args: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '결석' } }
+    ]);
+    // Edit call 0 to 출석 (no-op vs stored), apply only call 1 as 결석 — override flips kim to 출석.
+    const applied = await applyProposal(p2.proposal_id, run, [0, 1], {
+      1: { lesson_id: lessonOf(kim.student_id).lesson_id, attendance: '출석' }
+    });
+    assert.equal(applied.status, 'applied');
+    assert.equal(applied.verification_status, 'verified');
+    assert.equal(lessonOf(hong.student_id).attendance, '결석');
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+  });
+
+  it('ignores forged entity ids in overrides and applies to stored targets', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const hongLesson = lessonOf(hong.student_id);
+    const kimLesson = lessonOf(kim.student_id);
+    const p = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: hongLesson.lesson_id, attendance: '결석' } }
+    ]);
+    const applied = await applyProposal(p.proposal_id, run, [0], {
+      0: { lesson_id: kimLesson.lesson_id, attendance: '결석' }
+    });
+    assert.equal(applied.status, 'applied');
+    assert.equal(applied.verification_status, 'verified');
+    assert.equal(lessonOf(hong.student_id).attendance, '결석');
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+
+    const noteA = api.saveCounselingNote({ student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-16', content: '상담A', follow_up_date: '2026-09-22' });
+    const noteB = api.saveCounselingNote({ student_id: kim.student_id, kind: '학생', counsel_date: '2026-09-17', content: '상담B', follow_up_date: '2026-09-23' });
+    const pTask = proposalWith(api, [{ tool: 'update_task_status', args: { task_id: noteA.follow_up_task_id, status: '완료' } }]);
+    const appliedTask = await applyProposal(pTask.proposal_id, run, [0], {
+      0: { task_id: noteB.follow_up_task_id, status: '완료' }
+    });
+    assert.equal(appliedTask.verification_status, 'verified');
+    assert.equal(api.getCounselingNotes(hong.student_id).find((n) => n.counsel_date === '2026-09-16').follow_up_status, '완료');
+    assert.equal(api.getCounselingNotes(kim.student_id).find((n) => n.counsel_date === '2026-09-17').follow_up_status, '예정');
+
+    const pCounsel = proposalWith(api, [{
+      tool: 'create_counseling',
+      args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-18', content: '대상 홍' }
+    }]);
+    await applyProposal(pCounsel.proposal_id, run, [0], {
+      0: { student_id: kim.student_id, kind: '학생', counsel_date: '2026-09-18', content: '대상 홍' }
+    });
+    assert.ok(api.getCounselingNotes(hong.student_id).some((n) => n.counsel_date === '2026-09-18' && n.content === '대상 홍'));
+    assert.equal(api.getCounselingNotes(kim.student_id).some((n) => n.counsel_date === '2026-09-18'), false);
   });
 
   it('rejects once and refuses to apply a rejected proposal', () => {

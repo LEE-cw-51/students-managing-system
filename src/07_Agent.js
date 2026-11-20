@@ -361,8 +361,19 @@ LMS.createAgent = function (ctx) {
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
    * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
+   * overrides: { [index]: args } — partial override + locked ids; each is re-previewed before run
+   * (LMS.agentActions.apply). A bad override fails the whole apply like any other preview error.
    */
-  function applyAgentProposal(proposalId, selected) {
+  /** When the teacher edits proposal args, only non-id fields may change; *_id stays on the stored call. */
+  function repinStoredIds_(stored, args) {
+    if (!stored || typeof stored !== 'object') return args;
+    Object.keys(stored).forEach(function (k) {
+      if (/_id$/.test(k) && Object.prototype.hasOwnProperty.call(stored, k)) args[k] = stored[k];
+    });
+    return args;
+  }
+
+  function applyAgentProposal(proposalId, selected, overrides) {
     var row = requireProposal(proposalId);
     if (!mustSettle(row, 'applied')) return slimProposal(row);
     var calls = row.calls || [];
@@ -378,10 +389,15 @@ LMS.createAgent = function (ctx) {
         throw none;
       }
     }
+    var over = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : null;
     var s = svc();
     var results = calls.map(function (c, i) {
       if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
-      var check = LMS.agentActions.apply(s, c.tool, c.args);
+      var args = c.args;
+      if (over && Object.prototype.hasOwnProperty.call(over, i)) {
+        args = repinStoredIds_(c.args, Object.assign({}, c.args, over[i]));
+      }
+      var check = LMS.agentActions.apply(s, c.tool, args);
       return { tool: c.tool, text: c.text, ok: check.ok, after: check.after };
     });
     var rows = table('AgentProposals');

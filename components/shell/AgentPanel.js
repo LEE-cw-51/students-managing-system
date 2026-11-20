@@ -135,12 +135,12 @@ function pickSuggestions(today, classes, hour) {
   return { count: todays.length, list };
 }
 
-// ----- Message text: paragraphs, markdown tables, **bold**, [[student:ID|이름]] links -----
+// ----- Message text: headings, lists, code, tables, **bold**, [[student:ID|이름]] links -----
 
 // Student id → name from the boot search index, for old [[student:ID]] links without a name.
 const StudentNames = createContext(null);
 
-const TOKEN_RE = /(\[\[student:[^\]]+\]\]|\*\*[^*]+\*\*)/g;
+const TOKEN_RE = /(\[\[student:[^\]]+\]\]|`[^`\n]+`|\*\*[^*]+\*\*)/g;
 const NAME_BOUNDARY = /(^|[\s([{"'“‘,·:])$/;
 
 function tokenize(text, names) {
@@ -160,6 +160,8 @@ function tokenize(text, names) {
       out.push({ type: 'student', id, name });
       continue;
     }
+    const code = p.match(/^`([^`\n]+)`$/);
+    if (code) { out.push({ type: 'code', text: code[1] }); continue; }
     const bold = p.match(/^\*\*([^*]+)\*\*$/);
     if (bold) out.push({ type: 'bold', text: bold[1] });
     else if (p) out.push({ type: 'text', text: p });
@@ -178,6 +180,7 @@ function Inline({ text }) {
       );
     }
     if (t.type === 'bold') return <strong key={i}>{t.text}</strong>;
+    if (t.type === 'code') return <code key={i} className="agent-inline">{t.text}</code>;
     return <Fragment key={i}>{t.text}</Fragment>;
   });
 }
@@ -185,39 +188,147 @@ function Inline({ text }) {
 const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 const isDivider = (line) => /^\s*\|?\s*:?-{2,}/.test(line) && /^[\s|:-]+$/.test(line);
 
+const stripInlineMd = (line, names) => tokenize(line, names).map((t) => (t.type === 'student' ? t.name : t.text)).join('');
+
 /** Message text without markup, for copying and for the screen reader announcement. */
 function plainText(text, names) {
-  return String(text || '').split('\n')
-    .filter((line) => !isDivider(line))
-    .map((line) => (line.trim().startsWith('|') ? cells(line).join('\t') : line))
-    .map((line) => tokenize(line, names).map((t) => (t.type === 'student' ? t.name : t.text)).join(''))
-    .join('\n')
-    .trim();
+  const lines = String(text || '').split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length;) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('```')) {
+      i++;
+      const code = [];
+      while (i < lines.length && !lines[i].trim().startsWith('```')) code.push(lines[i++]);
+      if (i < lines.length) i++;
+      if (code.length) out.push(code.join('\n'));
+      continue;
+    }
+    if (isDivider(trimmed)) { i++; continue; }
+    if (trimmed.startsWith('|')) {
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        if (!isDivider(lines[i])) out.push(cells(lines[i]).map((c) => stripInlineMd(c, names)).join('\t'));
+        i++;
+      }
+      continue;
+    }
+    const hm = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) { out.push(stripInlineMd(hm[2], names)); i++; continue; }
+    if (/^[-*]\s+/.test(trimmed)) {
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        out.push(stripInlineMd(lines[i].trim().replace(/^[-*]\s+/, ''), names));
+        i++;
+      }
+      continue;
+    }
+    if (/^\d+\.\s+/.test(trimmed)) {
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        out.push(stripInlineMd(lines[i].trim().replace(/^\d+\.\s+/, ''), names));
+        i++;
+      }
+      continue;
+    }
+    if (!trimmed) { i++; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim()) {
+      const t = lines[i].trim();
+      if (t.startsWith('```') || t.startsWith('|') || /^(#{1,3})\s+/.test(t) || /^[-*]\s+/.test(t) || /^\d+\.\s+/.test(t)) break;
+      para.push(stripInlineMd(lines[i], names));
+      i++;
+    }
+    if (para.length) out.push(para.join('\n'));
+  }
+  return out.join('\n').trim();
 }
+
+const HEADING_TAG = ['', 'h2', 'h2', 'h3'];
 
 export function RichText({ text }) {
   const lines = String(text || '').split('\n');
   const blocks = [];
   for (let i = 0; i < lines.length;) {
-    if (lines[i].trim().startsWith('|')) {
+  // Skip blank lines between blocks.
+    while (i < lines.length && !lines[i].trim()) i++;
+    if (i >= lines.length) break;
+    const trimmed = lines[i].trim();
+
+    if (trimmed.startsWith('```')) {
+      i++;
+      const code = [];
+      while (i < lines.length && !lines[i].trim().startsWith('```')) code.push(lines[i++]);
+      if (i < lines.length) i++;
+      blocks.push(<pre key={blocks.length} className="agent-code"><code>{code.join('\n')}</code></pre>);
+      continue;
+    }
+
+    if (trimmed.startsWith('|')) {
       const rows = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) rows.push(lines[i++]);
-      const body = rows.filter((r) => !isDivider(r)).map(cells);
-      // Only divider lines: nothing to show as a table.
-      if (!body.length) continue;
-      const [head, ...rest] = body;
+      const dataRows = rows.filter((r) => !isDivider(r)).map(cells);
+      if (!dataRows.length) continue;
+      const singleRow = dataRows.length === 1 && !rows.some(isDivider);
       blocks.push(
         <div className="agent-table" key={blocks.length}>
           <table>
-            <thead><tr>{head.map((c, j) => <th key={j}><Inline text={c} /></th>)}</tr></thead>
-            <tbody>{rest.map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>)}</tbody>
+            {singleRow ? (
+              <tbody>
+                <tr>{dataRows[0].map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>
+              </tbody>
+            ) : (
+              <>
+                <thead><tr>{dataRows[0].map((c, j) => <th key={j}><Inline text={c} /></th>)}</tr></thead>
+                <tbody>{dataRows.slice(1).map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>)}</tbody>
+              </>
+            )}
           </table>
         </div>
       );
       continue;
     }
+
+    const hm = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) {
+      const level = hm[1].length;
+      const Tag = HEADING_TAG[level] || 'h3';
+      blocks.push(<Tag key={blocks.length} className={'agent-h' + level}><Inline text={hm[2]} /></Tag>);
+      i++;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*]\s+/, ''));
+        i++;
+      }
+      blocks.push(
+        <ul key={blocks.length} className="agent-list">
+          {items.map((item, j) => <li key={j}><Inline text={item} /></li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+        i++;
+      }
+      blocks.push(
+        <ol key={blocks.length} className="agent-list">
+          {items.map((item, j) => <li key={j}><Inline text={item} /></li>)}
+        </ol>
+      );
+      continue;
+    }
+
     const para = [];
-    while (i < lines.length && !lines[i].trim().startsWith('|')) para.push(lines[i++]);
+    while (i < lines.length && lines[i].trim()) {
+      const t = lines[i].trim();
+      if (t.startsWith('```') || t.startsWith('|') || /^(#{1,3})\s+/.test(t) || /^[-*]\s+/.test(t) || /^\d+\.\s+/.test(t)) break;
+      para.push(lines[i++]);
+    }
     const textBlock = para.join('\n').trim();
     if (textBlock) blocks.push(<p key={blocks.length}><Inline text={textBlock} /></p>);
   }
@@ -292,6 +403,66 @@ function LiveBubble({ live, elapsed }) {
 const STATUS_LABEL = { pending: '승인 대기', applied: '반영됨', rejected: '거절함', failed: '실패' };
 const STATUS_TONE = { pending: 'amber', applied: 'ok', rejected: 'muted', failed: 'danger' };
 
+/** Fields the teacher can tweak before approve (ids stay locked in the stored args). */
+const EDITABLE_ARG_KEYS = [
+  'attendance', 'test_status', 'test_score', 'test_max_score', 'test_difficulty',
+  'assignment_completion', 'concentration', 'special_note', 'student_notice',
+  'progress', 'homework', 'content', 'test_title', 'test_scope', 'class_notice', 'memo',
+  'status', 'kind', 'title', 'due_date', 'text'
+];
+const ARG_LABELS = {
+  attendance: '출결', test_status: '테스트', test_score: '점수', test_max_score: '만점',
+  test_difficulty: '난이도', assignment_completion: '과제', concentration: '집중도',
+  special_note: '특이사항', student_notice: '전달사항', progress: '진도', homework: '숙제',
+  content: '내용', test_title: '테스트 제목', test_scope: '시험 범위', class_notice: '반 공지',
+  memo: '메모', status: '상태', kind: '종류', title: '제목', due_date: '기한', text: '텍스트'
+};
+const NUMBER_ARGS = new Set(['test_score', 'test_max_score']);
+
+function editableDraft(args) {
+  const out = {};
+  if (!args || typeof args !== 'object') return out;
+  EDITABLE_ARG_KEYS.forEach((k) => {
+    if (args[k] !== undefined && args[k] !== null) out[k] = args[k];
+  });
+  return out;
+}
+
+function coerceArg(key, raw) {
+  if (!NUMBER_ARGS.has(key)) return raw;
+  const s = String(raw ?? '').trim();
+  if (s === '') return '';
+  const n = Number(s);
+  return Number.isFinite(n) ? n : raw;
+}
+
+function sameArg(a, b) {
+  if (a === b) return true;
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') return na === nb;
+  return String(a ?? '') === String(b ?? '');
+}
+
+/** Merged args for calls the teacher edited; undefined when nothing changed. */
+function buildOverrides(calls, drafts, selected) {
+  const overrides = {};
+  calls.forEach((c, i) => {
+    if (!selected.includes(i)) return;
+    const draft = drafts[i] || {};
+    const base = c.args || {};
+    let changed = false;
+    const merged = { ...base };
+    Object.keys(draft).forEach((k) => {
+      const next = coerceArg(k, draft[k]);
+      if (!sameArg(base[k], next)) changed = true;
+      merged[k] = next;
+    });
+    if (changed) overrides[i] = merged;
+  });
+  return Object.keys(overrides).length ? overrides : undefined;
+}
+
 function ResultTag({ result }) {
   if (!result) return null;
   if (result.skipped) return <span className="tag muted">건너뜀</span>;
@@ -302,13 +473,20 @@ function ProposalCard({ proposal, onChange }) {
   const toast = useToast();
   const [busy, setBusy] = useState('');
   const [selected, setSelected] = useState(() => proposal.calls.map((_, i) => i));
+  const [drafts, setDrafts] = useState(() => proposal.calls.map((c) => editableDraft(c.args)));
   const p = proposal;
   const pending = p.status === 'pending';
   const toggle = (i) => setSelected((list) => (list.includes(i) ? list.filter((x) => x !== i) : [...list, i].sort((a, b) => a - b)));
+  const setDraft = (i, key, value) => {
+    setDrafts((rows) => rows.map((row, j) => (j === i ? { ...row, [key]: value } : row)));
+  };
   const act = async (kind) => {
     setBusy(kind);
     try {
-      const next = await postJson(`/api/agent/${kind}`, kind === 'apply' ? { proposal_id: p.proposal_id, selected } : { proposal_id: p.proposal_id });
+      const body = kind === 'apply'
+        ? { proposal_id: p.proposal_id, selected, overrides: buildOverrides(p.calls, drafts, selected) }
+        : { proposal_id: p.proposal_id };
+      const next = await postJson(`/api/agent/${kind}`, body);
       onChange(next);
       if (kind === 'apply') {
         const count = Array.isArray(next.result) ? next.result.filter((r) => r && !r.skipped).length : selected.length;
@@ -340,23 +518,42 @@ function ProposalCard({ proposal, onChange }) {
         <span className={'tag ' + STATUS_TONE[p.status]}>{STATUS_LABEL[p.status] || p.status}</span>
       </div>
       <ul>
-        {p.calls.map((c, i) => (
-          <li key={i}>
-            {pending ? (
-              <label className="agent-proposal-item">
-                <input type="checkbox" checked={selected.includes(i)} onChange={() => toggle(i)} disabled={Boolean(busy)} />
-                <span className="agent-proposal-label">{c.label}</span>
-                <span>{c.text}</span>
-              </label>
-            ) : (
-              <>
-                <span className="agent-proposal-label">{c.label}</span>
-                <span>{c.text}</span>
-              </>
-            )}
-            <ResultTag result={results[i]} />
-          </li>
-        ))}
+        {p.calls.map((c, i) => {
+          const fields = Object.keys(drafts[i] || {});
+          return (
+            <li key={i}>
+              {pending ? (
+                <label className="agent-proposal-item">
+                  <input type="checkbox" checked={selected.includes(i)} onChange={() => toggle(i)} disabled={Boolean(busy)} />
+                  <span className="agent-proposal-label">{c.label}</span>
+                  <span>{c.text}</span>
+                </label>
+              ) : (
+                <>
+                  <span className="agent-proposal-label">{c.label}</span>
+                  <span>{c.text}</span>
+                </>
+              )}
+              <ResultTag result={results[i]} />
+              {pending && fields.length ? (
+                <div className="agent-proposal-edits" onClick={(e) => e.stopPropagation()}>
+                  {fields.map((key) => (
+                    <label key={key} className="agent-proposal-edit">
+                      <span>{ARG_LABELS[key] || key}</span>
+                      <input
+                        type={NUMBER_ARGS.has(key) ? 'number' : 'text'}
+                        value={drafts[i][key] ?? ''}
+                        disabled={Boolean(busy) || !selected.includes(i)}
+                        onChange={(e) => setDraft(i, key, e.target.value)}
+                        aria-label={`${c.label} ${ARG_LABELS[key] || key}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {p.status === 'failed' && p.result && p.result.error ? (
         <p className="agent-proposal-error" role="alert">반영하지 못했습니다(변경 없음): {p.result.error}</p>
@@ -885,8 +1082,8 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
 
         {!aiEnabled ? (
           <div className="agent-empty">
-            <p><strong>AI 키가 설정되지 않았습니다.</strong></p>
-            <p>서버 환경 변수 <code>ANTHROPIC_API_KEY</code>를 넣으면 Claude Haiku 5.5로 사용할 수 있습니다. 없으면 <code>AI_API_KEY</code>(OpenRouter)와 도구 호출을 지원하는 <code>AGENT_MODEL</code>을 씁니다.</p>
+            <p><strong>AI 비서가 아직 설정되지 않았습니다.</strong></p>
+            <p>관리자에게 문의해 주세요.</p>
           </div>
         ) : view === 'inbox' ? (
           <Inbox
@@ -917,6 +1114,7 @@ export default function AgentPanel({ open, onClose, aiEnabled, today, classes, s
               {suggestions ? (
                 <div className="agent-empty">
                   <p>학생 관리 업무를 말로 지시해 보세요.</p>
+                  <p className="agent-shortcuts">Ctrl+K 검색 · Ctrl+J AI 비서</p>
                   {suggestions.count ? <p className="agent-context">오늘 수업 {suggestions.count}개가 있습니다.</p> : null}
                   <div className="agent-suggestions">
                     {suggestions.list.map((s) => (

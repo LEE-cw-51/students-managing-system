@@ -243,7 +243,7 @@ function MonthlyReports({ studentId }) {
   const [open, setOpen] = useState(null);
   return (
     <section className="card">
-      <div className="card-head"><h2>월간 보고서</h2><Link className="btn secondary sm" href="/reports">보고서 화면</Link></div>
+      <div className="card-head"><h2>월간 보고서</h2><Link className="link-btn" href="/reports">보고서 화면</Link></div>
       <Async state={state}>
         {(d) => d.monthly.length ? (
           <ul className="sd-lines">

@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Suspense, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import Tabs, { useTab } from '@/components/ui/Tabs';
+import Tabs, { TabPanel, useTab } from '@/components/ui/Tabs';
 import CounselingLog from '@/components/domain/student/CounselingLog';
 import PageHeader from '@/components/ui/PageHeader';
-import { Async, EmptyState } from '@/components/ui/Feedback';
+import { Async, EmptyState, PageSkeleton } from '@/components/ui/Feedback';
 import Badges from '@/components/domain/Badges';
 import StudentForm from '@/components/domain/student/StudentForm';
 import { openRegularClasses } from '@/components/domain/student/ClassChangeDialog';
@@ -28,7 +28,7 @@ const TABS = [
 
 export default function StudentsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <StudentsView />
     </Suspense>
   );
@@ -48,7 +48,8 @@ function StudentsView() {
         actions={tab === 'list' ? <button type="button" className="btn" onClick={() => setCreating(true)}>학생 등록</button> : null}
       />
       <Tabs tabs={TABS} current={tab} />
-      {tab === 'list' ? <StudentList onCreate={() => setCreating(true)} /> : <CounselingLog />}
+      <TabPanel tabKey="list" current={tab}><StudentList onCreate={() => setCreating(true)} /></TabPanel>
+      <TabPanel tabKey="counseling" current={tab}><CounselingLog /></TabPanel>
       {creating ? <StudentForm onClose={() => setCreating(false)} onSaved={(row) => router.push(`/students/${row.student_id}`)} /> : null}
     </div>
   );
@@ -130,7 +131,7 @@ function StudentList({ onCreate }) {
           <option value="__none__">미배정 (반 없는 재원생)</option>
           {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button type="button" className={'btn sm ' + (onlyFlagged ? '' : 'secondary')} aria-pressed={onlyFlagged} onClick={() => setFlagged(onlyFlagged ? '' : '1')}>
+        <button type="button" className={'btn sm ' + (onlyFlagged ? '' : 'secondary')} aria-pressed={onlyFlagged} title="출결·과제 등 주의 뱃지가 붙은 학생만" onClick={() => setFlagged(onlyFlagged ? '' : '1')}>
           ⚠ 주의만{state.data ? ` (${flaggedCount})` : ''}
         </button>
         <div className="segmented st-status" role="group" aria-label="재원 상태">
@@ -139,6 +140,11 @@ function StudentList({ onCreate }) {
           ))}
         </div>
       </div>
+      <p className="hint st-search-hint">
+        {classId === '__none__'
+          ? '미배정: 재원생인데 운영 반에 없는 학생입니다. 목록에서 반을 배정하세요.'
+          : '검색은 이 브라우저에만 유지됩니다. 학년·반·주의 필터는 주소에 남습니다.'}
+      </p>
       {sel.chosen.length ? <StudentBulkBar ids={sel.chosen} onDone={bulkDone} onClear={sel.clear} /> : null}
       <Async state={state}>
         {() => rows.length ? (

@@ -152,7 +152,10 @@ describe('agent write action registry: adapters', () => {
 
   it('the in-app assistant gets exactly the actions on its surface, in OpenAI and Anthropic form', () => {
     const shared = LMS.agentActions.list().filter((a) => a.surfaces.includes('assistant'));
-    assert.deepEqual(shared.map((a) => a.name), ['update_attendance', 'create_counseling', 'update_task_status']);
+    assert.deepEqual(shared.map((a) => a.name), [
+      'update_attendance', 'save_lesson', 'update_lesson', 'save_class_session',
+      'create_counseling', 'update_task_status'
+    ]);
     const openAi = new Map(toolDefinitions().map((d) => [d.function.name, d.function]));
     const anthropic = new Map(anthropicToolDefinitions().map((d) => [d.name, d]));
     LMS.agentActions.list().forEach((a) => {

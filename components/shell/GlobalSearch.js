@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const MAX_RESULTS = 8;
+const MAX_RESULTS = 12;
 
 function norm(v) {
   return String(v || '').toLowerCase().replace(/\s+/g, '');
@@ -13,7 +13,7 @@ function norm(v) {
 /** Rank students and classes for the query: name prefix > name contains > school/class/phone. */
 export function searchIndex(index, query) {
   const q = norm(query);
-  if (!q) return [];
+  if (!q) return { results: [], truncated: false };
   const digits = q.replace(/\D/g, '');
   const scored = [];
   (index?.students || []).forEach((s) => {
@@ -51,9 +51,11 @@ export function searchIndex(index, query) {
       score
     });
   });
-  return scored
-    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'ko'))
-    .slice(0, MAX_RESULTS);
+  const all = scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'ko'));
+  return {
+    results: all.slice(0, MAX_RESULTS),
+    truncated: all.length > MAX_RESULTS
+  };
 }
 
 export default function GlobalSearch({ index }) {
@@ -62,7 +64,7 @@ export default function GlobalSearch({ index }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const results = useMemo(() => searchIndex(index, query), [index, query]);
+  const { results, truncated } = useMemo(() => searchIndex(index, query), [index, query]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -138,7 +140,13 @@ export default function GlobalSearch({ index }) {
                 <span className="meta">{item.meta}</span>
               </Link>
             </li>
-          )) : <li className="gsearch-empty">‘{query}’와 일치하는 학생이나 반이 없습니다.</li>}
+          )) : (
+            <li className="gsearch-empty">
+              ‘{query}’와 일치하는 학생이나 반이 없습니다.
+              <span className="gsearch-shortcuts">Ctrl+K 검색 · Ctrl+J AI 비서</span>
+            </li>
+          )}
+          {truncated ? <li className="gsearch-more muted" role="presentation">더 많은 결과는 학생/반 목록에서 보세요</li> : null}
         </ul>
       ) : null}
     </div>

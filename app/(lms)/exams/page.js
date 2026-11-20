@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { Fragment, Suspense, useMemo, useState } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
-import Tabs, { useTab } from '@/components/ui/Tabs';
+import Tabs, { TabPanel, useTab } from '@/components/ui/Tabs';
 import Modal, { ModalCancel } from '@/components/ui/Modal';
 import { useDirty } from '@/components/ui/useDirty';
-import { Async, EmptyState } from '@/components/ui/Feedback';
+import { Async, EmptyState, PageSkeleton, TableScroll } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
 import { useBoot } from '@/components/shell/AppShell';
 import SchoolExamForm from '@/components/domain/exam/SchoolExamForm';
@@ -219,6 +219,7 @@ function ScheduleTab({ tabs }) {
                 ) : null}
                 {exams.length ? (
                   <>
+                    <TableScroll>
                     <div className="table-wrap ex-table">
                       <table className="data-table">
                         <thead><tr><th>학교 · 학년</th><th>시험 기간</th><th>교재</th><th>시험 범위</th><th className="num">학생</th><th /></tr></thead>
@@ -244,6 +245,7 @@ function ScheduleTab({ tabs }) {
                         </tbody>
                       </table>
                     </div>
+                    </TableScroll>
                     <ul className="ex-cards">
                       {exams.map((x) => (
                         <li key={x.school_exam_id} className="ex-card">
@@ -329,6 +331,7 @@ function PeriodsTab({ tabs }) {
               <summary>시험대비 기간이란?</summary>
               <p>{PERIOD_HELP}</p>
             </details>
+            <TableScroll>
             <div className="table-wrap ep-table">
               <table className="data-table">
                 <thead><tr><th>기간</th><th>날짜</th><th>상태</th><th className="num">시험대비 반</th><th className="num">학생</th><th className="num">휴강 반</th></tr></thead>
@@ -346,6 +349,7 @@ function PeriodsTab({ tabs }) {
                 </tbody>
               </table>
             </div>
+            </TableScroll>
             <ul className="ep-cards">
               {list.map((p) => (
                 <li key={p.exam_period_id} className="ep-card">
@@ -373,14 +377,15 @@ function ExamsView() {
   const tabs = <Tabs tabs={TABS} current={tab} />;
   return (
     <div className="exams-page">
-      {tab === 'schedule' ? <ScheduleTab tabs={tabs} /> : <PeriodsTab tabs={tabs} />}
+      <TabPanel tabKey="schedule" current={tab}><ScheduleTab tabs={tabs} /></TabPanel>
+      <TabPanel tabKey="periods" current={tab}><PeriodsTab tabs={tabs} /></TabPanel>
     </div>
   );
 }
 
 export default function ExamsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton />}>
       <ExamsView />
     </Suspense>
   );

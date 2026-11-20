@@ -1,7 +1,8 @@
 # 강사용 음성 AI 에이전트 로드맵
 
-- 상태: 채팅 AI 비서 1차 구현 완료(음성 없음). 단계를 가치 순서(A~F)로 개정 — 2026-11-03
+- 상태: 채팅 AI 비서·MCP 커넥터 운영 중(음성 없음). A~F 가치 순서 유지. **현실 동기화 2026-11-19**
 - 작성일: 2026-10-28
+- 다음 실행: [phase-a-next.md](./phase-a-next.md) (Phase A 작업 패키지·종료 조건·첫 PR)
 
 기존 수동 입력 화면은 그대로 두고, 같은 서비스 함수를 호출하는 "AI 제안 → 강사 승인" 레이어를 얹는다. 단계는 기술 순서가 아니라 강사에게 주는 가치 순서(기록 → 기억 → 진단 → 능동 알림)로 확장한다.
 
@@ -53,18 +54,19 @@ flowchart LR
 
 ## 범위
 
-- 당분간 사용자는 나(강사 1명)뿐이다. 지금 구조(공유 비밀번호 하나, `lms.kv` 단일 저장소)를 그대로 쓴다.
-- 사업화, 멀티테넌트, 법적 검토는 이 계획에 넣지 않는다. 위 정체성은 설계 방향을 정하는 기준으로만 쓰고, 사업화 관련 일은 맨 아래 "나중에" 섹션에 메모만 남긴다.
+- **우선 사용자는 본인(강사) dogfooding이다.** 기능·우선순위는 여전히 본인 수업 흐름에 맞춘다.
+- **계정·작업공간은 이미 있다.** 공유 비밀번호 하나 + 단일 `lms.kv`만 쓰던 시절은 지났다. 강사 로그인, 초대, 워크스페이스별 `lms.kv` 분리가 동작한다(README·accounts 마이그레이션). 다만 사업화·멀티테넌트 제품화·법적 검토는 이 로드맵에 넣지 않는다.
+- 위 정체성은 설계 방향을 정하는 기준으로만 쓰고, 사업화 관련 일은 맨 아래 "나중에" 섹션에 메모만 남긴다.
 
 ## 핵심 원칙
 
-- **입력 경로는 둘, 저장 경로는 하나.** 수동 화면과 AI 모두 `src/01_Service.js`의 같은 함수(`saveTodaySession`, `saveHomeworkChecks`, `saveCounselingNote` 등)를 거쳐 저장한다. AI 전용 저장 로직은 만들지 않는다. 그래야 검증 규칙(레슨 중복 방지 등)과 데이터 형태가 항상 같다.
-- **AI는 제안만 하고, 저장은 내가 승인할 때만 한다.** 현재 `lib/plan-ai.js`의 "초안 → 확인" 원칙을 모든 데이터로 넓힌다.
-- **기존 스택을 유지한다.** Next.js 16, Supabase, `lib/ai-client.js`를 그대로 쓰고, 그 위에 tool calling과 스트리밍을 붙인다.
+- **입력 경로는 둘, 저장 경로는 하나.** 수동 화면과 AI 모두 `src/01_Service.js`(및 분리된 도메인 모듈)의 같은 함수를 거쳐 저장한다. AI 전용 저장 로직은 만들지 않는다.
+- **AI는 제안만 하고, 저장은 앱에서 강사가 승인할 때만 한다.** ADR-0002: 승인·거절은 앱 세션만. MCP/Claude는 제안 생성·대기 목록 조회만 한다.
+- **기존 스택을 유지한다.** Next.js, Supabase, `lib/ai-client.js`를 그대로 쓰고, tool calling과 스트리밍을 붙인다.
 
 ## 지금부터 지킬 설계 제약
 
-- **근무처 구조를 막지 않는다.** 나중에 강사 → 근무처(학원, 과외) → 반 → 학생 구조로 갈 수 있게 한다. 학원이 하나만 있다고 가정하는 부분(예: 설정의 `academy_name` 하나)을 더 늘리지 않는다. 새 설정이나 필드가 학원 단위라면 반이나 근무처에 붙일 수 있는 형태로 둔다.
+- **근무처 구조를 막지 않는다.** 나중에 강사 → 근무처(학원, 과외) → 반 → 학생 구조로 갈 수 있게 한다. 학원이 하나만 있다고 가정하는 부분(예: 설정의 `academy_name` 하나)을 더 늘리지 않는다.
 - **녹음 원본은 기본으로 지운다.** 텍스트로 변환한 뒤 원본은 남기지 않는 것을 기본값으로 한다.
 
 ## 전체 구조
@@ -75,44 +77,73 @@ flowchart LR
   voice[음성] --> stt[STT받아쓰기]
   stt --> agent[에이전트]
   textCmd[텍스트명령] --> agent
+  mcp[Claude MCP] --> agent
   realtime[실시간음성비서] --> agent
-  agent -->|읽기도구| views[src/05_Views.js]
+  agent -->|읽기도구| views[Views]
   agent -->|쓰기는제안으로만| proposals[AgentProposals]
-  proposals --> review[승인패널]
-  review -->|승인| publicApi
-  publicApi --> service[src/01_Service.js]
-  service --> db[(lms.kv)]
+  proposals --> review[앱 승인패널]
+  review -->|승인 ADR-0002| apply["/api/agent/apply"]
+  apply --> service[Service / domain modules]
+  service --> db[(lms.kv per workspace)]
 ```
 
-현재 저장 진입점(`app/api/[name]/route.js`)이 이미 `PUBLIC_API` 허용 목록 방식이라, 에이전트 도구를 그 위에 그대로 만들 수 있다.
+## 현재 현실 (2026-11-19)
+
+### 인앱 AI 비서
+
+- 전역 패널 `components/shell/AgentPanel.js` (`Ctrl+J`), `/api/agent` 도구 루프(`lib/agent.js`).
+- **읽기 10 + 쓰기 6** (`lib/agent-tools.js` → `assistant` surface):
+  - 읽기: `search_students`, `get_student_profile`, `get_attendance`, `get_student_lessons`, `get_scores`, `get_homework_status`, `get_counseling_notes`, `get_today_board`, `list_classes`, `get_class_members`
+  - 쓰기(승인형): `update_attendance`, `save_lesson`, `update_lesson`, `save_class_session`, `create_counseling`, `update_task_status`
+- 제안 카드(`ProposalCard`): call 단위 체크 + **승인 전 인자 인라인 편집**(`overrides` → apply 직전 re-preview).
+- 승인 대기함(Inbox): 대화·MCP에서 올라온 pending을 일괄 선택·반영/거절.
+
+### Claude MCP 커넥터
+
+- 도구 약 **84개** (`AGENT_TOOLS` 기준, MCP surface: 읽기 ~35 + 쓰기 ~49). 수업 기록·진도·숙제·반·시험 등 넓은 write action이 `src/agent-actions/*`에 이미 있고, 기본 surface는 MCP다.
+- 쓰기 모드: `read_only` | `proposal`만. `claude_approve`는 제거·레거시 정규화(ADR-0002).
+
+### 승인·계정
+
+- **ADR-0002 (채택):** 제안 apply/reject는 앱 로그인 세션만. MCP는 승인 도구 없음.
+- **강사 계정·워크스페이스:** 로그인, 초대, 워크스페이스별 저장이 있다. dogfooding 우선은 유지하되, "공유 비밀번호 하나" 전제는 더 이상 맞지 않는다.
+
+### 테스트
+
+- `tests/agent.test.js`, `tests/agent-actions.test.js`, `tests/agent-action-registry.test.js` 등.
+- **발화 평가 세트:** `tests/agent-eval/` (~40 한국어 지시) + `tests/agent-eval.test.js` CI 게이트(모델 호출 없음). B 진입 조건.
 
 ## 단계별 계획
 
-### 진행 상황 (2026-11-03 기준)
+### 진행 상황 요약
 
-- 구현(2026-10-31): 전역 채팅 패널(`components/shell/AgentPanel.js`, `Ctrl+J`), `/api/agent` 도구 호출 루프(`lib/agent.js`), 도구 목록(`lib/agent-tools.js`: 조회 10개, 승인형 쓰기 3개), 대화·제안 테이블과 승인·검증(`src/07_Agent.js`), 승인 라우트 `/api/agent/apply`, 테스트(`tests/agent.test.js`).
-- 처음 계획과 다른 점: 쓰기는 제안 카드 단위로 한꺼번에 승인한다(항목별 체크·수정은 아직 없음). 승인은 실패 기록을 위해 `/api/[name]` 대신 전용 라우트를 쓴다.
-- 모델: AI 비서는 `ANTHROPIC_API_KEY`로 Claude Haiku 5.5를 쓴다. 학생 이름 해석 실패가 잦으면 Sonnet 5.5로 올린다. 월말 보고서와 강의 계획은 계속 OpenRouter를 쓴다.
-- 처음 계획의 0·1·3단계(기반, 텍스트 명령 → 제안, 조회형)는 1차 구현이 끝났다. 남은 일은 아래 A~F 단계로 다시 나눴다.
-  - A: 성적 입력·진도 저장 도구, 제안 항목별 선택·수정, 발화 평가 세트(30~50개)
-  - B: 받아쓰기 음성(처음 계획의 2단계)
-  - C~E: 학생 기억, 진단과 제안, 능동형 기능(처음 계획의 5단계를 앞으로 당김)
-  - F: 실시간 대화형 비서(처음 계획의 4단계를 맨 뒤로 내림)
+| 단계 | 상태 | 메모 |
+|------|------|------|
+| A 기록 완성 | **완료(A1–A3)** | 인앱 수업 쓰기 6, 승인 전 편집, eval 게이트. MCP write 전량 복제는 안 함 |
+| B 받아쓰기 | 미착수 | A 평가 세트 통과 후 |
+| C 학생 기억 | 부분 | 조회 도구는 있음. 장기 맥락 요약은 미착수 |
+| D 진단·제안 | 미착수 | `06_Plans` 신호 재사용 예정 |
+| E 능동형 | 미착수 | 브리핑·패턴 알림 |
+| F 실시간 | 보류 | 선택·맨 뒤 |
 
-### 이미 갖춘 기반
+### A. 기록 완성 (음성 전) — 완료 vs 미완
 
-- **도구 목록:** `lib/agent-tools.js`에 `PUBLIC_API` 중 에이전트가 쓸 함수만 골라 한국어 설명과 인자 스키마를 붙였다.
-- **제안 테이블:** `AgentProposals`에 `proposal_id`, `source`(text/dictation/realtime), `transcript`, `calls`(`[{name, args}]`), `summary`, `status`(pending/applied/rejected), `created_at`을 둔다. 승인하면 한 트랜잭션 안에서 실행하고, 저장 후 다시 읽어 검증한다.
-- **문맥 구성기:** 오늘 수업, 반 명단, 동명이인 정보를 짧게 묶어 AI에 넘긴다. 확신이 낮으면 추측하지 않고 "어느 학생인지" 되묻는다.
-- **AI 호출 위치:** AI 호출은 DB 잠금 밖에서 한다. `generateMonthlyReportAi`와 같은 패턴이다.
+**된 것**
 
-### A. 기록 완성 (음성 전)
+- 텍스트 명령 → 제안 → 앱 승인 파이프라인
+- 인앱 읽기 10 + 쓰기 6, MCP 광역 도구(~84)
+- ProposalCard **항목(call)별 체크 선택** 반영
+- ADR-0002 앱 전용 승인
+- 계정·워크스페이스
 
-- **성적·진도 쓰기 도구:** 성적 입력과 진도 저장(`saveTodaySession`) 도구를 추가한다. 가장 자주 쓰는 쓰기라서, 이것이 없으면 받아쓰기의 가치가 절반으로 떨어진다.
-- **항목별 승인·수정:** 승인 패널에서 바뀌는 내용을 기존 값과 나란히 보여주고, 항목별로 체크하고 수정한 뒤 승인할 수 있게 한다. 받아쓰기는 오류가 잦아서 카드 통째 승인으로는 부족하다.
-- **평가 세트:** `tests/`에 실제 발화 예시와 기대하는 도구 호출 쌍을 30~50개 만들어 회귀 테스트로 쓴다.
-  - 학생 이름 해석이 핵심이다: 성 생략, 별명, 동명이인을 구분해야 한다.
-- **다음 단계로 가는 조건:** 평가 세트를 통과해야 B단계(음성)로 넘어간다.
+**Phase A 완료 (A1–A3)**
+
+1. 인앱 수업 기록 쓰기: `save_lesson` / `update_lesson` / `save_class_session` (+ 기존 출결·상담·할 일) → 쓰기 6.
+2. 승인 전 편집: ProposalCard inline edit + apply `overrides` re-preview.
+3. 평가 세트: `tests/agent-eval/` ~40 + CI 게이트.
+4. **B 진입:** eval 회귀 통과 후 받아쓰기(B).
+
+상세 작업 패키지·키 파일·하지 말 것 → [phase-a-next.md](./phase-a-next.md).
 
 ### B. 수업 직후 받아쓰기
 
@@ -125,7 +156,7 @@ flowchart LR
 
 ### C. 학생 기억과 조회
 
-- 읽기 도구만으로 질문에 답한다(1차 구현됨).
+- 읽기 도구만으로 질문에 답한다(1차·MCP 확장 구현됨).
   - 예: "이번 주 숙제 두 번 이상 안 한 학생?", "민수 최근 상담 내용"
 - 답변 안의 학생과 반은 상세 페이지 링크로 보여준다.
 - 학생별 장기 맥락 요약을 더한다. 여러 달의 레슨, 상담, 시험 기록을 짧게 묶어 "지난 시험 직전에도 이 단원에서 막혔다" 같은 답을 할 수 있게 한다.
@@ -167,14 +198,15 @@ flowchart LR
 ## 남은 결정과 주의점
 
 - **STT 공급자:** B단계에서 2~3개를 직접 비교해 고른다.
-- **모델:** 결정 완료. AI 비서는 Claude Haiku 5.5(`ANTHROPIC_API_KEY`), 이름 해석 실패가 잦으면 Sonnet 5.5. 월 사용 비용은 단계별로 확인한다.
+- **모델:** AI 비서는 Claude(Haiku 계열, `ANTHROPIC_API_KEY`). 이름 해석 실패가 잦으면 상위 모델. 월말 보고서·강의 계획은 OpenRouter 경로를 유지한다.
 - **녹음 원본:** 기본은 삭제다(설계 제약 참고).
-- **성능:** `withService`는 전역 잠금 아래 전체 테이블을 불러온다. 1인 사용에는 문제없지만, E단계 알림이나 F단계 실시간 비서의 잦은 읽기는 가벼운 읽기 경로를 검토한다.
+- **성능:** `withService`는 워크스페이스 잠금 아래 테이블을 불러온다. 1인 dogfooding에는 문제없지만, E단계 알림이나 F단계 실시간 비서의 잦은 읽기는 가벼운 읽기 경로를 검토한다.
+- **인앱 vs MCP 도구 폭:** MCP write가 넓고 인앱은 의도적으로 좁다. Phase A에서 수업 직후 기록에 필요한 것만 인앱에 연다. 전부 복제하지 않는다.
 
 ## 나중에 (지금은 하지 않음)
 
-- 프리랜서 강사 대상 사업화: 강사 개인 계정, `lms.kv` 강사별 분리, `Workplaces`(근무처) 테이블
-  - 데이터 구조는 강사 → 근무처(학원, 과외) → 반 → 학생. 지금은 위 설계 제약만 지킨다.
+- 프리랜서 강사 대상 **상업화** 포장: 요금제, 유통, 마케팅 사이트
+- `Workplaces`(근무처) 테이블을 제품 기능으로 노출 — 설계 제약만 지킨다
 - 개인정보·법적 검토: 강사가 학생 정보를 보관하는 문제, 외부 AI 전송 범위, 녹음 동의
-- 가격(받아쓰기 기본 요금제, 실시간 비서 상위 요금제)과 유통 경로(강사 커뮤니티, 지인 추천)
-- 저장은 모두 `withService`를 거치므로, 나중에 강사별 분리를 할 때 에이전트 코드는 크게 바꿀 필요가 없다.
+- F 실시간 비서, Claude 쪽 승인 재개방(ADR-0002를 먼저 재검토)
+- 저장은 서비스/도메인 경로를 거치므로, 워크스페이스 분리가 되어 있어도 에이전트 코드는 surface·승인 규칙만 지키면 된다.
