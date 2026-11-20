@@ -364,6 +364,15 @@ LMS.createAgent = function (ctx) {
    * overrides: { [index]: args } — partial override + locked ids; each is re-previewed before run
    * (LMS.agentActions.apply). A bad override fails the whole apply like any other preview error.
    */
+  /** When the teacher edits proposal args, only non-id fields may change; *_id stays on the stored call. */
+  function repinStoredIds_(stored, args) {
+    if (!stored || typeof stored !== 'object') return args;
+    Object.keys(stored).forEach(function (k) {
+      if (/_id$/.test(k) && Object.prototype.hasOwnProperty.call(stored, k)) args[k] = stored[k];
+    });
+    return args;
+  }
+
   function applyAgentProposal(proposalId, selected, overrides) {
     var row = requireProposal(proposalId);
     if (!mustSettle(row, 'applied')) return slimProposal(row);
@@ -386,10 +395,7 @@ LMS.createAgent = function (ctx) {
       if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
       var args = c.args;
       if (over && Object.prototype.hasOwnProperty.call(over, i)) {
-        args = Object.assign({}, c.args, over[i]);
-        args.lesson_id = c.args.lesson_id;
-        args.student_id = c.args.student_id;
-        args.class_id = c.args.class_id;
+        args = repinStoredIds_(c.args, Object.assign({}, c.args, over[i]));
       }
       var check = LMS.agentActions.apply(s, c.tool, args);
       return { tool: c.tool, text: c.text, ok: check.ok, after: check.after };

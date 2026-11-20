@@ -264,14 +264,22 @@ export function RichText({ text }) {
     if (trimmed.startsWith('|')) {
       const rows = [];
       while (i < lines.length && lines[i].trim().startsWith('|')) rows.push(lines[i++]);
-      const body = rows.filter((r) => !isDivider(r)).map(cells);
-      if (!body.length) continue;
-      const [head, ...rest] = body;
+      const dataRows = rows.filter((r) => !isDivider(r)).map(cells);
+      if (!dataRows.length) continue;
+      const singleRow = dataRows.length === 1 && !rows.some(isDivider);
       blocks.push(
         <div className="agent-table" key={blocks.length}>
           <table>
-            <thead><tr>{head.map((c, j) => <th key={j}><Inline text={c} /></th>)}</tr></thead>
-            <tbody>{rest.map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>)}</tbody>
+            {singleRow ? (
+              <tbody>
+                <tr>{dataRows[0].map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>
+              </tbody>
+            ) : (
+              <>
+                <thead><tr>{dataRows[0].map((c, j) => <th key={j}><Inline text={c} /></th>)}</tr></thead>
+                <tbody>{dataRows.slice(1).map((r, k) => <tr key={k}>{r.map((c, j) => <td key={j}><Inline text={c} /></td>)}</tr>)}</tbody>
+              </>
+            )}
           </table>
         </div>
       );

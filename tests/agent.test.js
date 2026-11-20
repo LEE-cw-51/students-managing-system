@@ -712,7 +712,7 @@ describe('agent proposals', () => {
     assert.equal(lessonOf(kim.student_id).attendance, '출석');
   });
 
-  it('ignores forged lesson_id in override and applies to the stored target', async () => {
+  it('ignores forged entity ids in overrides and applies to stored targets', async () => {
     const { api, hong, kim, lessonOf, run } = setup();
     const hongLesson = lessonOf(hong.student_id);
     const kimLesson = lessonOf(kim.student_id);
@@ -726,6 +726,26 @@ describe('agent proposals', () => {
     assert.equal(applied.verification_status, 'verified');
     assert.equal(lessonOf(hong.student_id).attendance, '결석');
     assert.equal(lessonOf(kim.student_id).attendance, '출석');
+
+    const noteA = api.saveCounselingNote({ student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-16', content: '상담A', follow_up_date: '2026-09-22' });
+    const noteB = api.saveCounselingNote({ student_id: kim.student_id, kind: '학생', counsel_date: '2026-09-17', content: '상담B', follow_up_date: '2026-09-23' });
+    const pTask = proposalWith(api, [{ tool: 'update_task_status', args: { task_id: noteA.follow_up_task_id, status: '완료' } }]);
+    const appliedTask = await applyProposal(pTask.proposal_id, run, [0], {
+      0: { task_id: noteB.follow_up_task_id, status: '완료' }
+    });
+    assert.equal(appliedTask.verification_status, 'verified');
+    assert.equal(api.getCounselingNotes(hong.student_id).find((n) => n.counsel_date === '2026-09-16').follow_up_status, '완료');
+    assert.equal(api.getCounselingNotes(kim.student_id).find((n) => n.counsel_date === '2026-09-17').follow_up_status, '예정');
+
+    const pCounsel = proposalWith(api, [{
+      tool: 'create_counseling',
+      args: { student_id: hong.student_id, kind: '학생', counsel_date: '2026-09-18', content: '대상 홍' }
+    }]);
+    await applyProposal(pCounsel.proposal_id, run, [0], {
+      0: { student_id: kim.student_id, kind: '학생', counsel_date: '2026-09-18', content: '대상 홍' }
+    });
+    assert.ok(api.getCounselingNotes(hong.student_id).some((n) => n.counsel_date === '2026-09-18' && n.content === '대상 홍'));
+    assert.equal(api.getCounselingNotes(kim.student_id).some((n) => n.counsel_date === '2026-09-18'), false);
   });
 
   it('rejects once and refuses to apply a rejected proposal', () => {
