@@ -4,15 +4,50 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Async, EmptyState } from '@/components/ui/Feedback';
 import { useToast } from '@/components/ui/Toast';
+import { useBoot } from '@/components/shell/AppShell';
 import Badges from '@/components/domain/Badges';
 import MakeupForm from './MakeupForm';
 import TaskForm, { TASK_LABEL } from './TaskForm';
 import { api } from '@/lib/client-api';
 import { dateRange, shortDate } from '@/lib/format';
 
+/** Shown while the workspace has no enrolled students or no operating classes. */
+function SetupChecklist({ todayHasClass }) {
+  const boot = useBoot();
+  const enrolled = (boot.search?.students || []).filter((s) => s.status === '재원');
+  const operating = (boot.search?.classes || []).filter((c) => c.status === '운영');
+  if (enrolled.length && operating.length) return null;
+  const allAssigned = enrolled.length > 0 && enrolled.every((s) => (s.class_ids || []).length > 0);
+  const steps = [
+    { key: 'students', label: '학생 등록', done: enrolled.length > 0, href: '/students' },
+    { key: 'classes', label: '반 만들기', done: operating.length > 0, href: '/classes' },
+    { key: 'assign', label: '학생을 반에 배정', done: allAssigned, href: '/students?class=__none__' },
+    { key: 'lesson', label: '오늘 수업 기록', done: todayHasClass, href: null },
+  ];
+  return (
+    <div className="card setup-checklist">
+      <h2 style={{ margin: 0 }}>학원 시작하기</h2>
+      <p className="hint setup-checklist-lead">재원생과 운영 반을 등록하면 오늘 화면이 채워집니다.</p>
+      <ol className="setup-steps">
+        {steps.map((s) => (
+          <li key={s.key} className={s.done ? 'is-done' : ''}>
+            <span className="setup-step-mark" aria-hidden="true">{s.done ? '✓' : '○'}</span>
+            <span>
+              {s.href && !s.done ? <Link href={s.href}>{s.label}</Link> : s.label}
+              {s.key === 'lesson' && !s.done ? <span className="hint"> · 요일·시간이 있는 반은 달력에 수업으로 나옵니다</span> : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /** `state` is the page's getTodayBoard load, shared with WeekStrip so one reload refreshes both. */
 export default function TodayBoard({ date, state, onOpenClass }) {
+  const boot = useBoot();
   const toast = useToast();
+  const operatingClasses = (boot.search?.classes || []).filter((c) => c.status === '운영');
   const [addingMakeup, setAddingMakeup] = useState(false);
   // null = closed; { task: null } = new task; { task } = edit that task.
   const [taskForm, setTaskForm] = useState(null);
@@ -51,6 +86,7 @@ export default function TodayBoard({ date, state, onOpenClass }) {
     <Async state={state}>
       {(b) => (
         <div className="stack today-board">
+          <SetupChecklist todayHasClass={Boolean(b.classes.length || b.makeups.length)} />
           <section>
             <div className="card-head"><h2 style={{ margin: 0 }}>수업{b.classes.length ? ` ${b.classes.length}개` : ''}{b.makeups.length ? ` · 보강 ${b.makeups.length}개` : ''}</h2><button type="button" className="btn secondary sm" onClick={() => setAddingMakeup(true)}>보강 추가</button></div>
             {b.classes.length || b.makeups.length ? (
@@ -58,7 +94,7 @@ export default function TodayBoard({ date, state, onOpenClass }) {
                 {b.classes.map((c) => (
                   <button key={c.class_id} type="button" className={'class-card' + (c.complete ? ' is-done' : '')} onClick={() => onOpenClass(c.class_id)}>
                     <span className="class-card-time">{c.start_time}{c.end_time ? `–${c.end_time}` : ''}</span>
-                    <strong className="class-card-name">{c.class_name}{c.class_type === '시험대비' ? <span className="tag amber" style={{ marginLeft: 6 }}>시험대비</span> : null}</strong>
+                    <strong className="class-card-name">{c.class_name}{c.class_type === '시험대비' ? <span className="tag amber" style={{ marginLeft: 6 }} title="학교 시험 기간에만 운영하는 임시 반">시험대비</span> : null}</strong>
                     <span className="class-card-meta">
                       {c.complete ? <span className="tag ok">기록 완료</span>
                         : c.recorded_count ? <span className="tag amber">기록 {c.recorded_count}/{c.student_count}</span>
@@ -80,19 +116,32 @@ export default function TodayBoard({ date, state, onOpenClass }) {
                   </div>
                 ))}
               </div>
-            ) : <div className="card"><EmptyState title="이 날은 수업이 없습니다">위의 주간 띠에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState></div>}
+            ) : (
+              <div className="card">
+                {operatingClasses.length ? (
+                  <EmptyState title="이 날은 수업이 없습니다">위의 주간 띠에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState>
+                ) : (
+                  <EmptyState title="등록된 반이 없습니다" action={<Link href="/classes" className="btn secondary sm">반 만들기</Link>}>
+                    먼저 반과 수업 요일을 등록하세요. 학생을 배정하면 오늘 수업이 여기에 나타납니다.
+                  </EmptyState>
+                )}
+              </div>
+            )}
             {b.cancelled.length ? (
               <div className="stack-sm" style={{ marginTop: 8 }}>
+                <p className="hint" style={{ margin: 0 }}>휴강: 이 날짜만 수업을 쉬는 반입니다. 취소하면 다시 수업 목록에 나옵니다.</p>
                 {b.cancelled.map((c) => (
                   <div key={c.class_id} className="split muted">
-                    <span><span className="tag muted">휴강</span> {c.start_time} {c.class_name}{c.reason ? ` · ${c.reason}` : ''}</span>
+                    <span><span className="tag muted" title="해당 날짜만 수업 없음">휴강</span> {c.start_time} {c.class_name}{c.reason ? ` · ${c.reason}` : ''}</span>
                     <button type="button" className="link-btn" onClick={() => restoreClass(c)}>휴강 취소</button>
                   </div>
                 ))}
               </div>
             ) : null}
             {b.suspended.length ? (
-              <p className="muted" style={{ marginTop: 8 }}>시험대비 휴강: {b.suspended.map((s) => `${s.class_name}(${shortDate(s.resume_date)}부터 돌아온 학생과 수업)`).join(', ')}</p>
+              <p className="muted" style={{ marginTop: 8 }} title="시험대비 기간 동안 원래 반이 잠시 쉽니다">
+                시험대비 휴강: {b.suspended.map((s) => `${s.class_name}(${shortDate(s.resume_date)}부터 돌아온 학생과 수업)`).join(', ')}
+              </p>
             ) : null}
           </section>
 
@@ -145,9 +194,12 @@ export default function TodayBoard({ date, state, onOpenClass }) {
 
             <section className="card">
               <div className="card-head"><h2>주의 학생 {b.flagged.length ? `${b.flagged.length}명` : ''}</h2><Link className="link-btn" href="/students?flagged=1">학생 목록</Link></div>
+              <p className="hint" style={{ margin: '0 0 10px' }}>출결·과제·집중도 등에서 주의가 필요한 재원생이 모입니다.</p>
               {b.unassigned_count ? (
                 <div className="notice-bar" style={{ marginBottom: 12 }}>
-                  반이 없는 재원생 {b.unassigned_count}명 · <Link href="/students?class=__none__">미배정 학생 보기</Link>
+                  <span title="재원생인데 운영 반에 속하지 않음">미배정 재원생 {b.unassigned_count}명</span>
+                  {' · '}
+                  <Link href="/students?class=__none__">미배정 학생 보기</Link>
                 </div>
               ) : null}
               {b.flagged.length ? (

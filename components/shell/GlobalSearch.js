@@ -140,7 +140,12 @@ export default function GlobalSearch({ index }) {
                 <span className="meta">{item.meta}</span>
               </Link>
             </li>
-          )) : <li className="gsearch-empty">‘{query}’와 일치하는 학생이나 반이 없습니다.</li>}
+          )) : (
+            <li className="gsearch-empty">
+              ‘{query}’와 일치하는 학생이나 반이 없습니다.
+              <span className="gsearch-shortcuts">Ctrl+K 검색 · Ctrl+J AI 비서</span>
+            </li>
+          )}
           {truncated ? <li className="gsearch-more muted" role="presentation">더 많은 결과는 학생/반 목록에서 보세요</li> : null}
         </ul>
       ) : null}

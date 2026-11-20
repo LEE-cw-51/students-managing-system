@@ -361,7 +361,7 @@ LMS.createAgent = function (ctx) {
    * then read each one back. Running twice does nothing the second time. Any error throws,
    * so the request's transaction undoes the changes already made.
    * selected: indexes into calls to run (absent: all). The others are recorded as skipped.
-   * overrides: { [index]: args } — edited args for those calls; each is re-previewed before run
+   * overrides: { [index]: args } — partial override + locked ids; each is re-previewed before run
    * (LMS.agentActions.apply). A bad override fails the whole apply like any other preview error.
    */
   function applyAgentProposal(proposalId, selected, overrides) {
@@ -384,7 +384,13 @@ LMS.createAgent = function (ctx) {
     var s = svc();
     var results = calls.map(function (c, i) {
       if (chosen && !chosen[i]) return { tool: c.tool, text: c.text, skipped: true };
-      var args = over && Object.prototype.hasOwnProperty.call(over, i) ? over[i] : c.args;
+      var args = c.args;
+      if (over && Object.prototype.hasOwnProperty.call(over, i)) {
+        args = Object.assign({}, c.args, over[i]);
+        args.lesson_id = c.args.lesson_id;
+        args.student_id = c.args.student_id;
+        args.class_id = c.args.class_id;
+      }
       var check = LMS.agentActions.apply(s, c.tool, args);
       return { tool: c.tool, text: c.text, ok: check.ok, after: check.after };
     });

@@ -712,6 +712,22 @@ describe('agent proposals', () => {
     assert.equal(lessonOf(kim.student_id).attendance, '출석');
   });
 
+  it('ignores forged lesson_id in override and applies to the stored target', async () => {
+    const { api, hong, kim, lessonOf, run } = setup();
+    const hongLesson = lessonOf(hong.student_id);
+    const kimLesson = lessonOf(kim.student_id);
+    const p = proposalWith(api, [
+      { tool: 'update_attendance', args: { lesson_id: hongLesson.lesson_id, attendance: '결석' } }
+    ]);
+    const applied = await applyProposal(p.proposal_id, run, [0], {
+      0: { lesson_id: kimLesson.lesson_id, attendance: '결석' }
+    });
+    assert.equal(applied.status, 'applied');
+    assert.equal(applied.verification_status, 'verified');
+    assert.equal(lessonOf(hong.student_id).attendance, '결석');
+    assert.equal(lessonOf(kim.student_id).attendance, '출석');
+  });
+
   it('rejects once and refuses to apply a rejected proposal', () => {
     const { api, hong, lessonOf } = setup();
     const p = proposalWith(api, [{ tool: 'update_attendance', args: { lesson_id: lessonOf(hong.student_id).lesson_id, attendance: '결석' } }]);
