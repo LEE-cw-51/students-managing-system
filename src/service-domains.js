@@ -263,6 +263,7 @@ var STUDENTS_PUBLIC = [
 var CLASSES_PUBLIC = [
   'createClass',
   'deleteClass',
+  'getClass',
   'updateClass'
 ];
 
