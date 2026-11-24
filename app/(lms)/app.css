@@ -476,18 +476,40 @@ button.hw-cell:focus-visible { outline: none; box-shadow: var(--focus); }
 .app-content a:not(.btn):not(.tag):hover { text-decoration: underline; }
 
 /* ---------- Today ---------- */
-.week-nav { display: flex; align-items: stretch; gap: 6px; margin-bottom: 16px; }
-.week-nav .week-step { flex: none; height: auto; }
-.week-nav .week-pick { flex: none; width: auto; align-self: center; }
-.week-strip { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
-.week-day { border: 2px solid transparent; background: var(--surface); border-radius: 12px; padding: 8px 4px; display: grid; gap: 2px; justify-items: center; cursor: pointer; font: inherit; }
-.week-day .wd-name { font-size: 12px; color: var(--ink-2); }
-.week-day .wd-date { font-size: 18px; font-weight: 700; }
-.week-day .wd-count { font-size: 11px; color: var(--ink-2); white-space: nowrap; }
-.week-day.is-today .wd-date { color: var(--accent); }
-.week-day.is-selected { border-color: var(--accent); color: var(--accent-strong); }
-.week-day .wd-dots { display: none; font-size: 12px; line-height: 1; color: var(--ink-2); letter-spacing: 1px; }
-.week-day.is-selected .wd-name, .week-day.is-selected .wd-count, .week-day.is-selected .wd-dots { color: var(--accent-strong); }
+.cal { margin-bottom: 16px; display: grid; gap: 8px; }
+.cal-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cal-nav, .cal-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cal-period { min-width: 112px; text-align: center; font-size: 16px; }
+.cal .btn { height: auto; min-height: 38px; }
+.cal-pick { flex: none; width: auto; }
+.cal-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.cal-toggle-btn { min-height: 38px; padding: 0 14px; border: 0; background: transparent; font: inherit; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.cal-toggle-btn.is-on { background: var(--accent); color: var(--on-accent); }
+.cal-error { margin: 0; color: var(--bad); }
+.cal-head { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; text-align: center; font-size: 12px; color: var(--ink-2); }
+.cal-head .is-weekend { color: var(--ink-3); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-day { border: 2px solid transparent; background: var(--surface); border-radius: 12px; padding: 6px; display: flex; flex-direction: column; align-items: stretch; gap: 4px; text-align: left; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+.cal-grid.is-week .cal-day { min-height: 148px; }
+.cal-grid.is-month .cal-day { min-height: 96px; }
+.cal-day:hover { background: var(--surface-hover); }
+.cal-day.is-dim { background: var(--surface-faint); color: var(--ink-3); }
+.cal-day.is-today .cal-num { color: var(--on-accent); background: var(--accent); }
+.cal-day.is-selected { border-color: var(--accent); }
+.cal-num { align-self: flex-start; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.cal-chips { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cal-chip { display: block; padding: 1px 6px; border-radius: 6px; font-size: 12px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--tag-muted); color: var(--ink); }
+.cal-class { background: var(--accent-soft); color: var(--accent-strong); }
+.cal-makeup { background: var(--warn-soft); color: var(--warn); }
+.cal-task { background: var(--surface-sunken); border: 1px solid var(--line); color: var(--ink); }
+.cal-task.is-done { text-decoration: line-through; color: var(--ink-3); }
+.cal-exam { background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+.cal-exam.tone-amber { background: var(--warn-soft); color: var(--warn); }
+.cal-exam.tone-muted { background: var(--tag-muted); color: var(--ink-2); }
+.cal-more { font-size: 12px; color: var(--ink-2); padding: 0 6px; }
+.cal-placeholder { color: var(--ink-3); }
+.cal-dots { display: none; font-size: 12px; line-height: 1; color: var(--ink-2); letter-spacing: 1px; word-break: break-all; }
+.cal-legend { margin: 0; font-size: 12px; }
 .today-board.stack { gap: var(--space-5); }
 .today-board .board-cards { gap: var(--space-4); }
 .today-board .board-cards .card { padding: var(--space-3) var(--space-4); }
@@ -578,8 +600,8 @@ button.hw-cell:focus-visible { outline: none; box-shadow: var(--focus); }
 th[aria-sort] .sort-arrow { opacity: 1; color: var(--accent); }
 
 @media (max-width: 720px) {
-  .week-day { padding: 6px 2px; }
-  .week-day .wd-count { font-size: 10px; white-space: normal; text-align: center; }
+  .cal-day { padding: 4px; }
+  .cal-chip { font-size: 11px; padding: 0 4px; }
   .student-row { padding: 12px 4px; }
   .sr-line { flex-direction: column; align-items: stretch; gap: 8px; }
   .sr-name { flex: none; }
@@ -588,13 +610,20 @@ th[aria-sort] .sort-arrow { opacity: 1; color: var(--accent); }
 }
 @media (max-width: 640px) {
   .desktop-only { display: none; }
-  .week-nav { gap: 4px; }
-  .week-nav .week-step { padding-inline: 10px; }
-  .week-nav .week-step-label, .week-nav .week-pick { display: none; }
-  .week-strip { gap: 3px; }
-  .week-day .wd-count { display: none; }
-  .week-day .wd-dots { display: block; }
-  .today-board .btn.sm, .week-nav .btn { min-height: 42px; }
+  .cal-bar { gap: 6px; }
+  .cal-nav { flex: 1 1 100%; justify-content: space-between; }
+  .cal-tools { flex: 1 1 100%; }
+  .cal-tools .cal-today { flex: none; }
+  .cal-tools .cal-pick { flex: 1; min-width: 0; min-height: 42px; }
+  .cal-toggle { margin-left: auto; }
+  .cal .btn, .cal-toggle-btn { min-height: 42px; }
+  .cal-step-label { display: none; }
+  .cal-head, .cal-grid { gap: 3px; }
+  .cal-grid.is-week .cal-day, .cal-grid.is-month .cal-day { min-height: 56px; align-items: center; padding: 4px 2px; }
+  .cal-day .cal-num { align-self: center; }
+  .cal-chips { display: none; }
+  .cal-dots { display: block; text-align: center; min-height: 12px; }
+  .today-board .btn.sm { min-height: 42px; }
   .rec-header { margin-bottom: 10px; gap: 6px; }
   .rec-header h1 { font-size: 18px; }
   .rec-date-nav { flex-basis: 100%; }

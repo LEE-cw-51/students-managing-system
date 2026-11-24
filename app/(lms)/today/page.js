@@ -6,7 +6,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { PageSkeleton } from '@/components/ui/Feedback';
 import TodayBoard from '@/components/domain/today/TodayBoard';
 import LessonRecorder from '@/components/domain/today/LessonRecorder';
-import WeekStrip from '@/components/domain/today/WeekStrip';
+import CalendarPanel from '@/components/domain/today/CalendarPanel';
 import { useBoot } from '@/components/shell/AppShell';
 import { api, useApi } from '@/lib/client-api';
 import { formatDate, relativeDay } from '@/lib/format';
@@ -18,6 +18,7 @@ function TodayView() {
   const params = useSearchParams();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : boot.today;
   const classId = params.get('class') || '';
+  const view = params.get('view') === 'month' ? 'month' : 'week';
   const board = useApi(() => (classId ? null : api('getTodayBoard', date)), [date, classId]);
 
   const navigate = (next) => {
@@ -48,9 +49,9 @@ function TodayView() {
       <PageHeader
         title="오늘"
         sub={`${formatDate(date, true)}${rel && rel !== '오늘' ? ` · ${rel}` : ''}`}
-        actions={date !== boot.today ? <button type="button" className="btn secondary sm" onClick={() => go({ date: '' })}>오늘로</button> : null}
       />
-      <WeekStrip date={date} today={boot.today} week={board.data && board.data.week} onPick={(d) => go({ date: d })} />
+      <CalendarPanel date={date} today={boot.today} view={view} refresh={board.data}
+        onPick={(d) => go({ date: d })} onView={(v) => go({ view: v === 'month' ? 'month' : '' })} />
       <TodayBoard date={date} state={board} onOpenClass={(id) => go({ class: id })} />
     </>
   );

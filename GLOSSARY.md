@@ -68,6 +68,7 @@
 
 - **확정 강의 계획** (`ClassPlans` 행의 get/list/save/delete): `src/19_ClassPlans.js`(`createClassPlans`)만 합니다. 초안·분할·적용·휴강은 계속 `src/06_Plans.js`입니다.
 - **달력** (`getCalendar`): 정규 수업 이벤트와 보강 이벤트를 한 구간에 모아 주는 것은 `src/20_Calendar.js`(`createCalendar`)만 합니다.
+  - 홈 달력(주간/월간)이 그리는 `getCalendarView(start, end)`(최대 42일)는 이 이벤트에 할 일과 학교 시험(재원생 학교만, 다일 구간은 날짜별로 펼침)을 더해 `src/05_Views.js`가 만듭니다.
 - **설정** (`Settings` 행): 읽기·병합 저장·키 단위 저장은 `src/21_Settings.js`(`createSettings`)만 합니다.
 - **스키마** (`ensureSchema` / `_Meta` 버전): 마이그레이션은 `src/22_Schema.js`(`createSchema`)만 합니다.
 - **셸 부트스트랩·룩업**: `getShellBootstrap`·`getLookups`는 `src/23_Shell.js`(`createShell`)만 합니다.
@@ -80,7 +81,7 @@
 - **상담 후속 할 일 보호**: 상담일지에서 생긴 할 일은 할 일로는 고치거나 지울 수 없고 상담일지에서 바꿉니다. 서비스의 할 일 수정·삭제, AI 쓰기 동작, 오늘 화면의 수정 버튼이 모두 `LMS.isTaskEditable`(`LMS.assertTaskEditable`)을 씁니다. 상태(완료·취소)는 출처와 관계없이 바꿀 수 있습니다.
 - **지난 할 일**: 예정일이 기준 날짜보다 앞인데 아직 `예정`인 할 일입니다. 오늘 화면은 오늘 날짜에서만 따로 모아 보여 줍니다. (`LMS.isTaskOverdue`)
 - **할 일 행** (`LMS.taskItem`): 하루 일정과 오늘 화면이 받는 할 일 모양입니다. 학생·반 이름과 함께 `editable`(상담 후속 할 일 보호)과 `overdue`(지난 할 일)를 줍니다. 화면은 이 값만 봅니다.
-- **주간 띠**: 오늘 화면의 월–일 7칸입니다. 날마다 수업 수, 보강 수, `예정`인 할 일 수를 오늘 화면 데이터(`getTodayBoard`의 `week`)에서 그대로 씁니다.
+- **홈 달력**: 오늘 화면 위의 주간/월간 달력(`CalendarPanel`)입니다. 칸의 수업·보강·할 일·시험은 `getCalendarView`에서 오고, 날짜를 누르면 아래 오늘 보드가 그 날짜로 바뀝니다. (`getTodayBoard`의 `week`는 이전 주간 띠용 필드로, 화면은 더 쓰지 않지만 MCP/에이전트용으로 남겨 둡니다.)
 
 ## AI 제안
 

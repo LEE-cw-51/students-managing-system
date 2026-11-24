@@ -527,3 +527,147 @@ describe('task rules', () => {
     assert.equal(s.api.previewAgentAction('update_task_status', { task_id: note.follow_up_task_id, status: '완료' }).after, '완료');
   });
 });
+
+describe('getCalendarView', () => {
+  const START = '2026-10-26';
+  const END = '2026-11-01';
+  const exam = { school_year: '2026', semester: '2', exam_type: '기말', grade: '중2', school: '한빛중학교' };
+  const on = (view, date) => view.events.filter((e) => e.date === date);
+
+  it('merges classes, makeups, tasks and school exams in day order', () => {
+    const s = seeded();
+    s.api.saveMakeupSession({ kind: '반', class_id: s.classId, makeup_date: '2026-10-28', start_time: '20:30', end_time: '21:30' });
+    s.api.saveTask({ due_date: '2026-10-28', kind: 'other', title: '교재 주문' });
+    s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-28', exam_end_date: '2026-10-28' });
+    const view = s.api.getCalendarView(START, END);
+    assert.deepEqual([view.start, view.end], [START, END]);
+    const wed = on(view, '2026-10-28');
+    assert.deepEqual(wed.map((e) => e.type).filter((t, i, a) => a.indexOf(t) === i), ['exam', 'class', 'makeup', 'task']);
+    assert.ok(wed.filter((e) => e.type === 'class').length >= 1);
+    const makeup = wed.find((e) => e.type === 'makeup');
+    assert.deepEqual([makeup.sub, makeup.start_time, makeup.class_id], ['반보강', '20:30', s.classId]);
+    assert.ok(makeup.makeup_id);
+    const task = wed.find((e) => e.type === 'task');
+    assert.deepEqual([task.title, task.status, task.done, task.start_time], ['교재 주문', '예정', false, '']);
+    const ex = wed.find((e) => e.type === 'exam');
+    assert.equal(ex.title, '한빛중학교 중2 2학기 기말고사');
+    assert.ok(ex.school_exam_id && ex.d_day_label);
+    assert.ok(ex.student_count >= 1);
+    const dates = view.events.map((e) => e.date);
+    assert.deepEqual(dates, dates.slice().sort());
+    assert.ok(view.events.every((e) => e.date >= START && e.date <= END));
+    const classes = view.events.filter((e) => e.type === 'class');
+    assert.ok(classes.some((e) => e.class_id === s.classId && e.date === START));
+  });
+
+  it('marks finished tasks as done', () => {
+    const s = seeded();
+    s.api.saveTask({ due_date: '2026-10-27', kind: 'other', title: '끝난 일', status: '완료' });
+    const task = on(s.api.getCalendarView(START, END), '2026-10-27').find((e) => e.type === 'task');
+    assert.deepEqual([task.status, task.done], ['완료', true]);
+  });
+
+  it('leaves out cancelled makeups, cancelled tasks and cancelled class days', () => {
+    const s = seeded();
+    const kept = s.api.saveMakeupSession({ kind: '반', class_id: s.classId, makeup_date: '2026-10-27', start_time: '17:00', end_time: '18:00' });
+    const dropped = s.api.saveMakeupSession({ kind: '반', class_id: s.classId, makeup_date: '2026-10-29', start_time: '17:00', end_time: '18:00' });
+    const row = s.api.getMakeupSession(dropped.sessions ? dropped.sessions[0].makeup_id : dropped.makeup_id);
+    s.api.updateMakeupSession({ ...row, student_ids: [], status: '취소' });
+    s.api.saveTask({ due_date: '2026-10-27', kind: 'other', title: '취소된 일', status: '취소' });
+    const before = s.api.getCalendarView(START, END).events.filter((e) => e.type === 'class' && e.class_id === s.classId && e.date === '2026-10-28');
+    assert.equal(before.length, 1);
+    s.api.cancelClassDate({ class_id: s.classId, date: '2026-10-28', reason: '학교 행사' });
+    const view = s.api.getCalendarView(START, END);
+    assert.equal(view.events.filter((e) => e.type === 'makeup').length, 1);
+    assert.ok(kept);
+    assert.ok(!view.events.some((e) => e.title === '취소된 일'));
+    assert.ok(!view.events.some((e) => e.type === 'class' && e.class_id === s.classId && e.date === '2026-10-28'));
+    assert.ok(view.events.some((e) => e.type === 'class' && e.class_id === s.classId && e.date === START), 'other days stay');
+  });
+
+  it('spreads a multi-day exam over its days and clips it to the range', () => {
+    const s = seeded();
+    s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-28', exam_end_date: '2026-10-30', math_exam_date: '2026-10-29' });
+    const exams = s.api.getCalendarView(START, END).events.filter((e) => e.type === 'exam');
+    assert.deepEqual(exams.map((e) => e.date), ['2026-10-28', '2026-10-29', '2026-10-30']);
+    assert.deepEqual(exams.map((e) => e.is_math_day), [false, true, false]);
+    assert.equal(new Set(exams.map((e) => e.school_exam_id)).size, 1);
+    const hanbit = (v) => v.events.filter((e) => e.type === 'exam' && e.title.startsWith('한빛중학교 중2'));
+    const clipped = hanbit(s.api.getCalendarView('2026-10-29', '2026-11-04'));
+    assert.deepEqual(clipped.map((e) => e.date), ['2026-10-29', '2026-10-30']);
+    assert.deepEqual(hanbit(s.api.getCalendarView('2026-10-31', '2026-11-04')), []);
+  });
+
+  describe('exam day labels', () => {
+    const labels = (view) => view.events.filter((e) => e.type === 'exam')
+      .map((e) => [e.date, e.day_label, e.d_day_label, e.d_day_tone]);
+
+    it('puts the D-day only on the math day of a multi-day exam and numbers the days', () => {
+      const s = seeded();
+      s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-28', exam_end_date: '2026-10-30', math_exam_date: '2026-10-29' });
+      assert.deepEqual(labels(s.api.getCalendarView(START, END)), [
+        ['2026-10-28', '1일차', '', ''],
+        ['2026-10-29', '2일차', 'D-3', 'danger'],
+        ['2026-10-30', '3일차', '', '']
+      ]);
+    });
+
+    it('counts a multi-day exam without a math day from its first day', () => {
+      const s = seeded();
+      s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-28', exam_end_date: '2026-10-29' });
+      assert.deepEqual(labels(s.api.getCalendarView(START, END)), [
+        ['2026-10-28', '1일차', 'D-2', 'danger'],
+        ['2026-10-29', '2일차', '', '']
+      ]);
+    });
+
+    it('labels a one-day exam with plain D-day words and no day number', () => {
+      const s = seeded();
+      s.api.saveSchoolExam({ ...exam, exam_date: TODAY, exam_end_date: TODAY });
+      assert.deepEqual(labels(s.api.getCalendarView(START, END)), [[TODAY, '', 'D-day', 'danger']]);
+      const far = seeded();
+      far.api.saveSchoolExam({ ...exam, exam_date: '2026-11-10', exam_end_date: '2026-11-10' });
+      assert.deepEqual(labels(far.api.getCalendarView('2026-11-09', '2026-11-14')), [['2026-11-10', '', 'D-15', 'amber']],
+        'a browsed month counts from today to that exam day, not to the cell');
+    });
+
+    it('shows no stale D-day on days that are already past', () => {
+      const s = seeded();
+      s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-20', exam_end_date: '2026-10-22', math_exam_date: '2026-10-21' });
+      assert.deepEqual(labels(s.api.getCalendarView('2026-10-19', '2026-10-25')), [
+        ['2026-10-20', '1일차', '', 'muted'],
+        ['2026-10-21', '2일차', '', 'muted'],
+        ['2026-10-22', '3일차', '', 'muted']
+      ]);
+    });
+
+    it('marks today as 시험 중 inside a running exam, past days muted and the math day still counting down', () => {
+      const s = seeded();
+      s.api.saveSchoolExam({ ...exam, exam_date: '2026-10-25', exam_end_date: '2026-10-28', math_exam_date: '2026-10-27' });
+      assert.deepEqual(labels(s.api.getCalendarView('2026-10-24', '2026-10-30')), [
+        ['2026-10-25', '1일차', '', 'muted'],
+        ['2026-10-26', '2일차', '시험 중', 'danger'],
+        ['2026-10-27', '3일차', 'D-1', 'danger'],
+        ['2026-10-28', '4일차', '', '']
+      ]);
+    });
+  });
+
+  it('shows only exams of schools with enrolled students', () => {
+    const s = seeded();
+    s.api.saveSchoolExam({ ...exam, school: '아무도없는중학교', exam_date: '2026-10-28', exam_end_date: '2026-10-28' });
+    s.api.saveSchoolExam({ ...exam, exam_type: '중간', exam_date: '2026-10-29', exam_end_date: '2026-10-29' });
+    const exams = s.api.getCalendarView(START, END).events.filter((e) => e.type === 'exam');
+    assert.deepEqual(exams.map((e) => e.date), ['2026-10-29']);
+    assert.match(exams[0].title, /한빛중학교 중2/);
+  });
+
+  it('rejects bad ranges', () => {
+    const s = seeded();
+    assert.throws(() => s.api.getCalendarView('x', END), { message: '날짜 형식이 올바르지 않습니다.' });
+    assert.throws(() => s.api.getCalendarView(START, ''), { message: '날짜 형식이 올바르지 않습니다.' });
+    assert.throws(() => s.api.getCalendarView(END, START), { message: '시작일이 종료일보다 뒤입니다.' });
+    assert.throws(() => s.api.getCalendarView('2026-10-01', '2026-11-12'), /42일/);
+    assert.doesNotThrow(() => s.api.getCalendarView('2026-10-01', '2026-11-11'));
+  });
+});
