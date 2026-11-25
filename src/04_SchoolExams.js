@@ -99,6 +99,31 @@ LMS.schoolExams = (function () {
   }
 
   /**
+   * What one calendar cell (exam day `date`, inside exam_date..exam_end_date) shows. `view` counts from
+   * `today`, so it only fits the cell that is the D-day date; every other day of a range would repeat it.
+   * - day_label: '1일차' · '2일차' … for a multi-day exam, '' for a one-day exam.
+   * - d_day_label / d_day_tone: the D-day (same words and tones as `view`) on the D-day date when it is
+   *   today or ahead; '시험 중' on today's other exam days; blank on later days, and blank + 'muted' on
+   *   days already past, so browsing another week or month never shows a stale D-day.
+   */
+  function dayView(row, today, date) {
+    var start = LMS.toStr(row.exam_date);
+    var multi = lastDay(row) > start;
+    var out = { day_label: multi ? (LMS.daysBetween(start, date) + 1) + '일차' : '', d_day_label: '', d_day_tone: '' };
+    if (date < today) {
+      out.d_day_tone = 'muted';
+    } else if (date === dDayDate(row)) {
+      var d = LMS.daysBetween(today, date);
+      out.d_day_label = dDayLabel(d, false);
+      out.d_day_tone = dDayTone(d, false);
+    } else if (date === today) {
+      out.d_day_label = dDayLabel(1, true);
+      out.d_day_tone = dDayTone(1, true);
+    }
+    return out;
+  }
+
+  /**
    * Exams still ahead or in progress on `today` whose D-day is within `days` (null = any),
    * soonest D-day first, as views.
    */
@@ -183,6 +208,7 @@ LMS.schoolExams = (function () {
     validate: validate,
     changeDate: changeDate,
     view: view,
+    dayView: dayView,
     upcoming: upcoming,
     nextByKey: nextByKey,
     lastDay: lastDay

@@ -295,6 +295,7 @@ LMS.createService = function (store) {
     getClassPlans: classPlans.getClassPlans,
     getTodayTeachingTasks: tasks.getTodayTeachingTasks,
     getDayAgenda: tasks.getDayAgenda,
+    getCalendar: calendar.getCalendar,
     getTaskCounts: tasks.getTaskCounts,
     getWeeklyHomeworkDashboard: homework.getWeeklyHomeworkDashboard,
     relRemovable: assignments.removable,

@@ -1070,6 +1070,105 @@ LMS.createViews = function (ctx) {
     return { monthly: monthly, lessons: lessons };
   }
 
+  // ----- Home calendar -----
+
+  var CALENDAR_MAX_DAYS = 42;
+  var CALENDAR_RANK = { exam: 0, class: 1, makeup: 1, task: 2 };
+
+  /**
+   * Everything the home calendar draws for start..end (inclusive, at most 42 days): class and makeup
+   * sessions, open and done tasks, and the school exams of enrolled students, one event per day.
+   * Each event: type (class|makeup|task|exam), date, start_time, title, plus the ids a screen links with.
+   * An exam day also carries day_label ('2일차' of a multi-day exam) and d_day_label/d_day_tone from
+   * LMS.schoolExams.dayView: the D-day only on its own date, nothing stale on past or later days.
+   */
+  function getCalendarView(start, end) {
+    start = LMS.toStr(start);
+    end = LMS.toStr(end);
+    if (!LMS.isIsoDate(start) || !LMS.isIsoDate(end)) throw new Error('날짜 형식이 올바르지 않습니다.');
+    if (start > end) throw new Error('시작일이 종료일보다 뒤입니다.');
+    if (LMS.daysBetween(start, end) + 1 > CALENDAR_MAX_DAYS) throw new Error('한 번에 ' + CALENDAR_MAX_DAYS + '일까지만 볼 수 있습니다.');
+    var today = store.today();
+    var events = [];
+
+    ctx.getCalendar(start, end).events.forEach(function (ev) {
+      var isMakeup = ev.event_type === '반보강' || ev.event_type === '개인보강';
+      events.push({
+        type: isMakeup ? 'makeup' : 'class',
+        sub: ev.event_type,
+        date: ev.date,
+        start_time: LMS.toStr(ev.start_time),
+        end_time: LMS.toStr(ev.end_time),
+        title: LMS.toStr(ev.title),
+        class_id: LMS.toStr(ev.class_id),
+        student_id: LMS.toStr(ev.student_id),
+        makeup_id: LMS.toStr(ev.makeup_id)
+      });
+    });
+
+    var students = table('Students');
+    var classes = table('Classes');
+    table('Tasks').forEach(function (row) {
+      if (LMS.toStr(row.status) === '취소' || !LMS.inRange(row.due_date, start, end)) return;
+      var t = LMS.taskItem(row, students, classes, today);
+      events.push({
+        type: 'task',
+        sub: t.kind,
+        date: t.due_date,
+        start_time: '',
+        end_time: '',
+        title: LMS.toStr(t.title),
+        status: t.status,
+        done: t.status === '완료',
+        task_id: t.task_id,
+        class_id: t.class_id,
+        student_id: t.student_id
+      });
+    });
+
+    var active = activeStudents_();
+    var keys = {};
+    active.forEach(function (s) {
+      var k = LMS.schoolGroupKey(s.school, s.grade);
+      if (k) keys[k] = true;
+    });
+    table('SchoolExams').forEach(function (row) {
+      if (!row.exam_date || !keys[LMS.toStr(row.school_key)]) return;
+      var exam = LMS.schoolExams.view(row, today);
+      if (exam.exam_end_date < start || exam.exam_date > end) return;
+      var from = exam.exam_date > start ? exam.exam_date : start;
+      var to = exam.exam_end_date < end ? exam.exam_end_date : end;
+      var count = active.filter(function (s) {
+        return LMS.schoolGroupKey(s.school, s.grade) === LMS.toStr(exam.school_key);
+      }).length;
+      LMS.datesInRange(from, to).forEach(function (d) {
+        var day = LMS.schoolExams.dayView(exam, today, d);
+        events.push({
+          type: 'exam',
+          sub: exam.exam_type,
+          date: d,
+          start_time: '',
+          end_time: '',
+          title: [LMS.toStr(exam.school), LMS.toStr(exam.grade), exam.label].filter(Boolean).join(' '),
+          school_exam_id: LMS.toStr(exam.school_exam_id),
+          day_label: day.day_label,
+          d_day_label: day.d_day_label,
+          d_day_tone: day.d_day_tone,
+          is_math_day: !!exam.math_exam_date && exam.math_exam_date === d,
+          student_count: count
+        });
+      });
+    });
+
+    events.sort(function (a, b) {
+      return LMS.toStr(a.date).localeCompare(LMS.toStr(b.date)) ||
+        CALENDAR_RANK[a.type] - CALENDAR_RANK[b.type] ||
+        LMS.toStr(a.start_time).localeCompare(LMS.toStr(b.start_time)) ||
+        LMS.toStr(a.title).localeCompare(LMS.toStr(b.title), 'ko');
+    });
+    return { start: start, end: end, events: events };
+  }
+
   // ----- Today board -----
 
   /** Everything the today screen shows above the lesson editor, for one date. */
@@ -1369,6 +1468,7 @@ LMS.createViews = function (ctx) {
       getExamPeriodDetail: getExamPeriodDetail,
       proposeExamGroups: proposeExamGroups,
       getTodayBoard: getTodayBoard,
+      getCalendarView: getCalendarView,
       getStudentList: getStudentList,
       getStudentOverview: getStudentOverview,
       getStudentAttendanceMonth: getStudentAttendanceMonth,

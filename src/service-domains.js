@@ -193,6 +193,7 @@ var VIEWS_PUBLIC = [
   'getStudentOverview',
   'getStudentReports',
   'getTodayBoard',
+  'getCalendarView',
   'proposeExamGroups'
 ];
 

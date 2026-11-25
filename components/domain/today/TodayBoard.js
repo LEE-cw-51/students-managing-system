@@ -43,7 +43,7 @@ function SetupChecklist({ todayHasClass }) {
   );
 }
 
-/** `state` is the page's getTodayBoard load, shared with WeekStrip so one reload refreshes both. */
+/** `state` is the page's getTodayBoard load, whose data also keys CalendarPanel's reload. */
 export default function TodayBoard({ date, state, onOpenClass }) {
   const boot = useBoot();
   const toast = useToast();
@@ -119,7 +119,7 @@ export default function TodayBoard({ date, state, onOpenClass }) {
             ) : (
               <div className="card">
                 {operatingClasses.length ? (
-                  <EmptyState title="이 날은 수업이 없습니다">위의 주간 띠에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState>
+                  <EmptyState title="이 날은 수업이 없습니다">위의 달력에서 다른 날짜를 고르거나 보강을 추가하세요.</EmptyState>
                 ) : (
                   <EmptyState title="등록된 반이 없습니다" action={<Link href="/classes" className="btn secondary sm">반 만들기</Link>}>
                     먼저 반과 수업 요일을 등록하세요. 학생을 배정하면 오늘 수업이 여기에 나타납니다.
